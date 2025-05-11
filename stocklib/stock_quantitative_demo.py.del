@@ -1,0 +1,1498 @@
+import datetime
+import akshare as ak
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+ # 设置 Matplotlib 后端为非交互式
+import talib
+import matplotlib.dates as mdates
+
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn import datasets,linear_model
+from sklearn.model_selection import cross_val_predict,cross_val_score,train_test_split
+from sklearn.metrics import mean_squared_error
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+
+
+
+class stockIndicatorQuantitative:
+    def __init__(self):
+        # 获取当前日期
+        current_date = datetime.datetime.now()
+        # 生成当前日期的指定格式字符串
+        self.current_date_str = current_date.strftime("%Y%m%d")
+        # 计算前一天的日期
+        previous_date = current_date - datetime.timedelta(days=1)
+        # 生成前一天日期的指定格式字符串
+        self.previous_date_str = previous_date.strftime("%Y%m%d")
+
+        previous_year = current_date - datetime.timedelta(days=100)
+        self.previous_year_str = previous_year.strftime("%Y%m%d")
+
+    @staticmethod
+    def get_stock_code(df):
+        if '股票代码' in df.columns:
+            stock_code = df['股票代码'].values[0]
+            return stock_code
+        else:
+            print("DataFrame 中不包含 '股票代码' 列。")
+            return "Unknown"
+
+    # 根据code获取每日成交数据
+    def stock_day_data_code(stock_code, market, start_date_str, end_date_str):
+        df = None
+        if market == 'usa':
+            try:
+                # 1. 获取美股实时行情数据
+                stock_us_spot_df = ak.stock_us_spot_em()
+                print("美股实时行情数据：")
+                # 查找阿里巴巴的代码
+                baba_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
+                if not baba_filtered.empty:
+                    baba_code = baba_filtered["代码"].values[0]
+                    print(f"美股股票的代码: {baba_code}")
+                    # 3. 获取阿里巴巴（BABA）的每日行情数据
+                    stock_us_hist_df = ak.stock_us_hist(symbol=baba_code, start_date=start_date_str, end_date=end_date_str)
+                    df = stock_us_hist_df
+                    print(stock_us_hist_df)
+                else:
+                    stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str, end_date=end_date_str)
+                    df = stock_us_hist_df
+                    print(stock_us_hist_df)
+            except Exception as e:
+                print(f"获取美股数据时出现错误: {e}")
+        elif market == 'H':  # 港股数据获取
+            try:
+                # 获取港股历史数据
+                stock_hk_hist_df = ak.stock_hk_hist(symbol=stock_code, period="daily", start_date=start_date_str,
+                                                         end_date=end_date_str)
+                print(stock_hk_hist_df)
+                df = stock_hk_hist_df
+            except Exception as e:
+                print(f"获取债券/ETF基金数据时出现错误: {e}")
+        elif market == 'zq':  # 新增债券/ETF基金条件
+            try:
+                 # 获取债券或ETF基金的历史数据
+                stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,
+                                                         end_date=end_date_str)
+                print(stock_zh_a_hist_df)
+                df = stock_zh_a_hist_df
+            except Exception as e:
+                print(f"获取债券/ETF基金数据时出现错误: {e}")
+        else :
+            try:
+                # stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,end_date=end_date_str)
+
+                # 3.历史行情数据 - 前复权
+                market = 3
+                code = stock_code
+                if stock_code.startswith("SZ"):
+                    market = 0
+                    code = stock_code[2:]
+                elif stock_code.startswith("SH"):
+                    market = 1
+                    code = stock_code[2:]
+                elif stock_code.startswith("BJ"):
+                    market = 0
+                    code = stock_code[2:]
+                else:
+                    market = 0
+                    code = stock_code[2:]
+                stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date_str,
+                                                        end_date=end_date_str,
+                                                        adjust="qfq",market = market)
+                print(stock_zh_a_hist_df)
+                df = stock_zh_a_hist_df
+            except Exception as e:
+                print(f"获取 A 股数据时出现错误: {e}")
+        return df
+
+
+
+    # 根据code获取每日成交数据
+    def stock_day_data_code_Old(stock_code, market, start_date_str, end_date_str):
+        df = None
+        if market == 'usa':
+            try:
+                # 获取美股实时行情数据
+                stock_us_spot_df = ak.stock_us_spot_em()
+                print("美股实时行情数据：")
+                # 查找股票的代码
+                stock_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
+                if not stock_filtered.empty:
+                    stock_code = stock_filtered["代码"].values[0]
+                    print(f"美股股票的代码: {stock_code}")
+                    # 获取美股的每日行情数据
+                    stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str, end_date=end_date_str)
+                    df = stock_us_hist_df
+                    df = df.dropna();
+                    print(stock_us_hist_df)
+                else:
+                    print(f"未找到股票 {stock_code} 的代码。")
+            except Exception as e:
+                print(f"获取美股数据时出现错误: {e}")
+        elif market == 'H':  # 港股数据获取
+            try:
+                # 获取港股历史数据
+                stock_hk_hist_df = ak.stock_hk_hist(symbol=stock_code, period="daily", start_date=start_date_str,
+                                                     end_date=end_date_str)
+                print(stock_hk_hist_df)
+                df = stock_hk_hist_df
+                df = df.dropna();
+            except Exception as e:
+                print(f"获取港股数据时出现错误: {e}")
+        elif market == 'zq':  # 债券/ETF基金数据获取
+            try:
+                # 获取债券或ETF基金的历史数据
+                stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,
+                                                         end_date=end_date_str)
+                print(stock_zh_a_hist_df)
+                df = stock_zh_a_hist_df
+                df = df.dropna();
+            except Exception as e:
+                print(f"获取债券/ETF基金数据时出现错误: {e}")
+        else:  # A股数据获取
+            try:
+                # 获取A股历史数据
+                stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", start_date=start_date_str,
+                                                        end_date=end_date_str, adjust="qfq")
+                print(stock_zh_a_hist_df)
+                df = stock_zh_a_hist_df
+                df = df.dropna();
+            except Exception as e:
+                print(f"获取A股数据时出现错误: {e}")
+        return df
+
+
+
+
+    #移动平均线算法
+    """
+       计算并绘制股票收盘价的简单移动平均线（SMA）。
+       :param ticker: 股票代码
+       :param window: 移动平均的窗口大小，默认为 20
+       """
+    def strategy_mac(data, window=20):
+
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行小波分析。")
+            return
+        try:
+            stock_code = get_stock_code(data)
+            # 计算短期和长期均线
+            short_window = 10
+            long_window = 30
+            data['MA_10'] = data['收盘'].rolling(window=short_window, min_periods=1).mean()
+            data['MA_30'] = data['收盘'].rolling(window=long_window, min_periods=1).mean()
+
+            # 生成交易信号
+            data['Signal'] = 0
+            data['Signal'][short_window:] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1,
+                                                     -1)
+            data['Position'] = data['Signal'].diff()
+
+            # 可视化结果
+            plt.figure(figsize=(14, 7))
+            plt.plot(data['收盘'], label='Price')
+            plt.plot(data['MA_10'], label=f'{short_window}-Day MA')
+            plt.plot(data['MA_30'], label=f'{long_window}-Day MA')
+
+            # 标记买入和卖出信号
+            plt.plot(data[data['Position'] == 1].index,
+                     data['Short_MA'][data['Position'] == 1],
+                     '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+            plt.plot(data[data['Position'] == -1].index,
+                     data['MA_10'][data['Position'] == -1],
+                     'v', markersize=10, color='r', lw=0, label='Sell Signal')
+
+            plt.title(f'{stock_code} Moving Average Crossover Strategy')
+            plt.legend()
+            plt.show()
+
+            # 输出交易信号
+            print(data[['收盘', 'MA_10', 'MA_30', 'Signal', 'Position']].tail(20))
+        except Exception as e:
+            print(f"发生错误: {e}")
+
+    # 绘制均线策略和布林带策略的图像
+    def plot_strategy_bollinger(data):
+        if data is None:
+            print("数据为空，无法绘制图像。")
+            return
+
+        # 计算均线
+        short_window = 10
+        long_window = 30
+        stock_code = get_stock_code(data)
+        data['MA_10'] = data['收盘'].rolling(window=short_window, min_periods=1).mean()
+        data['MA_30'] = data['收盘'].rolling(window=long_window, min_periods=1).mean()
+
+        # 计算布林带
+        window = 20  # 布林带窗口
+        data['Middle_Band'] = data['收盘'].rolling(window=window).mean()
+        data['Std_Dev'] = data['收盘'].rolling(window=window).std()
+        data['Upper_Band'] = data['Middle_Band'] + (2 * data['Std_Dev'])
+        data['Lower_Band'] = data['Middle_Band'] - (2 * data['Std_Dev'])
+
+        # 生成均线策略信号
+        data['MA_Signal'] = 0
+        data['MA_Signal'][short_window:] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
+        data['MA_Position'] = data['MA_Signal'].diff()
+
+        # 生成布林带策略信号
+        data['BB_Signal'] = 0
+        data['BB_Signal'][window:] = np.where(data['收盘'][window:] > data['Upper_Band'][window:], -1,
+                                      np.where(data['收盘'][window:] < data['Lower_Band'][window:], 1, 0))
+        data['BB_Position'] = data['BB_Signal'].diff()
+
+        # 绘制图像
+        plt.figure(figsize=(16, 10))
+
+        # 绘制价格和均线
+        plt.subplot(2, 1, 1)
+        plt.plot(data['收盘'], label='Price', color='blue')
+        plt.plot(data['MA_10'], label=f'{short_window}-Day MA', color='orange')
+        plt.plot(data['MA_30'], label=f'{long_window}-Day MA', color='green')
+        plt.plot(data[data['MA_Position'] == 1].index,
+                 data['MA_10'][data['MA_Position'] == 1],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal (MA)')
+        plt.plot(data[data['MA_Position'] == -1].index,
+                 data['MA_10'][data['MA_Position'] == -1],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal (MA)')
+        plt.title(f'{stock_code} Moving Average Crossover Strategy')
+        plt.legend()
+
+        # 绘制价格和布林带
+        plt.subplot(2, 1, 2)
+        plt.plot(data['收盘'], label='Price', color='blue')
+        plt.plot(data['Middle_Band'], label='Middle Band', color='red')
+        plt.plot(data['Upper_Band'], label='Upper Band', color='green')
+        plt.plot(data['Lower_Band'], label='Lower Band', color='green')
+        plt.fill_between(data.index, data['Upper_Band'], data['Lower_Band'], color='lightgray', alpha=0.3)
+        plt.plot(data[data['BB_Position'] == 1].index,
+                 data['收盘'][data['BB_Position'] == 1],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal (BB)')
+        plt.plot(data[data['BB_Position'] == -1].index,
+                 data['收盘'][data['BB_Position'] == -1],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal (BB)')
+        plt.title(f'{stock_code} Bollinger Bands Strategy')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show()
+
+    # 根据code获取每日成交数据
+
+    # 根据code获取每日成交数据
+    def stock_day_data_code(stock_code, market, start_date_str, end_date_str):
+        df = None
+        if market == 'usa':
+            try:
+                # 1. 获取美股实时行情数据
+                stock_us_spot_df = ak.stock_us_spot_em()
+                print("美股实时行情数据：")
+                # 查找阿里巴巴的代码
+                baba_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
+                if not baba_filtered.empty:
+                    baba_code = baba_filtered["代码"].values[0]
+                    print(f"美股股票的代码: {baba_code}")
+                    # 3. 获取阿里巴巴（BABA）的每日行情数据
+                    stock_us_hist_df = ak.stock_us_hist(symbol=baba_code, start_date=start_date_str, end_date=end_date_str)
+                    df = stock_us_hist_df
+                    print(stock_us_hist_df)
+                else:
+                    stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str, end_date=end_date_str)
+                    df = stock_us_hist_df
+                    print(stock_us_hist_df)
+            except Exception as e:
+                print(f"获取美股数据时出现错误: {e}")
+        elif market == 'H':  # 港股数据获取
+            try:
+                # 获取港股历史数据
+                stock_hk_hist_df = ak.stock_hk_hist(symbol=stock_code, period="daily", start_date=start_date_str,
+                                                         end_date=end_date_str)
+                print(stock_hk_hist_df)
+                df = stock_hk_hist_df
+            except Exception as e:
+                print(f"获取债券/ETF基金数据时出现错误: {e}")
+        elif market == 'zq':  # 新增债券/ETF基金条件
+            try:
+                 # 获取债券或ETF基金的历史数据
+                stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,
+                                                         end_date=end_date_str)
+                print(stock_zh_a_hist_df)
+                df = stock_zh_a_hist_df
+            except Exception as e:
+                print(f"获取债券/ETF基金数据时出现错误: {e}")
+        else :
+            try:
+                # stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,end_date=end_date_str)
+
+                # 3.历史行情数据 - 前复权
+                market = 3
+                code = stock_code
+                if stock_code.startswith("SZ"):
+                    market = 0
+                    code = stock_code[2:]
+                elif stock_code.startswith("SH"):
+                    market = 1
+                    code = stock_code[2:]
+                elif stock_code.startswith("BJ"):
+                    market = 0
+                    code = stock_code[2:]
+                else:
+                    market = 0
+                    code = stock_code[2:]
+                stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date_str,
+                                                        end_date=end_date_str,
+                                                        adjust="qfq",market = market)
+
+                def format_float(x):
+                    if isinstance(x, float):
+                        return '{:.2f}'.format(x)
+                    return x
+
+                # 应用格式化函数
+                stock_zh_a_hist_df = stock_zh_a_hist_df.applymap(format_float)
+                print(stock_zh_a_hist_df)
+                df = stock_zh_a_hist_df
+            except Exception as e:
+                print(f"获取 A 股数据时出现错误: {e}")
+        return df
+
+
+    # 移动平均线算法
+    """
+       计算并绘制股票收盘价的简单移动平均线（SMA）。
+       :param ticker: 股票代码
+       :param window: 移动平均的窗口大小，默认为 20
+       """
+
+
+    def strategy_mac(data, window=20):
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行小波分析。")
+            return
+        try:
+            # 计算短期和长期均线
+            short_window = 10
+            long_window = 30
+
+            stock_code = get_stock_code(data)
+
+            data['Short_MA'] = data['收盘'].rolling(window=short_window, min_periods=1).mean()
+            data['Long_MA'] = data['收盘'].rolling(window=long_window, min_periods=1).mean()
+
+            last_sma1 = np.insert(data['Short_MA'][:-1], 0, 0)
+            last_sma2 = np.insert(data['Long_MA'][:-1], 0, 0)
+
+            # 生成交易信号
+            data['Signal'] = 0
+            # 短期均线上穿长期均线，买入信号
+            data.loc[(data['Short_MA'] > data['Long_MA']) & (last_sma1 < last_sma2), 'Signal'] = 1
+
+            # 打印 Signal 等于 1 的索引和对应数值
+            print("Signal 等于 1 的情况：")
+            buy_indices = data[data['Signal'] == 1].index
+            for idx in buy_indices:
+                short_ma = data.loc[idx, 'Short_MA']
+                long_ma = data.loc[idx, 'Long_MA']
+                last_short_ma = last_sma1[idx]
+                last_long_ma = last_sma2[idx]
+                print(
+                    f"索引: {idx}, 当前短期均线: {short_ma}, 当前长期均线: {long_ma}, 前一天短期均线: {last_short_ma}, 前一天长期均线: {last_long_ma}")
+
+
+            # 短期均线下穿长期均线，卖出信号
+            data.loc[(data['Short_MA'] < data['Long_MA']) & (last_sma1 > last_sma2), 'Signal'] = -1
+
+            # 打印 Signal 等于 -1 的索引和对应数值
+            print("\nSignal 等于 -1 的情况：")
+            sell_indices = data[data['Signal'] == -1].index
+            for idx in sell_indices:
+                short_ma = data.loc[idx, 'Short_MA']
+                long_ma = data.loc[idx, 'Long_MA']
+                last_short_ma = last_sma1[idx]
+                last_long_ma = last_sma2[idx]
+                print(
+                    f"索引: {idx}, 当前短期均线: {short_ma}, 当前长期均线: {long_ma}, 前一天短期均线: {last_short_ma}, 前一天长期均线: {last_long_ma}")
+
+
+            # 可视化结果
+            plt.figure(figsize=(14, 7))
+            plt.plot( data['收盘'], label='Price')
+            plt.plot(data['Short_MA'], label=f'{short_window}-Day MA')
+            plt.plot(data['Long_MA'], label=f'{long_window}-Day MA')
+
+            # 标记买入信号
+            buy_indices = data[data['Signal'] == 1].index
+            plt.plot(buy_indices,
+                     data['Short_MA'][buy_indices],
+                     '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+            # 标记卖出信号
+            sell_indices = data[data['Signal'] == -1].index
+            plt.plot(sell_indices,
+                     data['Short_MA'][sell_indices],
+                     'v', markersize=10, color='r', lw=0, label='Sell Signal')
+
+            plt.title(f'{stock_code} Moving Average Crossover Strategy')
+            plt.legend()
+            plt.show()
+
+            # 输出交易信号
+            print(data[['收盘', 'Short_MA', 'Long_MA', 'Signal', 'Position']].tail(20))
+        except Exception as e:
+            print(f"发生错误: {e}")
+
+
+    # 绘制均线策略和布林带策略的图像
+    def plot_strategy_bollinger(data):
+        if data is None:
+            print("数据为空，无法绘制图像。")
+            return
+
+        # 计算均线
+        short_window = 10
+        long_window = 30
+        stock_code = get_stock_code(data)
+
+        # 计算布林带
+        window = 20  # 布林带窗口
+        data['Middle_Band'] = data['收盘'].rolling(window=window).mean()
+        data['Std_Dev'] = data['收盘'].rolling(window=window).std()
+        data['Upper_Band'] = data['Middle_Band'] + (2 * data['Std_Dev'])
+        data['Lower_Band'] = data['Middle_Band'] - (2 * data['Std_Dev'])
+        data['Prev_Close'] = data['收盘'].shift(1)
+
+        # 生成布林带策略信号
+        data['signal'] = 0
+        # 买入条件
+        buyIndexCon = (data['收盘'] < data['Lower_Band']) & (data['Prev_Close'] > data['Lower_Band'].shift(1))
+        # 生成交易信号
+        data.loc[buyIndexCon, 'signal'] = 1
+
+        #卖出判断条件：当前收盘价大于上轨线，并且上一个收盘价小于上轨线
+        sellIndexCon = (data['收盘'] > data['Upper_Band']) & (data['Prev_Close'] < data['Upper_Band'].shift(1))
+        # 生成交易信号
+        data.loc[sellIndexCon, 'signal'] = -1
+
+        data['BB_Position'] = data['signal'].diff()
+
+        # 绘制图像
+        plt.figure(figsize=(8, 5))
+
+        # 绘制价格和布林带
+        plt.plot( data['收盘'], label='Price', color='blue')
+        plt.plot(data['Middle_Band'], label='Middle Band', color='red')
+        plt.plot(data['Upper_Band'], label='Upper Band', color='green')
+        plt.plot(data['Lower_Band'], label='Lower Band', color='yellow')
+
+        plt.fill_between(data.index, data['Upper_Band'], data['Lower_Band'], color='lightgray', alpha=0.3)
+
+        buy_indices = data[data['signal'] == 1].index
+        plt.plot(buy_indices,
+                 data['Lower_Band'][buy_indices],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+        sell_indices = data[data['signal'] == -1].index
+        plt.plot(sell_indices,
+                 data['Upper_Band'][sell_indices],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal (MA)')
+        plt.title(f'{stock_code} Moving Average Crossover Strategy')
+
+        plt.title(f'{stock_code} Bollinger Bands Strategy')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show()
+
+
+    # 绘制动量策略的图像
+    def plot_strategy_macd(data):
+        if data is None or data.empty:
+            print("数据为空，无法绘制图像。")
+            return
+
+        # 计算动量
+        momentum_window = 20
+        data['Momentum'] = data['收盘'].pct_change(periods=momentum_window)
+
+        # 计算 MACD
+        macd, signal, hist = talib.MACD(data['收盘'], fastperiod=12, slowperiod=26, signalperiod=9)
+        data["macd_dif"] = macd
+        data["macd_signal"] = signal
+        data["hist"] = hist
+        stock_code = get_stock_code(data)
+
+        # 生成交易信号
+        data['Signal'] = 0
+        # 买入信号
+        data.loc[(data["macd_dif"] < data["macd_signal"]) & (data["macd_dif"].shift(1) > data["macd_signal"].shift(1)), 'Signal'] = 1
+        # 短期均线下穿长期均线，卖出信号
+        data.loc[(data["macd_dif"] > data["macd_signal"]) & (data["macd_dif"].shift(1) < data["macd_signal"].shift(1)), 'Signal'] = -1
+
+        data['Position'] = data['Signal'].diff()
+
+
+        # 绘制图像
+        fig, axes = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+        # plt.plot(data['日期'],data['收盘'], label='Price', color='blue')
+        # ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))  # 日期显示格式为 '年-月'
+        axes[0].plot( data['收盘'], label='Price', color='blue')
+        axes[0].plot(data['macd_signal'], label='signal price-9 days evg', color='black')
+
+
+        # 标记买入和卖出信号
+        buy_indices = data[data['Signal'] == 1].index
+        axes[0].plot(buy_indices,
+                 data['收盘'][buy_indices],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+        sell_indices = data[data['Signal'] == -1].index
+        axes[0].plot(sell_indices,
+                 data['收盘'][sell_indices],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+        axes[0].legend()
+
+        axes[1].plot(data['macd_dif'], label='macd-fast line', color='yellow')
+        axes[1].plot(data['macd_signal'], label='signal price-slow line', color='black')
+        # plt.plot(data['hist'], label='hist', color='green')
+        axes[1].bar(range(len(data['hist'])), data['hist'], label='hist', color='green')
+
+        axes[1].legend()
+
+        plt.title(f'{stock_code} Momentum Strategy')
+        plt.legend()
+        plt.show()
+
+        # 输出交易信号
+        print(data[['收盘', 'Momentum', 'Signal', 'Position']].tail(20))
+
+
+
+    def plot_strategy_breakout(data, window=20):
+        """
+        绘制突破策略的图像
+        :param data: 包含股票价格数据的 DataFrame，需有 '收盘' 列
+        :param window: 计算前 n 日高低价的窗口大小，默认为 20
+        """
+        if data is None or data.empty:
+            print("数据为空，无法绘制图像。")
+            return
+
+        # 计算前 window 日的最高价和最低价
+        data['Previous_High_20'] = data['收盘'].rolling(window=window).max()
+        data['Previous_Low_20'] = data['收盘'].rolling(window=window).min()
+
+        data['Signal2'] = 0
+        data['Signal2'][window:] = np.where(data['收盘'][window:] > data['Previous_High_20'].shift(1)[window:], 1,
+                                            np.where(data['收盘'][window:] < data['Previous_Low_20'].shift(1)[window:], -1, 0))
+
+        short_window = 20
+        long_window = 50
+        data['MA_20'] = data['收盘'].rolling(window=short_window, min_periods=1).mean()
+        data['MA_50'] = data['收盘'].rolling(window=long_window, min_periods=1).mean()
+        data['residence'] = data['MA_20']+2*(data['收盘'].rolling(window=short_window, min_periods=1).std())
+        data['support'] = data['MA_20']-2*(data['收盘'].rolling(window=short_window, min_periods=1).std())
+
+        # 生成交易信号
+        data['Signal'] = 0
+        data['Signal'][window:] = np.where(data['收盘'][window:] > data['residence'][window:], 1,
+                                           np.where(data['收盘'][window:] < data['support'][window:], -1, 0))
+        data['Position'] = data['Signal'].diff()
+
+        stock_code = get_stock_code(data)
+
+
+        # 绘制图像
+        # plt.figure(figsize=(14, 7))
+        fig, axes = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+
+        axes[0].plot(data['收盘'], label='Price', color='blue')
+        axes[0].plot(data['MA_20'], label=f'{short_window}-Day High', color='red', linestyle='--')
+        axes[0].plot(data['MA_50'], label=f'{long_window}-Day Low', color='green', linestyle='--')
+        axes[0].plot(data['residence'], label=f'{short_window}-Day residence', color='yellow', linestyle='-.')
+        axes[0].plot(data['support'], label=f'{short_window}-Day support', color='orange', linestyle='-.')
+
+        # 标记买入信号
+        buy_indices = data[data['Signal'] == 1].index
+        axes[0].plot(buy_indices,
+                 data['收盘'][buy_indices],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+        # 标记卖出信号
+        sell_indices = data[data['Signal'] == -1].index
+        axes[0].plot(sell_indices,
+                 data['收盘'][sell_indices],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+
+        axes[1].plot(data['收盘'], label='Price', color='blue')
+        axes[1].plot(data['Previous_High_20'], label=f'{window}-Day Previous High', color='purple', linestyle='--')
+        axes[1].plot(data['Previous_Low_20'], label=f'{window}-Day Previous Low', color='brown', linestyle='--')
+        axes[1].set_title(f'{stock_code} Breakout Strategy - Previous High and Low')
+
+        # 标记买入信号
+        buy_indices = data[data['Signal2'] == 1].index
+        axes[1].plot(buy_indices,
+                     data['收盘'][buy_indices],
+                     '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+        # 标记卖出信号
+        sell_indices = data[data['Signal2'] == -1].index
+        axes[1].plot(sell_indices,
+                     data['收盘'][sell_indices],
+                     'v', markersize=10, color='r', lw=0, label='Sell Signal')
+
+        axes[0].legend()
+        axes[1].legend()
+
+        plt.title(f'{stock_code} Breakout Strategy')
+        plt.legend()
+        plt.show()
+
+        # 输出交易信号
+        print(data[['收盘', 'Previous_High_20', 'Previous_Low_20', 'Signal', 'Position']].tail(20))
+
+
+    # SAR 策略
+    def plot_strategy_sar(data):
+        """
+        绘制 SAR 策略的图像
+        :param data: 包含股票价格数据和 SAR 指标的 DataFrame
+        """
+        if data is None or data.empty:
+            print("数据为空，无法绘制图像。")
+            return
+    # 使用 talib 计算 SAR
+        high_prices = data['最高']
+        low_prices = data['最低']
+        acceleration = 0.02
+        maximum_acceleration = 0.2
+        data['SAR'] = talib.SAR(high_prices, low_prices, acceleration=acceleration, maximum=maximum_acceleration)
+
+        # 生成交易信号
+        data['Signal'] = 0
+        # data['Signal'][1:] = np.where(data['SAR'][1:] < data['收盘'][1:], 1, -1)
+        # 短期均线下穿长期均线，卖出信号
+        data.loc[(data['收盘'] > data['SAR']) & (data['收盘'].shift(1) < data['SAR'].shift(1)), 'Signal'] = 1
+        # 短期均线下穿长期均线，卖出信号
+        data.loc[(data['收盘'] < data['SAR']) & (data['收盘'].shift(1) > data['SAR'].shift(1)), 'Signal'] = -1
+
+        data['Position'] = data['Signal'].diff()
+        stock_code = get_stock_code(data)
+
+
+        # 绘制图像
+        plt.figure(figsize=(14, 7))
+        plt.plot(data['收盘'], label='Price', color='blue')
+        plt.plot(data['SAR'], label='SAR', color='red', linestyle='--')
+
+        # 标记买入和卖出信号
+        # 标记买入信号
+        buy_indices = data[data['Signal'] == 1].index
+        plt.plot(buy_indices,
+                 data['收盘'][buy_indices],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+        # 标记卖出信号
+        sell_indices = data[data['Signal'] == -1].index
+        plt.plot(sell_indices,
+                 data['收盘'][sell_indices],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+
+        plt.title(f'{stock_code} SAR Strategy')
+        plt.legend()
+        plt.show()
+
+        # 输出交易信号
+        print(data[['收盘', 'SAR', 'Signal', 'Position']].tail(20))
+
+
+    #均值回归策略
+    def plot_mean_reversion_strategy(data, window=20, z_score_threshold=1):
+        """
+        绘制均值回归策略的图像
+        :param data: 包含股票价格数据的 DataFrame，需有 '收盘' 列
+        :param window: 计算均值和标准差的窗口大小，默认为 20
+        :param z_score_threshold: Z 分数阈值，用于判断偏离程度，默认为 1
+        """
+        if data is None or data.empty:
+            print("数据为空，无法绘制图像。")
+            return
+
+        stock_code = get_stock_code(data)
+        # 计算滚动均值和标准差
+        data['Rolling_Mean'] = data['收盘'].rolling(window=window).mean()
+        data['Rolling_Std'] = data['收盘'].rolling(window=window).std()
+
+        # 计算 Z 分数
+        data['Z_Score'] = (data['收盘'] - data['Rolling_Mean']) / data['Rolling_Std']
+
+        # 生成交易信号
+        data['Signal'] = 0
+        data['Signal'] = np.where(data['Z_Score'] > z_score_threshold, -1,
+                                  np.where(data['Z_Score'] < -z_score_threshold, 1, 0))
+        data['Position'] = data['Signal'].diff()
+
+
+        # 绘制图像
+        plt.figure(figsize=(14, 7))
+        plt.subplot(2, 1, 1)
+        plt.plot(data['收盘'], label='Price', color='blue')
+        plt.plot(data['Rolling_Mean'], label=f'{window}-Day Mean', color='red', linestyle='--')
+        plt.title(f'{stock_code} Price and {window}-Day Mean')
+        plt.legend()
+
+        plt.subplot(2, 1, 2)
+        plt.plot(data['Z_Score'], label='Z-Score', color='green')
+        plt.axhline(y=z_score_threshold, color='r', linestyle='--', label=f'+{z_score_threshold} Z-Score')
+        plt.axhline(y=-z_score_threshold, color='r', linestyle='--', label=f'-{z_score_threshold} Z-Score')
+
+        # 标记买入信号
+        buy_indices = data[data['Signal'] == 1].index
+        plt.plot(buy_indices,
+                 data['Z_Score'][buy_indices],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal')
+
+        # 标记卖出信号
+        sell_indices = data[data['Signal'] == -1].index
+        plt.plot(sell_indices,
+                 data['Z_Score'][sell_indices],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+
+
+
+        plt.title(f'{stock_code} Z-Score and Trading Signals')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show()
+
+        # 输出交易信号
+        print(data[['收盘', 'Rolling_Mean', 'Z_Score', 'Signal', 'Position']].tail(20))
+
+
+
+    #次级结构套利
+    def plot_sub_structure_arbitrage(data, short_window=5, long_window=20, deviation_threshold=0.05):
+        """
+        绘制次级结构套利策略图像
+        :param data: 包含股票数据的 DataFrame，需有 '收盘' 列
+        :param short_window: 短期移动平均线窗口大小，默认为 5
+        :param long_window: 长期移动平均线窗口大小，默认为 20
+        :param deviation_threshold: 价格偏离阈值，默认为 0.05
+        """
+        if data is None or data.empty:
+            print("数据为空，无法绘制图像。")
+            return
+
+        stock_code = get_stock_code(data)
+        # 计算短期和长期移动平均线
+        data['MA_5'] = data['收盘'].rolling(window=short_window).mean()
+        data['MA_20'] = data['收盘'].rolling(window=long_window).mean()
+
+        # 计算价格偏离程度
+        data['Deviation'] = (data['收盘'] - data['MA_20']) / data['MA_5']
+
+        # 生成交易信号
+        data['Signal'] = 0
+        # 短期均线上穿长期均线且价格偏离超过阈值，买入信号
+        data.loc[(data['MA_5'].shift(1) <= data['MA_20'].shift(1)) & (data['MA_5'] > data['MA_20']) & (
+                data['Deviation'] > deviation_threshold), 'Signal'] = 1
+        # 短期均线下穿长期均线且价格偏离低于负阈值，卖出信号
+        data.loc[(data['MA_5'].shift(1) >= data['MA_20'].shift(1)) & (data['MA_5'] < data['MA_20']) & (
+                data['Deviation'] < -deviation_threshold), 'Signal'] = -1
+        data['Position'] = data['Signal'].diff()
+
+        # 绘制图像
+        plt.figure(figsize=(14, 7))
+        plt.plot(data['日期'],data['收盘'], label='Price', color='blue')
+        plt.plot(data['MA_5'], label=f'{short_window}-Day MA', color='orange')
+        plt.plot(data['MA_20'], label=f'{long_window}-Day MA', color='green')
+
+        # 标记买入和卖出信号
+        plt.plot(data[data['Position'] == 1].index,
+                 data['收盘'][data['Position'] == 1],
+                 '^', markersize=10, color='g', lw=0, label='Buy Signal')
+        plt.plot(data[data['Position'] == -1].index,
+                 data['收盘'][data['Position'] == -1],
+                 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+
+        plt.title(f'{stock_code} Sub-Structure Arbitrage Strategy')
+        plt.legend()
+        plt.show()
+
+        # 输出交易信号
+        print(data[['收盘', 'MA_5', 'MA_20', 'Deviation', 'Signal', 'Position']].tail(20))
+
+
+    # RSI 择时策略
+    def strategy_rsi(data, period=14, overbought=70, oversold=30):
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行 RSI 分析。")
+            return None
+        try:
+            stock_code = get_stock_code(data)
+            # 计算 RSI
+            data['RSI'] = talib.RSI(data['收盘'], timeperiod=period)
+            lastRSI = data['RSI'].shift(1)
+            # 生成交易信号
+            data['Signal'] = 0
+            data.loc[(data['RSI'] < oversold)  & (lastRSI > oversold) , 'Signal'] = 1  # 买入信号
+            data.loc[(data['RSI'] > overbought)  & (lastRSI < overbought), 'Signal'] = -1  # 卖出信号
+            data['Position'] = data['Signal'].diff()
+
+            # 打印交易信号信息
+            print("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['Signal'] == 1].index
+            for idx in buy_indices:
+                rsi_value = data.loc[idx, 'RSI']
+                print(f"索引: {idx}, RSI 值: {rsi_value}")
+
+            print("\nSignal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['Signal'] == -1].index
+            for idx in sell_indices:
+                rsi_value = data.loc[idx, 'RSI']
+                print(f"索引: {idx}, RSI 值: {rsi_value}")
+
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+            # 绘制股票价格和交易信号
+            ax1.plot(data['收盘'], label='Price')
+            buy_indices = data[data['Signal'] == 1].index
+            ax1.plot(buy_indices,
+                     data['收盘'][buy_indices],
+                     '^', markersize=10, color='g', lw=0, label='Buy Signal')
+            sell_indices = data[data['Signal'] == -1].index
+            ax1.plot(sell_indices,
+                     data['收盘'][sell_indices],
+                     'v', markersize=10, color='r', lw=0, label='Sell Signal')
+            ax1.set_title(f'{stock_code} Price and RSI Trading Signals')
+            ax1.legend()
+
+            # 绘制 RSI 指标和超买超卖线
+            ax2.plot(data['RSI'], label='RSI')
+            ax2.axhline(y=overbought, color='r', linestyle='--', label='Overbought')
+            ax2.axhline(y=oversold, color='g', linestyle='--', label='Oversold')
+            ax2.set_title(f'{stock_code} RSI Indicator')
+            ax2.legend()
+
+            plt.title(f'{stock_code} RSI  Strategy')
+            plt.legend()
+            plt.show()
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+
+
+    # KDJ 择时策略
+    def strategy_kdj(data, fastk_period=9, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0):
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行 KDJ 分析。")
+            return None
+        try:
+            stock_code = get_stock_code(data)
+            # 计算 KDJ 指标
+            high_prices = data['最高'].values
+            low_prices = data['最低'].values
+            close_prices = data['收盘'].values
+            k, d = talib.STOCH(high_prices, low_prices, close_prices, fastk_period=fastk_period,
+                               slowk_period=slowk_period, slowk_matype=slowk_matype,
+                               slowd_period=slowd_period, slowd_matype=slowd_matype)
+            j = 3 * k - 2 * d
+
+            data['K'] = k
+            data['D'] = d
+            data['J'] = j
+
+            # 获取上一个时间步的 K、D 值
+            last_k = data['K'].shift(1)
+            last_d = data['D'].shift(1)
+
+            # 生成交易信号
+            data['Signal'] = 0
+            data.loc[(data['K'] > data['D']) & (last_k < last_d), 'Signal'] = 1  # 买入信号
+            data.loc[(data['K'] < data['D']) & (last_k > last_d), 'Signal'] = -1  # 卖出信号
+            data['Position'] = data['Signal'].diff()
+
+            # 打印交易信号信息
+            print("Signal 等于 1 的情况（买入信号）：")
+
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+            # 绘制股票价格和交易信号
+            ax1.plot(data['收盘'], label='Price')
+            buy_indices = data[data['Signal'] == 1].index
+            ax1.plot(buy_indices,
+                     data['收盘'][buy_indices],
+                     '^', markersize=10, color='g', lw=0, label='Buy Signal')
+            sell_indices = data[data['Signal'] == -1].index
+            ax1.plot(sell_indices,
+                     data['收盘'][sell_indices],
+                     'v', markersize=10, color='r', lw=0, label='Sell Signal')
+            ax1.set_title(f'{stock_code} Price and KDJ Trading Signals')
+            ax1.legend()
+
+            # 绘制 KDJ 指标
+            ax2.plot(data['K'], label='K')
+            ax2.plot(data['D'], label='D')
+            ax2.plot(data['J'], label='J')
+            overbought = 70
+            oversold = 30
+            ax2.axhline(y=overbought, color='r', linestyle='--', label='Overbought')
+            ax2.axhline(y=oversold, color='g', linestyle='--', label='Oversold')
+
+            ax2.set_title(f'{stock_code} KDJ Indicator')
+            ax2.legend()
+
+            plt.title(f'{stock_code} KDJ  Strategy')
+            plt.legend()
+            plt.show()
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+
+
+    # 威廉R择时策略
+    def strategy_williams_r(data, time_period=14, overbought=-20, oversold=-80):
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行威廉R分析。")
+            return None
+        try:
+            stock_code = get_stock_code(data)
+            # 计算威廉R指标
+            high_prices = data['最高'].values
+            low_prices = data['最低'].values
+            close_prices = data['收盘'].values
+            williams_r = talib.WILLR(high_prices, low_prices, close_prices, timeperiod=time_period)
+            data['Williams_R'] = williams_r
+
+            # 获取上一个时间步的威廉R值
+            last_williams_r = data['Williams_R'].shift(1)
+
+            # 生成交易信号
+            data['Signal'] = 0
+            data.loc[(data['Williams_R'] < oversold) & (last_williams_r >= oversold), 'Signal'] = 1  # 买入信号
+            data.loc[(data['Williams_R'] > overbought) & (last_williams_r <= overbought), 'Signal'] = -1  # 卖出信号
+            data['Position'] = data['Signal'].diff()
+
+
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+            # 绘制股票价格和交易信号
+            ax1.plot(data['收盘'], label='Price')
+            buy_indices = data[data['Signal'] == 1].index
+            ax1.plot(buy_indices,
+                     data['收盘'][buy_indices],
+                     '^', markersize=10, color='g', lw=0, label='Buy Signal')
+            sell_indices = data[data['Signal'] == -1].index
+            ax1.plot(sell_indices,
+                     data['收盘'][sell_indices],
+                     'v', markersize=10, color='r', lw=0, label='Sell Signal')
+            ax1.set_title(f'{stock_code} Price and Williams %R Trading Signals')
+            ax1.legend()
+
+            # 绘制威廉R指标和超买超卖线
+            ax2.plot(data['Williams_R'], label='Williams %R')
+            ax2.axhline(y=overbought, color='r', linestyle='--', label='Overbought')
+            ax2.axhline(y=oversold, color='g', linestyle='--', label='Oversold')
+            ax2.set_title(f'{stock_code} Williams %R Indicator')
+            ax2.legend()
+
+            plt.title(f'{stock_code} williams_r  Strategy')
+            plt.legend()
+            plt.show()
+
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+
+
+
+    def strategy_adx(data, time_period=14, adx_threshold=25):
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行 ADX 分析。")
+            return None
+        try:
+            # 假设数据包含 '最高', '最低', '收盘' 列，且存在一个获取股票代码的函数 get_stock_code
+            stock_code = get_stock_code(data)
+
+            # 计算 ADX、+DI 和 -DI
+            high_prices = data['最高'].values
+            low_prices = data['最低'].values
+            close_prices = data['收盘'].values
+            adx = talib.ADX(high_prices, low_prices, close_prices, timeperiod=time_period)
+            plus_di = talib.PLUS_DI(high_prices, low_prices, close_prices, timeperiod=time_period)
+            minus_di = talib.MINUS_DI(high_prices, low_prices, close_prices, timeperiod=time_period)
+
+            data['ADX'] = adx
+            data['+DI'] = plus_di
+            data['-DI'] = minus_di
+
+            # 获取上一个时间步的 +DI 和 -DI 值
+            last_plus_di = data['+DI'].shift(1)
+            last_minus_di = data['-DI'].shift(1)
+
+            # 生成交易信号
+            data['Signal'] = 0
+            data.loc[(data['ADX'] > adx_threshold) & (data['+DI'] > data['-DI']) & (last_plus_di <= last_minus_di), 'Signal'] = 1  # 买入信号
+            data.loc[(data['ADX'] > adx_threshold) & (data['-DI'] > data['+DI']) & (last_minus_di <= last_plus_di), 'Signal'] = -1  # 卖出信号
+            data['Position'] = data['Signal'].diff()
+
+            # 打印交易信号信息
+            print("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['Signal'] == 1].index
+            for idx in buy_indices:
+                adx_value = data.loc[idx, 'ADX']
+                plus_di_value = data.loc[idx, '+DI']
+                minus_di_value = data.loc[idx, '-DI']
+                last_plus_di_value = last_plus_di[idx]
+                last_minus_di_value = last_minus_di[idx]
+                print(f"索引: {idx}, 当前 ADX 值: {adx_value}, 当前 +DI 值: {plus_di_value}, 当前 -DI 值: {minus_di_value}, 上一周期 +DI 值: {last_plus_di_value}, 上一周期 -DI 值: {last_minus_di_value}")
+
+            print("Signal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['Signal'] == -1].index
+            for idx in sell_indices:
+                adx_value = data.loc[idx, 'ADX']
+                plus_di_value = data.loc[idx, '+DI']
+                minus_di_value = data.loc[idx, '-DI']
+                last_plus_di_value = last_plus_di[idx]
+                last_minus_di_value = last_minus_di[idx]
+                print(f"索引: {idx}, 当前 ADX 值: {adx_value}, 当前 +DI 值: {plus_di_value}, 当前 -DI 值: {minus_di_value}, 上一周期 +DI 值: {last_plus_di_value}, 上一周期 -DI 值: {last_minus_di_value}")
+
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+            # 绘制股票价格和交易信号
+            ax1.plot(data['收盘'], label='Price')
+            buy_indices = data[data['Signal'] == 1].index
+            ax1.plot(buy_indices, data['收盘'][buy_indices], '^', markersize=10, color='g', lw=0, label='Buy Signal')
+            sell_indices = data[data['Signal'] == -1].index
+            ax1.plot(sell_indices, data['收盘'][sell_indices], 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+            ax1.set_title(f'{stock_code} Price and ADX Trading Signals')
+            ax1.legend()
+
+            # 绘制 ADX、+DI 和 -DI 指标
+            ax2.plot(data['ADX'], label='ADX')
+            ax2.plot(data['+DI'], label='+DI')
+            ax2.plot(data['-DI'], label='-DI')
+            ax2.axhline(y=adx_threshold, color='k', linestyle='--', label='ADX Threshold')
+            ax2.set_title(f'{stock_code} ADX, +DI, -DI Indicators')
+            ax2.legend()
+
+            plt.title(f'{stock_code} ADX  Strategy')
+            plt.legend()
+            plt.show()
+
+
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+
+
+    def strategy_volume(data, volume_threshold=1.5):
+        """
+        成交量指标策略函数
+
+        :param data: 包含股票数据的 DataFrame，至少包含 '收盘' 和 '成交量' 列
+        :param volume_threshold: 成交量变化的阈值，用于判断成交量是否异常放大
+        :return: 保存交易信号图的图片路径，如果出现错误则返回 None
+        """
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行成交量分析。")
+            return None
+        try:
+            # 假设数据包含 '股票代码' 列，用于获取股票代码
+            stock_code = get_stock_code(data)
+
+            # 计算成交量的移动平均值（例如，过去 5 天的平均成交量）
+            data['Volume_MA'] = data['成交量'].rolling(window=5).mean()
+
+            # 计算成交量相对变化率
+            data['Volume_Ratio'] = data['成交量'] / data['Volume_MA']
+
+            # 获取上一个时间步的成交量相对变化率
+            last_volume_ratio = data['Volume_Ratio'].shift(1)
+
+            # 生成交易信号
+            data['Signal'] = 0
+            # 当成交量相对变化率大于阈值且上一周期小于等于阈值，同时收盘价上涨时，产生买入信号
+            data.loc[(data['Volume_Ratio'] > volume_threshold) & (last_volume_ratio <= volume_threshold) & (data['收盘'] > data['收盘'].shift(1)), 'Signal'] = 1
+            # 当成交量相对变化率大于阈值且上一周期小于等于阈值，同时收盘价下跌时，产生卖出信号
+            data.loc[(data['Volume_Ratio'] > volume_threshold) & (last_volume_ratio <= volume_threshold) & (data['收盘'] < data['收盘'].shift(1)), 'Signal'] = -1
+
+            data['Position'] = data['Signal'].diff()
+
+            # 打印交易信号信息
+            print("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['Signal'] == 1].index
+            for idx in buy_indices:
+                volume_ratio = data.loc[idx, 'Volume_Ratio']
+                last_volume_ratio_value = last_volume_ratio[idx]
+                close_price = data.loc[idx, '收盘']
+                prev_close_price = data.loc[idx - 1, '收盘'] if idx > 0 else None
+                print(f"索引: {idx}, 当前成交量相对变化率: {volume_ratio}, 上一周期成交量相对变化率: {last_volume_ratio_value}, 当前收盘价: {close_price}, 上一周期收盘价: {prev_close_price}")
+
+            print("Signal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['Signal'] == -1].index
+            for idx in sell_indices:
+                volume_ratio = data.loc[idx, 'Volume_Ratio']
+                last_volume_ratio_value = last_volume_ratio[idx]
+                close_price = data.loc[idx, '收盘']
+                prev_close_price = data.loc[idx - 1, '收盘'] if idx > 0 else None
+                print(f"索引: {idx}, 当前成交量相对变化率: {volume_ratio}, 上一周期成交量相对变化率: {last_volume_ratio_value}, 当前收盘价: {close_price}, 上一周期收盘价: {prev_close_price}")
+
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+            # 绘制股票价格和交易信号
+            ax1.plot(data['收盘'], label='Price')
+            buy_indices = data[data['Signal'] == 1].index
+            ax1.plot(buy_indices, data['收盘'][buy_indices], '^', markersize=10, color='g', lw=0, label='Buy Signal')
+            sell_indices = data[data['Signal'] == -1].index
+            ax1.plot(sell_indices, data['收盘'][sell_indices], 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+            ax1.set_title(f'{stock_code} Price and Volume Trading Signals')
+            ax1.legend()
+
+            # 绘制成交量和成交量相对变化率
+            ax2.bar(data.index, data['成交量'], label='Volume')
+            ax2.plot(data['Volume_Ratio'], label='Volume Ratio', color='orange')
+            ax2.axhline(y=volume_threshold, color='r', linestyle='--', label='Volume Threshold')
+            ax2.set_title(f'{stock_code} Volume and Volume Ratio')
+            ax2.legend()
+
+            plt.title(f'{stock_code}   strategy_volume')
+            plt.legend()
+            plt.show()
+
+
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+
+    #线性回归模型
+    def strategy_linear_regression(data, train_ratio=0.8):
+        """
+        机器学习线性回归模型策略函数
+
+        :param data: 包含股票数据的 DataFrame，至少包含 '收盘' 列
+        :param train_ratio: 训练数据所占的比例
+        :return: 保存交易信号图的图片路径，如果出现错误则返回 None
+        """
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行线性回归分析。")
+            return None
+        try:
+
+            stock_code = get_stock_code(data)
+
+            data['nclose'] = data['收盘'].shift(-1);
+            data.fillna(method='pad', inplace=True)
+            clst = ['开盘', '最高', '最低', '收盘']
+            X0 = data[clst].values
+            poly = PolynomialFeatures(degree=2, include_bias=False)
+            x = poly.fit_transform(X0)
+            y = data['nclose'].values
+            mx = linear_model.LinearRegression()
+            data['predict'] = cross_val_predict(mx, x, y, cv=20)
+            cvscore = cross_val_score(mx, x, y, cv=6)
+            print(cvscore)
+
+
+
+            # 可视化真实值与预测值
+            plt.figure(figsize=(10, 6))
+            plt.plot(data['收盘'], label='Price', linestyle='-', color='blue')
+            plt.plot(data['predict'], label='Predict Price', linestyle='dashed', color='red')
+            plt.legend()
+            plt.title(f'{stock_code} 10-Day Future Stock Price Prediction vs Actual Stock Prices')
+            plt.show()
+
+            """
+            
+            
+            # 提取特征：计算5日和10日的简单移动平均线
+            data['SMA5'] = data['收盘'].rolling(window=5).mean()
+            data['SMA10'] = data['收盘'].rolling(window=10).mean()
+    
+            # 去掉缺失值
+            data = data.dropna()
+    
+            # 特征选择：使用当前的收盘价、5日、10日均线作为特征
+            X = data[['收盘', 'SMA5', 'SMA10', '成交量']]
+            y = data['收盘'].shift(-10)  # 目标为未来10天的收盘价
+    
+            # 去掉NaN值
+            X = X[:-10]
+            y = y[:-10]
+    
+            # 划分训练集和测试集
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+    
+            # 训练线性回归模型
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+    
+            # 预测
+            y_pred = model.predict(X_test)
+    
+            # 评估模型的效果：计算均方误差
+            mse = mean_squared_error(y_test, y_pred)
+            print(f'模型的均方误差: {mse:.2f}')
+            cvscore = cross_val_score(model, x, y, cv=6)
+            print(cvscore)
+         
+    
+            print(cvscore）
+    
+            
+            # 提取特征和目标变量
+            X = np.arange(len(data)).reshape(-1, 1)
+            y = data['收盘'].values
+    
+            # 划分训练集和测试集
+            train_size = int(train_ratio * len(data))
+            X_train, X_test = X[:train_size], X[train_size:]
+            y_train, y_test = y[:train_size], y[train_size:]
+    
+            # 训练线性回归模型
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+    
+            # 进行预测
+            y_pred = model.predict(X)
+    
+            # 生成交易信号
+            data['Signal'] = 0
+            data['Predicted'] = y_pred
+            data['Signal'] = np.where(data['Predicted'].diff() > 0, 1, -1)
+            data['Position'] = data['Signal'].diff()
+    
+            # 打印交易信号信息
+            print("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['Signal'] == 1].index
+            for idx in buy_indices:
+                predicted_price = data.loc[idx, 'Predicted']
+                print(f"索引: {idx}, 预测价格: {predicted_price}")
+    
+            print("Signal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['Signal'] == -1].index
+            for idx in sell_indices:
+                predicted_price = data.loc[idx, 'Predicted']
+                print(f"索引: {idx}, 预测价格: {predicted_price}")
+    
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+    
+            # 绘制股票价格和预测价格
+            ax1.plot(data['收盘'], label='Actual Price')
+            ax1.plot(data['Predicted'], label='Predicted Price', linestyle='--')
+            ax1.set_title(f'{stock_code} Actual vs Predicted Price')
+            ax1.legend()
+    
+            # 绘制交易信号
+            ax2.plot(data['Signal'], label='Trading Signal')
+            ax2.set_title(f'{stock_code} Trading Signal based on Linear Regression')
+            ax2.legend()
+    
+            plt.title(f'{stock_code}   strategy_volume')
+            plt.legend()
+            plt.show()
+            """
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+    # 测试代码
+    def strategy_kline_pattern(data):
+        """
+        K 线形态策略函数
+
+        :param data: 包含股票数据的 DataFrame，至少包含 '开盘', '最高', '最低', '收盘' 列
+        :return: 保存交易信号图的图片路径，如果出现错误则返回 None
+        """
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行 K 线形态分析。")
+            return None
+        try:
+            stock_code = get_stock_code(data)
+
+            # 计算看涨吞没和看跌吞没形态
+            engulfing = talib.CDLENGULFING(data['开盘'].values, data['最高'].values, data['最低'].values,
+                                           data['收盘'].values)
+            data['Engulfing'] = engulfing
+
+
+            whilte3 = talib.CDL3WHITESOLDIERS(data['开盘'].values, data['最高'].values, data['最低'].values,
+                                           data['收盘'].values)
+            data['whilte3'] = whilte3
+
+            cdl = talib.CDLDRAGONFLYDOJI(data['开盘'].values, data['最高'].values, data['最低'].values,
+                                           data['收盘'].values)
+            data['CDL'] = cdl
+
+
+            # 生成交易信号
+            data['Signal'] = 0
+            # 看涨吞没形态，产生买入信号
+            data.loc[data['Engulfing'] == 100, 'Signal'] = 1
+            # 看跌吞没形态，产生卖出信号
+            data.loc[data['Engulfing'] == -100, 'Signal'] = -1
+
+            data['Position'] = data['Signal'].diff()
+
+            # 打印交易信号信息
+            print("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['Signal'] == 1].index
+            for idx in buy_indices:
+                engulfing_value = data.loc[idx, 'Engulfing']
+                print(f"索引: {idx}, 吞没形态值: {engulfing_value}")
+
+            print("Signal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['Signal'] == -1].index
+            for idx in sell_indices:
+                engulfing_value = data.loc[idx, 'Engulfing']
+                print(f"索引: {idx}, 吞没形态值: {engulfing_value}")
+
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+            # 绘制股票价格和交易信号
+
+
+            ax1.plot(data['收盘'], label='Price', linestyle='solid', color='green')
+
+
+            buy_indices = data[data['Signal'] == 1].index
+            ax1.plot(buy_indices, data['收盘'][buy_indices], '^', markersize=10, color='g', lw=0, label='Buy Signal')
+            sell_indices = data[data['Signal'] == -1].index
+            ax1.plot(sell_indices, data['收盘'][sell_indices], 'v', markersize=10, color='r', lw=0, label='Sell Signal')
+            ax1.set_title(f'{stock_code} Price and K - line Pattern Trading Signals')
+            ax1.legend()
+
+            # 绘制吞没形态指标
+            data.loc[data['CDL'] == 0, 'CDL'] = np.NaN
+            data.loc[data['whilte3'] == 0, 'whilte3'] = np.NaN
+            ax2.plot(data['CDL'], label='COL', linestyle='None', marker='o', color='blue')
+            ax2.plot(data['whilte3'], label='3 white', linestyle='None', marker='o', color='red')
+            ax2.plot(data['Engulfing'], label='Engulfing Pattern')
+            ax2.set_title(f'{stock_code} Engulfing Pattern Indicator')
+            ax2.legend()
+
+            plt.legend()
+            plt.title(f'{stock_code}  kline strategy')
+            plt.show()
+
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+
+    def strategy_mlp_regression(data, train_ratio=0.8, epochs=50, batch_size=32):
+        """
+        深度学习神经网络多层感知回归算法策略函数
+
+        :param data: 包含股票数据的 DataFrame，至少包含 '收盘' 列
+        :param train_ratio: 训练数据所占的比例
+        :param epochs: 模型训练的轮数
+        :param batch_size: 训练时的批次大小
+        :return: 保存交易信号图的图片路径，如果出现错误则返回 None
+        """
+        if data is None or data.empty:
+            print("输入的 DataFrame 为空或为 None，无法进行多层感知回归分析。")
+            return None
+        try:
+
+            stock_code = get_stock_code(data)
+
+            df = data.copy();
+            if '股票代码' in df.columns:
+                df = df.drop(['股票代码'], axis=1)
+            if '日期' in df.columns:
+                df = df.drop(['日期'], axis=1)
+
+
+            # 提取特征和目标变量
+            X = df.drop(columns=['收盘']).values
+            y = data['收盘'].values
+
+            # 数据标准化
+            scaler_X = StandardScaler()
+            scaler_y = StandardScaler()
+            X = scaler_X.fit_transform(X)
+            y = scaler_y.fit_transform(y.reshape(-1, 1)).flatten()
+
+            # 划分训练集和测试集
+            train_size = int(train_ratio * len(data))
+            X_train, X_test = X[:train_size], X[train_size:]
+            y_train, y_test = y[:train_size], y[train_size:]
+
+            # 构建多层感知机模型
+            model = Sequential()
+            model.add(Dense(64, activation='relu', input_shape=(X_train.shape[1],)))
+            model.add(Dense(32, activation='relu'))
+            model.add(Dense(1))
+
+            # 编译模型
+            model.compile(optimizer='adam', loss='mse')
+
+            # 训练模型
+            model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, verbose=1)
+
+            # 进行预测
+            y_pred = model.predict(X)
+            y_pred = scaler_y.inverse_transform(y_pred).flatten()
+
+            # 生成交易信号
+            data['Signal'] = 0
+            data['Predicted'] = y_pred
+            data['Signal'] = np.where(data['Predicted'].diff() > 0, 1, -1)
+            data['Position'] = data['Signal'].diff()
+
+            # 打印交易信号信息
+            print("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['Signal'] == 1].index
+            for idx in buy_indices:
+                predicted_price = data.loc[idx, 'Predicted']
+                print(f"索引: {idx}, 预测价格: {predicted_price}")
+
+            print("Signal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['Signal'] == -1].index
+            for idx in sell_indices:
+                predicted_price = data.loc[idx, 'Predicted']
+                print(f"索引: {idx}, 预测价格: {predicted_price}")
+
+            # 绘制图形
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+            # 绘制股票价格和预测价格
+            ax1.plot(data['收盘'], label='Actual Price')
+            ax1.plot(data['Predicted'], label='Predicted Price', linestyle='--')
+            ax1.set_title(f'{stock_code} Actual vs Predicted Price')
+
+            buy_indices = data[data['Signal'] == 1].index
+            ax1.plot(buy_indices, data['Predicted'][buy_indices], '^', markersize=4, color='g', lw=0, label='Predicted correct')
+            sell_indices = data[data['Signal'] == -1].index
+            ax1.plot(sell_indices, data['Predicted'][sell_indices], 'v', markersize=4, color='r', lw=0, label='Predicted wrong')
+            ax1.legend()
+
+            # 绘制交易信号
+            ax2.plot(data['Signal'], label='Trading Signal')
+            ax2.set_title(f'{stock_code} Trading Signal based on MLP Regression')
+            ax2.legend()
+
+            plt.title(f'{stock_code}  mlp_regression strategy')
+            plt.legend()
+            plt.show()
+
+        except Exception as e:
+            print(f"发生错误: {e}")
+            return None
+

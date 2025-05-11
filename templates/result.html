@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>查询结果</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        td {
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ccc;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+        .caption {
+            margin-top: 5px;
+            font-weight: bold;
+        }
+        .md-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>查询结果</h1>
+    <h2>公司基本情况</h2>
+    <div class="md-content">{{ stock_summary|safe }}</div>
+    <!-- 修改为显示 Markdown 内容 -->
+    <h2>公司基本面分析结果</h2>
+    <div class="md-content">{{ fundamental_analysis|safe }}</div>
+
+    <h2>公司年报分析</h2>
+    <div class="md-content">{{ annual_report_analysis|safe }}</div>
+
+    <h2>公司情绪分析</h2>
+    <div class="md-content">{{ sentiment_analysis|safe }}</div>
+    
+    <table>
+        <tr>
+            {% for i in range(0, image_paths|length, 2) %}
+                <td>
+                    <div class="caption">{{ strategies[i] }}</div>
+                    <img src="{{ image_paths[i] }}" alt="{{ strategies[i] }} 策略图片">
+                </td>
+                {% if i + 1 < image_paths|length %}
+                    <td>
+                        <div class="caption">{{ strategies[i+1] }}</div>
+                        <img src="{{ image_paths[i+1] }}" alt="{{ strategies[i+1] }} 策略图片">
+                    </td>
+                {% endif %}
+                </tr><tr>
+            {% endfor %}
+        </tr>
+    </table>
+
+    
+</body>
+</html>

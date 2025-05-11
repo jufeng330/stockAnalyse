@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>量化交易策略查询</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        form {
+            background-color: #f4f4f4;
+            padding: 20px;
+            border-radius: 5px;
+        }
+
+        /* 公共样式 */
+        .container {
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        /* AI 模块样式 */
+        #ai-config {
+            background-color: #f9f9f9;
+            border: 1px solid #ccc;
+        }
+
+        /* 股票模块样式 */
+        #stock-config {
+            background-color: #fff5f5;
+            border: 1px solid #ffcccc;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"], input[type="date"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        button {
+            background-color: #007BFF;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+         .form-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+    }
+
+    .form-section {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px 120px;
+    }
+
+    .group {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .group label {
+        min-width: 80px;  /* 可根据实际需求调整标签最小宽度 */
+        margin-right: 10px;
+    }
+
+    select {
+    width: 200px;          /* 设置宽度 */
+    padding: 10px;         /* 增加内边距，让下拉框更高 */
+    font-size: 14px;       /* 可选：增大字体，提升可读性 */
+    height: 40px;          /* 可选：强制设定高度 */
+    border-radius: 4px;    /* 和 input 保持一致风格 */
+    border: 1px solid #ccc;
+}
+
+    .checkbox-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .checkbox-group label {
+        flex: 0 0 calc(33.333% - 7px);
+        box-sizing: border-box;
+    }
+    .inline-group {
+        display: grid;
+        grid-template-columns: auto 100px auto 100px; /* label input label input */
+        gap: 15px 30px;
+        margin-bottom: 15px;
+        align-items: left;
+        white-space: nowrap;
+        min-width: 600px; /* 根据内容计算最小宽度 */
+    }
+
+    .inline-group input[type="text"],
+    .inline-group input[type="date"] {
+        min-width: 150px; /* 或者你希望的固定宽度，如 width: 100px; */
+    }
+    .group input[type="text"],
+    .group input[type="date"] {
+        min-width: 150px; /* 或者你希望的固定宽度，如 width: 100px; */
+    }
+
+    .vertical-group-container {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        grid-column: span 2; /* 如果你在 .form-section 中使用了 grid */
+    }
+
+    .group.full-width {
+        width: 100%;
+    }
+    .group.full-width label {
+        width: 120px;             /* 固定宽度，确保对齐 */
+        min-width: 120px;         /* 防止被压缩 */
+        white-space: nowrap;      /* 不换行 */
+        display: inline-block;    /* 保证 width 生效 */
+    }
+
+    textarea {
+        width: 100%;            /* 拉伸到最大宽度 */
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        resize: vertical;        /* 可选：仅允许垂直缩放 */
+    }
+
+    .line-group {
+        display: flex;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        gap: 20px 40px;
+    }
+
+    .line-group .group {
+        flex: 1 1 auto;
+        min-width: 200px;
+    }
+
+
+
+}
+    </style>
+</head>
+<body>
+    <h1>量化交易策略查询</h1>
+    <form method="post">
+          <!-- AI 配置容器 -->
+        <div id= "ai-config" class="container">
+             <h3>AI 配置参数</h3>
+            <div class="line-group">
+
+                <!-- AI平台 -->
+                <div class="group">
+                    <label for="ai_platform">AI平台:</label>
+                    <select id="ai_platform" name="ai_platform">
+                        <option value="qwen">通义千问</option>
+                        <option value="byte">字节火山</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+
+                <!-- AI模型 -->
+                <div class="group">
+                    <label for="ai_model">AI模型:</label>
+                    <select id="ai_model" name="ai_model">
+                        <option value="qwen3-235b-a22b">qwen3-235b-a22b</option>
+                        <option value="qwen3-32b">qwen3-32b</option>
+                        <option value="qwen-plus-latest">qwen-plus</option>
+                        <option value="doubao-1.5-pro-32k-250115">doubao-1.5-pro-32k-250115</option>
+                        <option value="doubao-1-5-thinking-pro-250415">doubao-1-5-thinking-pro-250415</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="openai">chat-gpt-3.5</option>
+                    </select>
+                </div>
+                 <div class="group">
+                    <label for="api_code">Token:</label>
+                    <input type="text" id="api_code" name="api_code" value="{{ api_code }}" required>
+                </div>
+
+            </div>
+
+            <div class="vertical-group-container">
+                <!-- 系统提示语 -->
+                <div class="group full-width">
+                    <label for="system_prompt">系统提示语:</label>
+                    <textarea id="system_prompt" name="system_prompt" rows="5">{{ system_prompt }}</textarea>
+                </div>
+
+                <!-- Message的格式 -->
+                <div class="group full-width">
+                    <label for="message_format">Message的格式:</label>
+                    <textarea id="message_format" name="message_format" rows="5">{{ message_format }}</textarea>
+                </div>
+            </div>
+        </div>
+         <!-- 输入字段容器 -->
+        <div id= "stock-config" class="container">
+            <h3>股票 配置参数</h3>
+            <div class="form-container">
+        <!-- 左侧输入区域 -->
+            <div class="form-section">
+
+            <div class="group">
+                <label for="stock_code">股票编号:</label>
+                <input type="text" id="stock_code" name="stock_code" required>
+            </div>
+             <div class="group">
+                 <label for="market">市场类型:</label>
+                <select id="market" name="market">
+                    <option value="SH" {% if market == 'SH' %}selected{% endif %}>上海</option>
+                    <option value="SZ" {% if market == 'SZ' %}selected{% endif %}>深圳</option>
+                    <option value="usa" {% if market == 'usa' %}selected{% endif %}>美国</option>
+                    <option value="H" {% if market == 'H' %}selected{% endif %}>香港</option>
+                    <option value="zq" {% if market == 'zq' %}selected{% endif %}>债券</option>
+                    <option value="cy" {% if market == 'cy' %}selected{% endif %}>创业板</option>
+                </select>
+            </div>
+
+            <div class="group">
+                <label for="start_date">开始时间:</label>
+                <input type="date" id="start_date" name="start_date" value="{{ start_date }}">
+
+            </div>
+             <div class="group">
+                 <label for="end_date">结束时间:</label>
+                <input type="date" id="end_date" name="end_date" value="{{ end_date }}">
+             </div>
+
+
+
+            </div>
+
+            </div>
+         </div>
+
+        <!-- 交易策略 -->
+        <label>选择交易策略:</label>
+        <div class="checkbox-group">
+            {% for strategy in strategies %}
+                <label style="display: flex; align-items: center;">
+                    <input type="checkbox" id="{{ strategy }}" name="strategies" value="{{ strategy }}" checked>
+                    {{ strategy }}
+                </label>
+            {% endfor %}
+        </div>
+        </div>
+
+
+        <button type="submit">查询</button>
+    </form>
+
+
+
+</body>
+</html>
