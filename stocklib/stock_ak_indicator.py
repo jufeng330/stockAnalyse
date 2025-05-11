@@ -148,8 +148,11 @@ class stockAKIndicator:
 
             # 生成交易信号
             data['Signal'] = 0
-            data['Signal'][short_window:] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1,
-                                                     -1)
+            # 使用 .loc 进行赋值，确保操作在原始 DataFrame 上进行
+            data.loc[short_window:, 'Signal'] = np.where(
+                data.loc[short_window:, 'MA_10'] > data.loc[short_window:, 'MA_30'],
+                1, 0
+            )
             data['Position'] = data['Signal'].diff()
             # 输出交易信号
             print(data[['收盘', 'MA_10', 'MA_30', 'Signal', 'Position']].tail(20))

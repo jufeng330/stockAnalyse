@@ -53,6 +53,8 @@ class stockAIAnalysis:
                 self.base_http_api_url = 'https://api.deepseek.com/'
             elif ai_platform == 'openai':
                 self.base_http_api_url = 'https://api.openai.com/v1/'
+            elif ai_platform == 'kimi':
+                self.base_http_api_url = 'https://api.moonshot.cn/v1'
         if system_prompt is not None:
             self.instruction = system_prompt
         else:
@@ -201,7 +203,7 @@ class stockAIAnalysis:
         # 获取当前个股所在行业板块情况
         stock_sector_fund_flow_rank_df = stock_service.get_stock_fund_flow()
         single_industry_df = stock_sector_fund_flow_rank_df[stock_sector_fund_flow_rank_df['名称'] == industry]
-        single_industry_df = single_industry_df.to_string(index=False)
+
 
         df_concept_border = stock_service.get_stock_board_all_concept_name()
         # 获取概念板块的数据情况

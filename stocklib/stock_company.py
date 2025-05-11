@@ -57,8 +57,7 @@ class stockCompanyInfo:
         stock_concept_service = stockConceptData()
         concept_info_df = stock_concept_service.stock_board_concept_info_ths(symbol=symbol,
                                                                      stock_board_ths_map_df=df_stock_board)
-        concept_name = concept_info_df.to_markdown(index=False)
-        return concept_name
+        return concept_info_df
 
     # 主营业务介绍 根据主营业务网络搜索相关事件报道
     def get_stock_zyjs(self):
@@ -128,7 +127,6 @@ class stockCompanyInfo:
             list_date = '2010-01-01'
             # 提取行业
             industry = ''
-            stock_individual_info_em_df = stock_individual_info_em_df.to_markdown(index=False)
             return stock_individual_info_em_df, list_date, industry
         elif self.market == self.usa:
             symbol = self.get_usa_code()
@@ -143,7 +141,6 @@ class stockCompanyInfo:
                 0]
             # 提取行业
             industry = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '行业']['value'].values[0]
-            stock_individual_info_em_df = stock_individual_info_em_df.to_markdown(index=False)
             return stock_individual_info_em_df, list_date, industry
 
     # 个股新闻查询

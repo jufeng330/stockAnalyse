@@ -475,14 +475,14 @@ class stockSelectService:
 
                 #
                 ai_service = stockAIAnalysis(model='deepseek-r1-distill-qwen-32b-250120', ai_platform='byte',
-                                             api_token='261d6249-4cfd-4e2b-b60f-6c9d5eefdbae')
+                                             api_token='261d6249--4e2b-b60f-6c9d5eefdbae')
                 report = ai_service.stock_report_analyse(market=market, symbol=stock_code)
                 print(report)
                 current_date = datetime.datetime.now()
                 current_date_str = current_date.strftime("%Y-%m-%d")
 
                 ai_service_2 = stockAIAnalysis(model='doubao-1-5-thinking-pro-250415', ai_platform='byte',
-                                             api_token='261d6249-4cfd-4e2b-b60f-6c9d5eefdbae')
+                                             api_token='261d6249-4e2b-b60f-6c9d5eefdbae')
                 report = ai_service_2.stock_indicator_analyse(market=market, symbol=stock_code, start_date='2025-01-01',
                                                             end_date=current_date_str)
                 print(report)
@@ -500,53 +500,99 @@ class stockSelectService:
             missing = [col for col in required_columns if col not in df.columns]
             raise ValueError(f"CSV文件中缺少必要的列: {', '.join(missing)}")
 
+        ai_platform,api_token,list_model = self.get_ai_token()
+
+        current_date = datetime.datetime.now()
+        current_date_str = current_date.strftime("%Y-%m-%d")
+
         # 遍历每一行
         for index, row in df.iterrows():
             stock_code = row['代码']  # 获取代码列的值
             market = str(row['market'])  # 获取market列的值
             try:
+                # 每处理100次数据后更新list_model
+                if index % 100 == 0 and index != 0:
+                    ai_platform, api_token, list_model = self.get_ai_token()
+                    print(f"已更新list_model，当前值: {list_model}")
+
+                # 通过取模运算循环选择list_model中的元素
+                model = list_model[index % len(list_model)]
                 stock_code = str(stock_code)
-                if(market == 'SH'):
-                    # 上海证券交易所（6开头）
-                    if stock_code.startswith('6'):
-                        market = 'SH'
-                    # 深圳证券交易所（00开头或3开头）
-                    elif stock_code.startswith('00') or stock_code.startswith('3'):
-                        market = 'SZ'
-                    else:
-                        market = self.market
-                        print(f'Warn unkonw code :{stock_code}')
-                else:
-                    if stock_code.lower().endswith('us'):
-                        stock_code = stock_code[:-2]  # 移除最后两个字符
-                        stock_code = f'105.{stock_code}'
-                    elif stock_code.lower().endswith('hk'):
-                        stock_code = stock_code[:-2]
-                    if market == 'HK':
-                        market = 'H'
-                    if market == 'USA':
-                        market = 'usa'
+                market, stock_code = self.process_stock_and_market(market, stock_code)
 
-
-                ai_service = stockAIAnalysis(model='deepseek-r1-distill-qwen-32b-250120', ai_platform='byte',
-                                             api_token='261d6249-4cfd-4e2b-b60f-6c9d5eefdbae')
-                report = ai_service.stock_report_analyse(market=market, symbol=stock_code)
-                print(report)
-                current_date = datetime.datetime.now()
-                current_date_str = current_date.strftime("%Y-%m-%d")
-
-                ai_service_2 = stockAIAnalysis(model='doubao-1-5-pro-32k-250115', ai_platform='byte',
-                                               api_token='261d6249-4cfd-4e2b-b60f-6c9d5eefdbae')
+                ai_service_2 = stockAIAnalysis(model=model, ai_platform=ai_platform,
+                                               api_token=api_token)
                 report = ai_service_2.stock_indicator_analyse(market=market, symbol=stock_code,
                                                               start_date='2025-01-01',
                                                               end_date=current_date_str)
                 print(report)
+
+
+                ai_service = stockAIAnalysis(model=model, ai_platform=ai_platform,
+                                             api_token=api_token)
+                report = ai_service.stock_report_analyse(market=market, symbol=stock_code)
+                print(report)
+
+
+
 
             except Exception as e:
                 print(f"股票代码 {stock_code} 分析出错: {e}")
                 traceback.print_exc()
                 continue
 
+    def process_stock_and_market(self, market, stock_code):
+        if (market == 'SH'):
+            # 上海证券交易所（6开头）
+            if stock_code.startswith('6'):
+                market = 'SH'
+            # 深圳证券交易所（00开头或3开头）
+            elif stock_code.startswith('00') or stock_code.startswith('3'):
+                market = 'SZ'
+            else:
+                market = self.market
+                print(f'Warn unkonw code :{stock_code}')
+        else:
+            if stock_code.lower().endswith('us'):
+                stock_code = stock_code[:-2]  # 移除最后两个字符
+                stock_code = f'105.{stock_code}'
+            elif stock_code.lower().endswith('hk'):
+                stock_code = stock_code[:-2]
+            if market == 'HK':
+                market = 'H'
+            if market == 'USA':
+                market = 'usa'
+        return market, stock_code
+
+    def get_ai_token(self):
+        import json
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        # 加载环境变量中的 OpenAI API 密钥
+        CURRENT_AI = os.getenv('CURRENT_AI')
+        DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY')
+
+        DASHSCOPE_MODEL_LIST = os.getenv('DASHSCOPE_MODEL_LIST', '')
+        DASHSCOPE_MODEL_LIST = json.loads(DASHSCOPE_MODEL_LIST)
+
+
+        print(DASHSCOPE_MODEL_LIST)  # 输出: ['qwen3-30b-a3b', 'qwen3-14b', ...]
+
+        KIMI_API_KEY = os.getenv('KIMI_API_KEY')
+        KIMI_MODEL_LIST = os.getenv('KIMI_MODEL_LIST')
+        KIMI_MODEL_LIST = json.loads(KIMI_MODEL_LIST)
+
+
+        print(KIMI_MODEL_LIST)
+
+        print(f'{CURRENT_AI}_ {DASHSCOPE_API_KEY} _ {DASHSCOPE_MODEL_LIST}')
+        if CURRENT_AI == 'qwen':
+            return CURRENT_AI,DASHSCOPE_API_KEY,DASHSCOPE_MODEL_LIST
+        elif CURRENT_AI == 'kimi':
+            return CURRENT_AI,KIMI_API_KEY,KIMI_MODEL_LIST
+        else:
+            return  CURRENT_AI,DASHSCOPE_API_KEY,DASHSCOPE_MODEL_LIST
 
 
 

@@ -20,7 +20,7 @@ if __name__ == '__main__':
     try:
         stockSelectService = stockSelectService(market='SH')
 
-        file = '/stock_analyse/stock_list.csv'
+        file = '/Users/jujinbu/PycharmProjects/StockAnalyse/stock_analyse/stock_list.csv'
         stockSelectService.analyse_stock_and_analyse(file_name=file)
         stockSelectService.select_stock_and_analyse()
 
@@ -96,7 +96,7 @@ if __name__ == '__main__':
 
 
 
-        stockAIAnalysis = stockAIAnalysis(model='qwen3-32b',ai_platform='qwen',api_token = 'sk-8d852738bdd847669ebe105bbfa2c756')
+        stockAIAnalysis = stockAIAnalysis(model='qwen3-32b',ai_platform='qwen',api_token = '8d852738bdd847669e105bbfa2c756')
         report = stockAIAnalysis.stock_report_analyse(market='SH', symbol='600028')
         print(report)
         report = stockAIAnalysis.stock_report_analyse(market='H', symbol='09868')
