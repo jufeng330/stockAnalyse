@@ -17,15 +17,76 @@ from stockAI.stockAgent.stock_select import *
 if __name__ == '__main__':
 
     report_service  = stockAnnualReport()
+    stock_border_info = stockBorderInfo(market='SH')
+
     try:
+
+        market = 'usa'
+        stock_border = stockBorderInfo(market=market)
+        stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = stock_border.get_stock_border_report(market,
+                                                                                                   date='20241231',
+                                                                                                   indicator='年报')
+        stock_border.write_to_csv_force(stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df, '20241231')
+        print(stock_zcfz_em_df.to_markdown())
+        print(stock_lrb_em_df.to_markdown())
+        print(stock_xjll_em_df.to_markdown())
+
+
+        market = 'H'
+        stock_border= stockBorderInfo(market=market)
+        stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = stock_border.get_stock_border_report(market, date='20241231',indicator='年报')
+        stock_border.write_to_csv_force(stock_zcfz_em_df,stock_lrb_em_df,stock_xjll_em_df,'20241231')
+        print(stock_zcfz_em_df.to_markdown())
+        print(stock_lrb_em_df.to_markdown())
+        print(stock_xjll_em_df.to_markdown())
+
+
+
+        market = 'SH'
+        stock_border = stockBorderInfo(market=market)
+        stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = stock_border.get_stock_border_report(market,
+                                                                                                   date='20250331',
+                                                                                                   indicator='年报')
+        print(stock_zcfz_em_df.to_markdown())
+        print(stock_lrb_em_df.to_markdown())
+        print(stock_xjll_em_df.to_markdown())
+
+
+
+        stock_border = stockBorderInfo(market='H')
+        df_stock = stock_border_info.get_stock_border_info()
+        print(df_stock.to_markdown())
+
+        stock_border_info = stockBorderInfo(market='usa')
+        df_stock = stock_border_info.get_stock_border_info()
+        print(df_stock.to_markdown())
+
+        stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = stock_border_info.get_stock_border_report(market="H", date='20241231', indicator='年报')
+
+
+        stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = report_service.get_stock_border_report()
+        print("资产负债表")
+        print(stock_zcfz_em_df.to_string(index=False))
+        print("利润表")
+        print(stock_lrb_em_df.to_string(index=False))
+        print("现金流量表")
+        print(stock_xjll_em_df.to_string(index=False))
+
+
         stockSelectService = stockSelectService(market='SH')
 
-        file = '/Users/jujinbu/PycharmProjects/StockAnalyse/stock_analyse/stock_list.csv'
+        result = stockSelectService.stock_analyse_one(stock_code='01797', market='H',model='qwen2.5-32B-instruct')
+        print(result)
+
+        result = stockSelectService.stock_analyse_one(stock_code='01810', market='H', model='qwen2.5-14B-instruct')
+        print(result)
+
+        file = '/Users/jujinbu/PycharmProjects/StockAnalyse/stock_analyse/stock_list_all.csv'
         stockSelectService.analyse_stock_and_analyse(file_name=file)
         stockSelectService.select_stock_and_analyse()
 
 
-        stockBorderInfo = stockBorderInfo(market='H')
+
 
         # 测试 get_stock_border_report 方法
        #  zcfz_df, lrb_df, xjll_df = stockBorderInfo.get_stock_border_report(market="H", date='20240331',
@@ -50,12 +111,12 @@ if __name__ == '__main__':
         print(filter_stocks)
         print(stockSelectService.convert_filter_annual_reports_to_json(filter_annual_reports))
 
-        stockBorderInfo = stockBorderInfo(market = 'SH')
+        stock_border_info = stock_border_info(market ='SH')
 
         # 测试 get_stock_border_report 方法
-        zcfz_df, lrb_df, xjll_df = stockBorderInfo.get_stock_border_report(market="SH", date='20240331',
-                                                                           indicator='年报')
-        stockBorderInfo.calculate_financial_indicators(zcfz=zcfz_df, lrb=lrb_df, xjll=xjll_df)
+        zcfz_df, lrb_df, xjll_df = stock_border_info.get_stock_border_report(market="SH", date='20240331',
+                                                                             indicator='年报')
+        stock_border_info.calculate_financial_indicators(zcfz=zcfz_df, lrb=lrb_df, xjll=xjll_df)
         print('所有股票的资产负债表')
         if zcfz_df is not None:
             print(zcfz_df.to_string(index=False))
@@ -67,36 +128,36 @@ if __name__ == '__main__':
             print(xjll_df.to_string(index=False))
 
         # 测试 get_stock_all_info 方法
-        df_stock_info = stockBorderInfo.get_stock_all_info()
+        df_stock_info = stock_border_info.get_stock_all_info()
         print('所有股票数据的实时信息和市盈率等指标')
         print(df_stock_info.to_string(index=False))
 
         # 测试 get_stock_spot 方法
-        df_stock_spot = stockBorderInfo.get_stock_spot()
+        df_stock_spot = stock_border_info.get_stock_spot()
         print('所有股票的实时行情')
         print(df_stock_spot.to_string(index=False))
 
 
 
         # 测试 get_stock_board_all_concept_name 方法
-        df_stock_board = stockBorderInfo.get_stock_board_all_concept_name()
+        df_stock_board = stock_border_info.get_stock_board_all_concept_name()
         print('所有的板块信息')
         if df_stock_board is not None:
             print(df_stock_board.to_string(index=False))
 
         # 测试 get_stock_all_code 方法
-        df_stock_code = stockBorderInfo.get_stock_all_code()
+        df_stock_code = stock_border_info.get_stock_all_code()
         print('所有股票的代码和名称')
         print(df_stock_code.to_string(index=False))
 
         # 测试 get_stock_hsgt_hold_stock_em 方法
-        df_stock_hsgt = stockBorderInfo.get_stock_hsgt_hold_stock_em()
+        df_stock_hsgt = stock_border_info.get_stock_hsgt_hold_stock_em()
         print('北向的持仓数据')
         print(df_stock_hsgt.to_string(index=False))
 
 
 
-        stockAIAnalysis = stockAIAnalysis(model='qwen3-32b',ai_platform='qwen',api_token = '8d852738bdd847669e105bbfa2c756')
+        stockAIAnalysis = stockAIAnalysis(model='qwen3',ai_platform='qwen',api_token = '8d852738bdd847669e105bbfa2c756')
         report = stockAIAnalysis.stock_report_analyse(market='SH', symbol='600028')
         print(report)
         report = stockAIAnalysis.stock_report_analyse(market='H', symbol='09868')

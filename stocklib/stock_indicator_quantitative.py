@@ -59,11 +59,11 @@ class stockIndicatorQuantitative:
                     stock_us_hist_df = ak.stock_us_hist(symbol=baba_code, start_date=start_date_str, end_date=end_date_str)
 
                     df = stock_us_hist_df
-                    print(stock_us_hist_df)
+                    # print(stock_us_hist_df)
                 else:
                     stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str, end_date=end_date_str)
                     df = stock_us_hist_df
-                    print(stock_us_hist_df)
+                    # print(stock_us_hist_df)
             except Exception as e:
                 print(f"获取美股数据时出现错误: {e}")
         elif market == 'H':  # 港股数据获取
@@ -71,7 +71,7 @@ class stockIndicatorQuantitative:
                 # 获取港股历史数据
                 stock_hk_hist_df = ak.stock_hk_hist(symbol=stock_code, period="daily", start_date=start_date_str,
                                                     end_date=end_date_str)
-                print(stock_hk_hist_df)
+                # print(stock_hk_hist_df)
                 df = stock_hk_hist_df
             except Exception as e:
                 print(f"获取债券/ETF基金数据时出现错误: {e}")
@@ -81,7 +81,7 @@ class stockIndicatorQuantitative:
                 stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,
                                                          end_date=end_date_str)
                 stock_zh_a_hist_df['开盘'] = pd.to_numeric(stock_zh_a_hist_df['开盘'], errors="coerce")
-                print(stock_zh_a_hist_df)
+                # print(stock_zh_a_hist_df)
                 df = stock_zh_a_hist_df
             except Exception as e:
                 print(f"获取债券/ETF基金数据时出现错误: {e}")
@@ -173,7 +173,7 @@ class stockIndicatorQuantitative:
             plt.show()
 
             # 输出交易信号
-            print(data[['收盘', 'MA_10', 'MA_30', 'Signal', 'Position']].tail(20))
+            # print(data[['收盘', 'MA_10', 'MA_30', 'Signal', 'Position']].tail(20))
         except Exception as e:
             print(f"发生错误: {e}")
 
@@ -207,7 +207,7 @@ class stockIndicatorQuantitative:
 
         # 生成均线策略信号
         data['MA_Signal'] = 0
-        data['MA_Signal'][short_window:] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
+        data.loc[short_window:, 'MA_Signal'] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1,-1)
         data['MA_Position'] = data['MA_Signal'].diff()
 
         # 生成布林带策略信号
@@ -311,7 +311,7 @@ class stockIndicatorQuantitative:
         plt.show()
 
         # 输出交易信号
-        print(data[['收盘', 'Momentum', 'Signal', 'Position']].tail(20))
+        # print(data[['收盘', 'Momentum', 'Signal', 'Position']].tail(20))
 
 
     # 绘制突破策略的图像
@@ -396,7 +396,7 @@ class stockIndicatorQuantitative:
         plt.show()
 
         # 输出交易信号
-        print(data[['收盘', 'Previous_High_20', 'Previous_Low_20', 'Signal', 'Position']].tail(20))
+        # print(data[['收盘', 'Previous_High_20', 'Previous_Low_20', 'Signal', 'Position']].tail(20))
 
 
     # SAR 策略
@@ -449,7 +449,7 @@ class stockIndicatorQuantitative:
         plt.show()
 
         # 输出交易信号
-        print(data[['收盘', 'SAR', 'Signal', 'Position']].tail(20))
+        # print(data[['收盘', 'SAR', 'Signal', 'Position']].tail(20))
 
 
     # 均值回归策略
@@ -510,7 +510,7 @@ class stockIndicatorQuantitative:
         plt.show()
 
         # 输出交易信号
-        print(data[['收盘', 'Rolling_Mean', 'Z_Score', 'Signal', 'Position']].tail(20))
+        # print(data[['收盘', 'Rolling_Mean', 'Z_Score', 'Signal', 'Position']].tail(20))
 
 
     # 次级结构套利
@@ -563,7 +563,7 @@ class stockIndicatorQuantitative:
         plt.show()
 
         # 输出交易信号
-        print(data[['收盘', 'MA_5', 'MA_20', 'Deviation', 'Signal', 'Position']].tail(20))
+        # print(data[['收盘', 'MA_5', 'MA_20', 'Deviation', 'Signal', 'Position']].tail(20))
 
 
     # RSI 择时策略

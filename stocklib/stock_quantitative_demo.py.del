@@ -241,7 +241,7 @@ class stockIndicatorQuantitative:
 
         # 生成均线策略信号
         data['MA_Signal'] = 0
-        data['MA_Signal'][short_window:] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
+        data.loc[short_window:, 'MA_Signal'] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
         data['MA_Position'] = data['MA_Signal'].diff()
 
         # 生成布林带策略信号

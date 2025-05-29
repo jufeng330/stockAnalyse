@@ -4,6 +4,7 @@ import pandas as pd
 from .stock_concept_data import stockConceptData
 from .stock_news_data import stockNewsData
 from .stock_ak_indicator import stockAKIndicator
+import logging
 
 # 个股相关信息查询
 """
@@ -22,6 +23,8 @@ class stockCompanyInfo:
         self.ETF = 'zq'
         # 新增变量 HongKong
         self.HongKong = 'H'
+        self.logger = logging.getLogger(__name__)
+
 
     def get_default_df(self ):
         default_data = {
@@ -86,7 +89,7 @@ class stockCompanyInfo:
                 stock_individual_info_em_df[stock_individual_info_em_df['item'] == '股票简称']['value'].values[0]
                 return stock_name
         except Exception as e:
-            print(f"调用方法时发生属性错误，请检查对象是否正确初始化: {e}")
+            self.logger.error(f"调用方法时发生属性错误，请检查对象是否正确初始化: {e}")
             import traceback
             traceback.print_exc()
             return self.symbol
@@ -213,7 +216,7 @@ class stockCompanyInfo:
                                                                          end_date=end_date).to_markdown(index=False)
             return stock_share_change_cninfo_df
         except Exception as e:
-            print(f'get_stock_share_change_cninfo error stock_code:{self.symbol} {e}')
+            self.logger.error(f'get_stock_share_change_cninfo error stock_code:{self.symbol} {e}')
             default_df = self.get_default_df()
             import traceback
             traceback.print_exc()
@@ -238,9 +241,22 @@ class stockCompanyInfo:
         stock_ggcg_em_df = ak.stock_ggcg_em(symbol="全部")
         tock_ggcg_em_df = stock_ggcg_em_df[stock_ggcg_em_df['名称'] == stock_name].to_markdown(index=False)
         return tock_ggcg_em_df
-
+    #获取历史数据，并赋值技术指标
     def get_stock_history_data(self,start_date_str=None, end_date_str=None):
 
+        """针对单只股票执行完整的技术分析，下面是买卖点的分析信息
+            ma_signal  ma_signal_position
+            bb_signal  bb_signal_position
+            macd_signal_index  macd_signal_position
+            breakout_signal  breakout_position
+            'sar_signal', 'sar_position'
+            'mean_signal', 'mean_signal_position'
+            rsi_signal,rsi_signal_position
+            kdj_signal  kdj_signal_position
+            williams_signal,williams_signal_position
+            adx_signal adx_signal_position
+            volume_signal volume_signal_position
+        """
         current_date = datetime.datetime.now()
         if start_date_str is None :
             previous_date = current_date - datetime.timedelta(days=100)
@@ -252,7 +268,7 @@ class stockCompanyInfo:
         end_date_str = end_date_str.replace('-', '')
         stock = stockAKIndicator()
 
-        stock_us_hist_df = stock.stock_day_data_code(stock_code, self.market, start_date_str, end_date_str)
+        stock_us_hist_df = stock.stock_day_data_code(stock_code = stock_code, market = self.market, start_date_str= start_date_str, end_date_str = end_date_str)
         # 均线策略
         stock.strategy_mac(stock_us_hist_df)
         # 布林带策略
@@ -273,5 +289,7 @@ class stockCompanyInfo:
         stock.strategy_williams_r(stock_us_hist_df)
         # ADX策略
         stock.strategy_adx(stock_us_hist_df)
-        print(stock_us_hist_df)
+        # 成交量策略
+        stock.strategy_volume(stock_us_hist_df)
+        # print(stock_us_hist_df.to_markdown())
         return stock_us_hist_df

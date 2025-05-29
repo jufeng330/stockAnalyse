@@ -3,6 +3,7 @@ import akshare as ak
 import numpy as np
 import pandas as pd
 import talib
+import logging
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn import datasets,linear_model
 from sklearn.model_selection import cross_val_predict,cross_val_score,train_test_split
@@ -24,6 +25,8 @@ class stockAKIndicator:
 
         previous_year = current_date - datetime.timedelta(days=100)
         self.previous_year_str = previous_year.strftime("%Y%m%d")
+        self.logger = logging.getLogger(__name__)
+
 
     @staticmethod
     def get_stock_code(df):
@@ -40,63 +43,54 @@ class stockAKIndicator:
         if market == 'usa':
             try:
                 # 1. 获取美股实时行情数据
-                stock_us_spot_df = ak.stock_us_spot_em()
-                print("美股实时行情数据：")
+                #stock_us_spot_df = ak.stock_us_spot_em()
+                #self.logger.debug("美股实时行情数据：")
                 # 查找阿里巴巴的代码
-                baba_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
+                # baba_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
+                baba_filtered = pd.DataFrame()
                 if not baba_filtered.empty:
                     baba_code = baba_filtered["代码"].values[0]
-                    print(f"美股股票的代码: {baba_code}")
+                    self.logger.debug(f"美股股票的代码: {baba_code}")
                     # 3. 获取阿里巴巴（BABA）的每日行情数据
                     stock_us_hist_df = ak.stock_us_hist(symbol=baba_code, start_date=start_date_str,
                                                         end_date=end_date_str)
                     df = stock_us_hist_df
-                    print(stock_us_hist_df)
+                    # self.logger.debug(stock_us_hist_df)
                 else:
                     stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str,
                                                         end_date=end_date_str)
                     df = stock_us_hist_df
-                    print(stock_us_hist_df)
+                    df['股票代码'] = stock_code
+                    # self.logger.debug(stock_us_hist_df)
             except Exception as e:
-                print(f"获取美股数据时出现错误: {e}")
+                self.logger.error(f"获取美股数据时出现错误: {e}")
         elif market == 'H':  # 港股数据获取
             try:
                 # 获取港股历史数据
                 stock_hk_hist_df = ak.stock_hk_hist(symbol=stock_code, period="daily", start_date=start_date_str,
                                                     end_date=end_date_str)
-                print(stock_hk_hist_df)
+                # self.logger.debug(stock_hk_hist_df)
                 df = stock_hk_hist_df
+                df['股票代码'] = stock_code
+
             except Exception as e:
-                print(f"获取债券/ETF基金数据时出现错误: {e}")
+                self.logger.error(f"获取债券/ETF基金数据时出现错误: {e}")
         elif market == 'zq':  # 新增债券/ETF基金条件
             try:
                 # 获取债券或ETF基金的历史数据
                 stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,
                                                          end_date=end_date_str)
-                print(stock_zh_a_hist_df)
+                # self.logger.debug(stock_zh_a_hist_df)
                 df = stock_zh_a_hist_df
             except Exception as e:
-                print(f"获取债券/ETF基金数据时出现错误: {e}")
+                self.logger.error(f"获取债券/ETF基金数据时出现错误: {e}")
                 traceback.print_exc()
         else:
             try:
                 # stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,end_date=end_date_str)
 
                 # 3.历史行情数据 - 前复权
-                market = 3
-                code = stock_code
-                if stock_code.startswith("SZ"):
-                    market = 0
-                    code = stock_code[2:]
-                elif stock_code.startswith("SH"):
-                    market = 1
-                    code = stock_code[2:]
-                elif stock_code.startswith("BJ"):
-                    market = 0
-                    code = stock_code[2:]
-                else:
-                    market = 0
-                    code = stock_code[2:]
+                # 日期，开盘，收盘，最高，最低，成交量，成交额，振幅，涨跌幅，涨跌额，换手率，股票代码
                 code = stock_code
                 stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date_str,
                                                         end_date=end_date_str,
@@ -109,10 +103,10 @@ class stockAKIndicator:
 
                 # 应用格式化函数
                 stock_zh_a_hist_df = stock_zh_a_hist_df.applymap(format_float)
-                print(stock_zh_a_hist_df)
+                # self.logger.debug(stock_zh_a_hist_df)
                 df = stock_zh_a_hist_df
             except Exception as e:
-                print(f"获取 A 股数据时出现错误: {e}")
+                self.logger.error(f"获取 A 股数据时出现错误: {e}")
                 traceback.print_exc()
         if df is not None:
             df = df.reset_index(drop=True)
@@ -122,9 +116,9 @@ class stockAKIndicator:
             for col in numeric_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors="coerce")
-                    print(f"成功转换列: {col}")
+                    # self.logger.debug(f"成功转换列: {col}")
                 else:
-                    print(f"警告: 列 '{col}' 不存在，已跳过")
+                    self.logger.info(f"警告: 列 '{col}' 不存在，已跳过")
         return df
 
     # 移动平均线算法
@@ -136,7 +130,7 @@ class stockAKIndicator:
 
     def strategy_mac(self, data, window=20):
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行小波分析。")
+            self.logger.debug("输入的 DataFrame 为空或为 None，无法进行小波分析。")
             return
         try:
             stock_code = self.get_stock_code(data)
@@ -145,26 +139,26 @@ class stockAKIndicator:
             long_window = 30
             data['MA_10'] = data['收盘'].rolling(window=short_window, min_periods=1).mean()
             data['MA_30'] = data['收盘'].rolling(window=long_window, min_periods=1).mean()
-
+            data['MA_5'] = data['收盘'].rolling(window=short_window).mean()
             # 生成交易信号
-            data['Signal'] = 0
+            data['ma_signal'] = 0
             # 使用 .loc 进行赋值，确保操作在原始 DataFrame 上进行
-            data.loc[short_window:, 'Signal'] = np.where(
+            data.loc[short_window:, 'ma_signal'] = np.where(
                 data.loc[short_window:, 'MA_10'] > data.loc[short_window:, 'MA_30'],
                 1, 0
             )
-            data['Position'] = data['Signal'].diff()
+            data['ma_signal_position'] = data['ma_signal'].diff()
             # 输出交易信号
-            print(data[['收盘', 'MA_10', 'MA_30', 'Signal', 'Position']].tail(20))
+            # self.logger.debug(data[['收盘', 'MA_10', 'MA_30', 'ma_signal', 'ma_signal_position']].tail(20))
             return data
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
 
     # 绘制均线策略和布林带策略的图像
     def strategy_bollinger(self, data, short_window = 10,long_window = 30):
-        if data is None:
-            print("数据为空，无法绘制图像。")
+        if data is None or data.empty:
+            self.logger.debug("数据为空，无法绘制图像。")
             return
 
         # 计算均线
@@ -179,25 +173,25 @@ class stockAKIndicator:
         data['Lower_Band'] = data['Middle_Band'] - (2 * data['Std_Dev'])
 
         # 生成均线策略信号
-        data['MA_Signal'] = 0
+        data['MAC_Signal'] = 0
         data.loc[short_window:, 'MA_Signal'] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
 
 
         data['MA_Position'] = data['MA_Signal'].diff()
 
         # 生成布林带策略信号
-        data['BB_Signal'] = 0
-        data.loc[window:, 'BB_Signal'] = np.where(data['收盘'][window:] > data['Upper_Band'][window:], -1,
+        data['bb_signal'] = 0
+        data.loc[window:, 'bb_signal'] = np.where(data['收盘'][window:] > data['Upper_Band'][window:], -1,
                                               np.where(data['收盘'][window:] < data['Lower_Band'][window:], 1, 0))
 
-        data['BB_Position'] = data['BB_Signal'].diff()
+        data['bb_signal_position'] = data['bb_signal'].diff()
 
         return data
 
     # 绘制动量策略的图像
     def strategy_macd(self, data,momentum_window = 20):
         if data is None or data.empty:
-            print("数据为空，无法绘制图像。")
+            self.logger.debug("数据为空，无法绘制图像。")
             return
 
         # 计算动量
@@ -211,18 +205,18 @@ class stockAKIndicator:
         stock_code = self.get_stock_code(data)
 
         # 生成交易信号
-        data['Signal'] = 0
+        data['macd_signal_index'] = 0
         # 买入信号
         data.loc[(data["macd_dif"] < data["macd_signal"]) & (
-                data["macd_dif"].shift(1) > data["macd_signal"].shift(1)), 'Signal'] = 1
+                data["macd_dif"].shift(1) > data["macd_signal"].shift(1)), 'macd_signal_index'] = 1
         # 短期均线下穿长期均线，卖出信号
         data.loc[(data["macd_dif"] > data["macd_signal"]) & (
-                data["macd_dif"].shift(1) < data["macd_signal"].shift(1)), 'Signal'] = -1
+                data["macd_dif"].shift(1) < data["macd_signal"].shift(1)), 'macd_signal_index'] = -1
 
-        data['Position'] = data['Signal'].diff()
+        data['macd_signal_position'] = data['macd_signal_index'].diff()
 
         # 输出交易信号
-        print(data[['收盘', 'Momentum', 'Signal', 'Position']].tail(20))
+        # self.logger.debug(data[['收盘', 'Momentum', 'macd_signal_index', 'macd_signal_position']].tail(20))
 
         return data
 
@@ -234,7 +228,7 @@ class stockAKIndicator:
         :param window: 计算前 n 日高低价的窗口大小，默认为 20
         """
         if data is None or data.empty:
-            print("数据为空，无法绘制图像。")
+            self.logger.debug("数据为空，无法绘制图像。")
             return
 
         # 计算前 window 日的最高价和最低价
@@ -255,25 +249,25 @@ class stockAKIndicator:
         data['support'] = data['MA_20'] - 2 * (data['收盘'].rolling(window=short_window, min_periods=1).std())
 
         # 生成交易信号
-        data['Signal'] = 0
-        data.loc[window:, 'Signal'] = np.where(data['收盘'][window:] > data['residence'][window:], 1,
+        data['breakout_signal'] = 0
+        data.loc[window:, 'breakout_signal'] = np.where(data['收盘'][window:] > data['residence'][window:], 1,
                                            np.where(data['收盘'][window:] < data['support'][window:], -1, 0))
-        data['Position'] = data['Signal'].diff()
+        data['breakout_position'] = data['breakout_signal'].diff()
 
         stock_code = self.get_stock_code(data)
         # 标记买入信号
-        buy_indices = data[data['Signal'] == 1].index
+        buy_indices = data[data['breakout_signal'] == 1].index
         # 标记卖出信号
-        sell_indices = data[data['Signal'] == -1].index
+        sell_indices = data[data['breakout_signal'] == -1].index
 
 
         # 标记买入信号
-        buy_indices = data[data['Signal2'] == 1].index
-        sell_indices = data[data['Signal2'] == -1].index
+        # buy_indices = data[data['breakout_position'] == 1].index
+        # sell_indices = data[data['breakout_position'] == -1].index
 
 
         # 输出交易信号
-        print(data[['收盘', 'Previous_High_20', 'Previous_Low_20', 'Signal', 'Position']].tail(20))
+        # self.logger.debug(data[['收盘', 'Previous_High_20', 'Previous_Low_20', 'Signal', 'Position']].tail(20))
         return data
 
     # SAR 策略
@@ -283,7 +277,7 @@ class stockAKIndicator:
         :param data: 包含股票价格数据和 SAR 指标的 DataFrame
         """
         if data is None or data.empty:
-            print("数据为空，无法绘制图像。")
+            self.logger.debug("数据为空，无法绘制图像。")
             return
         # 使用 talib 计算 SAR
         high_prices = data['最高']
@@ -293,18 +287,18 @@ class stockAKIndicator:
         data['SAR'] = talib.SAR(high_prices, low_prices, acceleration=acceleration, maximum=maximum_acceleration)
 
         # 生成交易信号
-        data['Signal'] = 0
+        data['sar_signal'] = 0
         # data['Signal'][1:] = np.where(data['SAR'][1:] < data['收盘'][1:], 1, -1)
         # 短期均线下穿长期均线，卖出信号
-        data.loc[(data['收盘'] > data['SAR']) & (data['收盘'].shift(1) < data['SAR'].shift(1)), 'Signal'] = 1
+        data.loc[(data['收盘'] > data['SAR']) & (data['收盘'].shift(1) < data['SAR'].shift(1)), 'sar_signal'] = 1
         # 短期均线下穿长期均线，卖出信号
-        data.loc[(data['收盘'] < data['SAR']) & (data['收盘'].shift(1) > data['SAR'].shift(1)), 'Signal'] = -1
+        data.loc[(data['收盘'] < data['SAR']) & (data['收盘'].shift(1) > data['SAR'].shift(1)), 'sar_signal'] = -1
 
-        data['Position'] = data['Signal'].diff()
+        data['sar_position'] = data['sar_signal'].diff()
         stock_code = self.get_stock_code(data)
 
         # 输出交易信号
-        print(data[['收盘', 'SAR', 'Signal', 'Position']].tail(20))
+        # self.logger.debug(data[['收盘', 'SAR', 'sar_signal', 'sar_position']].tail(20))
         return data
 
     # 均值回归策略
@@ -316,7 +310,7 @@ class stockAKIndicator:
         :param z_score_threshold: Z 分数阈值，用于判断偏离程度，默认为 1
         """
         if data is None or data.empty:
-            print("数据为空，无法绘制图像。")
+            self.logger.debug("数据为空，无法绘制图像。")
             return
 
         stock_code = self.get_stock_code(data)
@@ -328,19 +322,19 @@ class stockAKIndicator:
         data['Z_Score'] = (data['收盘'] - data['Rolling_Mean']) / data['Rolling_Std']
 
         # 生成交易信号
-        data['Signal'] = 0
-        data['Signal'] = np.where(data['Z_Score'] > z_score_threshold, -1,
+        data['mean_signal'] = 0
+        data['mean_signal'] = np.where(data['Z_Score'] > z_score_threshold, -1,
                                   np.where(data['Z_Score'] < -z_score_threshold, 1, 0))
-        data['Position'] = data['Signal'].diff()
+        data['mean_signal_position'] = data['mean_signal'].diff()
 
         # 标记买入信号
-        buy_indices = data[data['Signal'] == 1].index
+        buy_indices = data[data['mean_signal'] == 1].index
 
         # 标记卖出信号
-        sell_indices = data[data['Signal'] == -1].index
+        sell_indices = data[data['mean_signal'] == -1].index
 
         # 输出交易信号
-        print(data[['收盘', 'Rolling_Mean', 'Z_Score', 'Signal', 'Position']].tail(20))
+        # self.logger.debug(data[['收盘', 'Rolling_Mean', 'Z_Score', 'mean_signal', 'mean_signal_position']].tail(20))
 
     # 次级结构套利
     def sub_structure_arbitrage(self, data, short_window=5, long_window=20, deviation_threshold=0.05):
@@ -352,7 +346,7 @@ class stockAKIndicator:
         :param deviation_threshold: 价格偏离阈值，默认为 0.05
         """
         if data is None or data.empty:
-            print("数据为空，无法绘制图像。")
+            self.logger.debug("数据为空，无法绘制图像。")
             return
 
         stock_code = self.get_stock_code(data)
@@ -364,22 +358,22 @@ class stockAKIndicator:
         data['Deviation'] = (data['收盘'] - data['MA_20']) / data['MA_5']
 
         # 生成交易信号
-        data['Signal'] = 0
+        data['arbitrage_signal'] = 0
         # 短期均线上穿长期均线且价格偏离超过阈值，买入信号
         data.loc[(data['MA_5'].shift(1) <= data['MA_20'].shift(1)) & (data['MA_5'] > data['MA_20']) & (
-                data['Deviation'] > deviation_threshold), 'Signal'] = 1
+                data['Deviation'] > deviation_threshold), 'arbitrage_signal'] = 1
         # 短期均线下穿长期均线且价格偏离低于负阈值，卖出信号
         data.loc[(data['MA_5'].shift(1) >= data['MA_20'].shift(1)) & (data['MA_5'] < data['MA_20']) & (
-                data['Deviation'] < -deviation_threshold), 'Signal'] = -1
-        data['Position'] = data['Signal'].diff()
+                data['Deviation'] < -deviation_threshold), 'arbitrage_signal'] = -1
+        data['arbitrage_signal_position'] = data['arbitrage_signal'].diff()
         # 输出交易信号
-        print(data[['收盘', 'MA_5', 'MA_20', 'Deviation', 'Signal', 'Position']].tail(20))
+        # self.logger.debug(data[['收盘', 'MA_5', 'MA_20', 'Deviation', 'arbitrage_signal', 'arbitrage_signal_position']].tail(20))
         return data
 
     # RSI 择时策略
     def strategy_rsi(self, data, period=14, overbought=70, oversold=30):
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行 RSI 分析。")
+            self.logger.debug("输入的 DataFrame 为空或为 None，无法进行 RSI 分析。")
             return None
         try:
             stock_code = self.get_stock_code(data)
@@ -387,34 +381,34 @@ class stockAKIndicator:
             data['RSI'] = talib.RSI(data['收盘'], timeperiod=period)
             lastRSI = data['RSI'].shift(1)
             # 生成交易信号
-            data['Signal'] = 0
-            data.loc[(data['RSI'] < oversold) & (lastRSI > oversold), 'Signal'] = 1  # 买入信号
-            data.loc[(data['RSI'] > overbought) & (lastRSI < overbought), 'Signal'] = -1  # 卖出信号
-            data['Position'] = data['Signal'].diff()
+            data['rsi_signal'] = 0
+            data.loc[(data['RSI'] < oversold) & (lastRSI > oversold), 'rsi_signal'] = 1  # 买入信号
+            data.loc[(data['RSI'] > overbought) & (lastRSI < overbought), 'rsi_signal'] = -1  # 卖出信号
+            data['rsi_signal_position'] = data['rsi_signal'].diff()
 
             # 打印交易信号信息
-            print("Signal 等于 1 的情况（买入信号）：")
-            buy_indices = data[data['Signal'] == 1].index
+            self.logger.debug("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['rsi_signal'] == 1].index
             for idx in buy_indices:
                 rsi_value = data.loc[idx, 'RSI']
-                print(f"索引: {idx}, RSI 值: {rsi_value}")
+                self.logger.debug(f"索引: {idx}, RSI 值: {rsi_value}")
 
-            print("\nSignal 等于 -1 的情况（卖出信号）：")
-            sell_indices = data[data['Signal'] == -1].index
+            self.logger.debug("\nSignal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['rsi_signal'] == -1].index
             for idx in sell_indices:
                 rsi_value = data.loc[idx, 'RSI']
-                print(f"索引: {idx}, RSI 值: {rsi_value}")
+                self.logger.debug(f"索引: {idx}, RSI 值: {rsi_value}")
 
             return data
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
             return None
 
     # KDJ 择时策略
     def strategy_kdj(self, data, fastk_period=9, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0):
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行 KDJ 分析。")
+            self.logger.debug("输入的 DataFrame 为空或为 None，无法进行 KDJ 分析。")
             return None
         try:
             stock_code = self.get_stock_code(data)
@@ -436,24 +430,24 @@ class stockAKIndicator:
             last_d = data['D'].shift(1)
 
             # 生成交易信号
-            data['Signal'] = 0
-            data.loc[(data['K'] > data['D']) & (last_k < last_d), 'Signal'] = 1  # 买入信号
-            data.loc[(data['K'] < data['D']) & (last_k > last_d), 'Signal'] = -1  # 卖出信号
-            data['Position'] = data['Signal'].diff()
+            data['kdj_signal'] = 0
+            data.loc[(data['K'] > data['D']) & (last_k < last_d), 'kdj_signal'] = 1  # 买入信号
+            data.loc[(data['K'] < data['D']) & (last_k > last_d), 'kdj_signal'] = -1  # 卖出信号
+            data['kdj_signal_position'] = data['kdj_signal'].diff()
 
             # 打印交易信号信息
-            print("Signal 等于 1 的情况（买入信号）：")
+            self.logger.debug("Signal 等于 1 的情况（买入信号）：")
 
             return data
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
             return None
 
     # 威廉R择时策略
     def strategy_williams_r(self, data, time_period=14, overbought=-20, oversold=-80):
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行威廉R分析。")
+            self.logger.debug("输入的 DataFrame 为空或为 None，无法进行威廉R分析。")
             return None
         try:
             stock_code = self.get_stock_code(data)
@@ -468,20 +462,20 @@ class stockAKIndicator:
             last_williams_r = data['Williams_R'].shift(1)
 
             # 生成交易信号
-            data['Signal'] = 0
-            data.loc[(data['Williams_R'] < oversold) & (last_williams_r >= oversold), 'Signal'] = 1  # 买入信号
-            data.loc[(data['Williams_R'] > overbought) & (last_williams_r <= overbought), 'Signal'] = -1  # 卖出信号
-            data['Position'] = data['Signal'].diff()
+            data['williams_signal'] = 0
+            data.loc[(data['Williams_R'] < oversold) & (last_williams_r >= oversold), 'williams_signal'] = 1  # 买入信号
+            data.loc[(data['Williams_R'] > overbought) & (last_williams_r <= overbought), 'williams_signal'] = -1  # 卖出信号
+            data['williams_signal_position'] = data['williams_signal'].diff()
 
             return data
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
             return None
 
     def strategy_adx(self, data, time_period=14, adx_threshold=25):
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行 ADX 分析。")
+            self.logger.warn("输入的 DataFrame 为空或为 None，无法进行 ADX 分析。")
             return None
         try:
             # 假设数据包含 '最高', '最低', '收盘' 列，且存在一个获取股票代码的函数 get_stock_code
@@ -504,40 +498,39 @@ class stockAKIndicator:
             last_minus_di = data['-DI'].shift(1)
 
             # 生成交易信号
-            data['Signal'] = 0
+            data['adx_signal'] = 0
             data.loc[(data['ADX'] > adx_threshold) & (data['+DI'] > data['-DI']) & (
-                    last_plus_di <= last_minus_di), 'Signal'] = 1  # 买入信号
+                    last_plus_di <= last_minus_di), 'adx_signal'] = 1  # 买入信号
             data.loc[(data['ADX'] > adx_threshold) & (data['-DI'] > data['+DI']) & (
-                    last_minus_di <= last_plus_di), 'Signal'] = -1  # 卖出信号
-            data['Position'] = data['Signal'].diff()
+                    last_minus_di <= last_plus_di), 'adx_signal'] = -1  # 卖出信号
+            data['adx_signal_position'] = data['adx_signal'].diff()
 
             # 打印交易信号信息
-            print("Signal 等于 1 的情况（买入信号）：")
-            buy_indices = data[data['Signal'] == 1].index
+            self.logger.debug("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['adx_signal'] == 1].index
             for idx in buy_indices:
                 adx_value = data.loc[idx, 'ADX']
                 plus_di_value = data.loc[idx, '+DI']
                 minus_di_value = data.loc[idx, '-DI']
                 last_plus_di_value = last_plus_di[idx]
                 last_minus_di_value = last_minus_di[idx]
-                print(
+                self.logger.debug(
                     f"索引: {idx}, 当前 ADX 值: {adx_value}, 当前 +DI 值: {plus_di_value}, 当前 -DI 值: {minus_di_value}, 上一周期 +DI 值: {last_plus_di_value}, 上一周期 -DI 值: {last_minus_di_value}")
 
-            print("Signal 等于 -1 的情况（卖出信号）：")
-            sell_indices = data[data['Signal'] == -1].index
+            self.logger.debug("Signal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['adx_signal'] == -1].index
             for idx in sell_indices:
                 adx_value = data.loc[idx, 'ADX']
                 plus_di_value = data.loc[idx, '+DI']
                 minus_di_value = data.loc[idx, '-DI']
                 last_plus_di_value = last_plus_di[idx]
                 last_minus_di_value = last_minus_di[idx]
-                print(
-                    f"索引: {idx}, 当前 ADX 值: {adx_value}, 当前 +DI 值: {plus_di_value}, 当前 -DI 值: {minus_di_value}, 上一周期 +DI 值: {last_plus_di_value}, 上一周期 -DI 值: {last_minus_di_value}")
+                self.logger.debug(f"索引: {idx}, 当前 ADX 值: {adx_value}, 当前 +DI 值: {plus_di_value}, 当前 -DI 值: {minus_di_value}, 上一周期 +DI 值: {last_plus_di_value}, 上一周期 -DI 值: {last_minus_di_value}")
 
             return data
 
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
             return None
 
@@ -550,7 +543,7 @@ class stockAKIndicator:
         :return: 保存交易信号图的图片路径，如果出现错误则返回 None
         """
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行成交量分析。")
+            self.logger.debug("输入的 DataFrame 为空或为 None，无法进行成交量分析。")
             return None
         try:
             # 假设数据包含 '股票代码' 列，用于获取股票代码
@@ -566,41 +559,39 @@ class stockAKIndicator:
             last_volume_ratio = data['Volume_Ratio'].shift(1)
 
             # 生成交易信号
-            data['Signal'] = 0
+            data['volume_signal'] = 0
             # 当成交量相对变化率大于阈值且上一周期小于等于阈值，同时收盘价上涨时，产生买入信号
             data.loc[(data['Volume_Ratio'] > volume_threshold) & (last_volume_ratio <= volume_threshold) & (
-                    data['收盘'] > data['收盘'].shift(1)), 'Signal'] = 1
+                    data['收盘'] > data['收盘'].shift(1)), 'volume_signal'] = 1
             # 当成交量相对变化率大于阈值且上一周期小于等于阈值，同时收盘价下跌时，产生卖出信号
             data.loc[(data['Volume_Ratio'] > volume_threshold) & (last_volume_ratio <= volume_threshold) & (
-                    data['收盘'] < data['收盘'].shift(1)), 'Signal'] = -1
+                    data['收盘'] < data['收盘'].shift(1)), 'volume_signal'] = -1
 
-            data['Position'] = data['Signal'].diff()
+            data['volume_signal_position'] = data['volume_signal'].diff()
 
             # 打印交易信号信息
-            print("Signal 等于 1 的情况（买入信号）：")
-            buy_indices = data[data['Signal'] == 1].index
+            self.logger.debug("Signal 等于 1 的情况（买入信号）：")
+            buy_indices = data[data['volume_signal'] == 1].index
             for idx in buy_indices:
                 volume_ratio = data.loc[idx, 'Volume_Ratio']
                 last_volume_ratio_value = last_volume_ratio[idx]
                 close_price = data.loc[idx, '收盘']
                 prev_close_price = data.loc[idx - 1, '收盘'] if idx > 0 else None
-                print(
-                    f"索引: {idx}, 当前成交量相对变化率: {volume_ratio}, 上一周期成交量相对变化率: {last_volume_ratio_value}, 当前收盘价: {close_price}, 上一周期收盘价: {prev_close_price}")
+                self.logger.debug(f"索引: {idx}, 当前成交量相对变化率: {volume_ratio}, 上一周期成交量相对变化率: {last_volume_ratio_value}, 当前收盘价: {close_price}, 上一周期收盘价: {prev_close_price}")
 
-            print("Signal 等于 -1 的情况（卖出信号）：")
-            sell_indices = data[data['Signal'] == -1].index
+            self.logger.debug("Signal 等于 -1 的情况（卖出信号）：")
+            sell_indices = data[data['volume_signal'] == -1].index
             for idx in sell_indices:
                 volume_ratio = data.loc[idx, 'Volume_Ratio']
                 last_volume_ratio_value = last_volume_ratio[idx]
                 close_price = data.loc[idx, '收盘']
                 prev_close_price = data.loc[idx - 1, '收盘'] if idx > 0 else None
-                print(
-                    f"索引: {idx}, 当前成交量相对变化率: {volume_ratio}, 上一周期成交量相对变化率: {last_volume_ratio_value}, 当前收盘价: {close_price}, 上一周期收盘价: {prev_close_price}")
+                self.logger.debug(f"索引: {idx}, 当前成交量相对变化率: {volume_ratio}, 上一周期成交量相对变化率: {last_volume_ratio_value}, 当前收盘价: {close_price}, 上一周期收盘价: {prev_close_price}")
 
             return data
 
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
             return None
 
@@ -614,7 +605,7 @@ class stockAKIndicator:
         :return: 保存交易信号图的图片路径，如果出现错误则返回 None
         """
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行线性回归分析。")
+            self.logger.warn("输入的 DataFrame 为空或为 None，无法进行线性回归分析。")
             return None
         try:
 
@@ -630,10 +621,10 @@ class stockAKIndicator:
             mx = linear_model.LinearRegression()
             data['predict'] = cross_val_predict(mx, x, y, cv=20)
             cvscore = cross_val_score(mx, x, y, cv=6)
-            print(cvscore)
+            self.logger.debug(cvscore)
             return data
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
             return None
 
@@ -647,7 +638,7 @@ class stockAKIndicator:
         :return: 保存交易信号图的图片路径，如果出现错误则返回 None
         """
         if data is None or data.empty:
-            print("输入的 DataFrame 为空或为 None，无法进行 K 线形态分析。")
+            self.logger.info("输入的 DataFrame 为空或为 None，无法进行 K 线形态分析。")
             return None
         try:
             stock_code = self.get_stock_code(data)
@@ -675,20 +666,20 @@ class stockAKIndicator:
             data['Position'] = data['Signal'].diff()
 
             # 打印交易信号信息
-            print("Signal 等于 1 的情况（买入信号）：")
+            self.logger.debug("Signal 等于 1 的情况（买入信号）：")
             buy_indices = data[data['Signal'] == 1].index
             for idx in buy_indices:
                 engulfing_value = data.loc[idx, 'Engulfing']
-                print(f"索引: {idx}, 吞没形态值: {engulfing_value}")
+                self.logger.debug(f"索引: {idx}, 吞没形态值: {engulfing_value}")
 
-            print("Signal 等于 -1 的情况（卖出信号）：")
+            self.logger.debug("Signal 等于 -1 的情况（卖出信号）：")
             sell_indices = data[data['Signal'] == -1].index
             for idx in sell_indices:
                 engulfing_value = data.loc[idx, 'Engulfing']
-                print(f"索引: {idx}, 吞没形态值: {engulfing_value}")
+                self.logger.debug(f"索引: {idx}, 吞没形态值: {engulfing_value}")
             return data
         except Exception as e:
-            print(f"发生错误: {e}")
+            self.logger.error(f"发生错误: {e}")
             traceback.print_exc()
             return None
 

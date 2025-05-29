@@ -78,9 +78,6 @@ class stockSelectService:
 
         list_filter_stocks = filter_df['代码'].tolist()
         self.save_results_to_file_by_price(filter_stocks=list_filter_stocks,filter_df = filter_df)
-
-
-
         return filter_df
 
     def select_stock_by_report(self, years=5,profit_growth_threshold = 6,revenue_growth_threshold=6,debt_ratio_threshold=60,year_threshold=5):
@@ -436,6 +433,7 @@ class stockSelectService:
     def calculate_stock_dcf_price(self,date='20250331'):
       dcf_service =  stockDCFSimpleModel(self.market)
       stock_service = stockBorderInfo(market=self.market)
+     #  "代码","名称", "股东户数统计截止日-本次", "区间涨跌幅", "户均持股市值", "户均持股数量", "总市值", "总股本", "公告日期", "股东户数-本次", "股东户数-上次",  "股东户数-增减", "股东户数-增减比例", "股东户数统计截止日-上次", "最新价","涨跌幅",
       df_stock_gdhs = ak.stock_zh_a_gdhs(symbol='最新')
       df_stock_gdhs['代码'] = df_stock_gdhs['代码'].astype(np.int64)
       zcfz, lrb, xjll = stock_service.get_stock_border_report(market=self.market, date=date)
@@ -457,7 +455,10 @@ class stockSelectService:
 
     def select_stock_and_analyse(self):
         filter_stocks, filter_annual_reports = self.select_stock_by_report(5)
-
+        current_date = datetime.datetime.now()
+        current_date_str = current_date.strftime("%Y-%m-%d")
+        ai_platform, api_token, list_model = self.get_ai_token()
+        index = 0
         for stock_code in filter_stocks:
             try:
                 market = self.market
@@ -471,26 +472,22 @@ class stockSelectService:
                 else:
                     market = self.market
                     print(f'Warn unkonw code :{stock_code}')
-                #
-
-                #
-                ai_service = stockAIAnalysis(model='deepseek-r1-distill-qwen-32b-250120', ai_platform='byte',
-                                             api_token='261d6249--4e2b-b60f-6c9d5eefdbae')
-                report = ai_service.stock_report_analyse(market=market, symbol=stock_code)
-                print(report)
-                current_date = datetime.datetime.now()
-                current_date_str = current_date.strftime("%Y-%m-%d")
-
-                ai_service_2 = stockAIAnalysis(model='doubao-1-5-thinking-pro-250415', ai_platform='byte',
-                                             api_token='261d6249-4e2b-b60f-6c9d5eefdbae')
-                report = ai_service_2.stock_indicator_analyse(market=market, symbol=stock_code, start_date='2025-01-01',
-                                                            end_date=current_date_str)
-                print(report)
-
+                model = list_model[index % len(list_model)]
+                stock_code = str(stock_code)
+                stock_code = self.stock_analyse(ai_platform, api_token, current_date_str, market, model, stock_code)
+                index = index+1
             except Exception as e:
                 print(f"股票代码 {stock_code} 分析出错: {e}")
                 traceback.print_exc()
                 continue
+
+    def stock_analyse_one(self, stock_code,  market, model):
+        ai_platform, api_token, list_model = self.get_ai_token()
+        stock_code = str(stock_code)
+        current_date = datetime.datetime.now()
+        current_date_str = current_date.strftime("%Y-%m-%d")
+        stock_result = self.stock_analyse(ai_platform, api_token, current_date_str, market, model, stock_code)
+        print(stock_result)
 
     def analyse_stock_and_analyse(self, file_name):
         df = pd.read_csv(file_name)
@@ -518,28 +515,27 @@ class stockSelectService:
                 # 通过取模运算循环选择list_model中的元素
                 model = list_model[index % len(list_model)]
                 stock_code = str(stock_code)
-                market, stock_code = self.process_stock_and_market(market, stock_code)
-
-                ai_service_2 = stockAIAnalysis(model=model, ai_platform=ai_platform,
-                                               api_token=api_token)
-                report = ai_service_2.stock_indicator_analyse(market=market, symbol=stock_code,
-                                                              start_date='2025-01-01',
-                                                              end_date=current_date_str)
-                print(report)
-
-
-                ai_service = stockAIAnalysis(model=model, ai_platform=ai_platform,
-                                             api_token=api_token)
-                report = ai_service.stock_report_analyse(market=market, symbol=stock_code)
-                print(report)
-
-
-
+                stock_result = self.stock_analyse(ai_platform, api_token, current_date_str, market, model, stock_code)
+                print(stock_result)
 
             except Exception as e:
                 print(f"股票代码 {stock_code} 分析出错: {e}")
                 traceback.print_exc()
                 continue
+
+    def stock_analyse(self, ai_platform, api_token, current_date_str, market, model, stock_code):
+        market, stock_code = self.process_stock_and_market(market, stock_code)
+        ai_service_2 = stockAIAnalysis(model=model, ai_platform=ai_platform,
+                                       api_token=api_token)
+        report = ai_service_2.stock_indicator_analyse(market=market, symbol=stock_code,
+                                                      start_date='2025-01-01',
+                                                      end_date=current_date_str)
+        print(report)
+        ai_service = stockAIAnalysis(model=model, ai_platform=ai_platform,
+                                     api_token=api_token)
+        report = ai_service.stock_report_analyse(market=market, symbol=stock_code)
+        print(report)
+        return stock_code
 
     def process_stock_and_market(self, market, stock_code):
         if (market == 'SH'):

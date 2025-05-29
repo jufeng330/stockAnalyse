@@ -217,7 +217,7 @@ class stockIndicatorQuantitative:
             plt.show()
 
             # 输出交易信号
-            print(data[['收盘', 'MA_10', 'MA_30', 'Signal', 'Position']].tail(20))
+            # print(data[['收盘', 'MA_10', 'MA_30', 'Signal', 'Position']].tail(20))
         except Exception as e:
             print(f"发生错误: {e}")
 
@@ -243,7 +243,7 @@ class stockIndicatorQuantitative:
 
         # 生成均线策略信号
         data['MA_Signal'] = 0
-        data['MA_Signal'][short_window:] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
+        data.loc[short_window:, 'MA_Signal'] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
         data['MA_Position'] = data['MA_Signal'].diff()
 
         # 生成布林带策略信号
@@ -448,7 +448,7 @@ class stockIndicatorQuantitative:
             plt.show()
 
             # 输出交易信号
-            print(data[['收盘', 'Short_MA', 'Long_MA', 'Signal', 'Position']].tail(20))
+            # print(data[['收盘', 'Short_MA', 'Long_MA', 'Signal', 'Position']].tail(20))
         except Exception as e:
             print(f"发生错误: {e}")
 

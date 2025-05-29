@@ -4,7 +4,8 @@ import requests
 from urllib.parse import urlparse, parse_qs
 import tabula
 from datetime import datetime, timedelta
-
+import logging
+import traceback
 
 
 class stockAnnualReport:
@@ -12,6 +13,7 @@ class stockAnnualReport:
         # 定义 current_date 并格式化
         self.current_date = datetime.now()
         self.current_date_str = self.current_date.strftime("%Y%m%d")
+        self.logger = logging.getLogger(__name__)
 
     # 定义格式化函数，作为静态方法
     @staticmethod
@@ -27,22 +29,22 @@ class stockAnnualReport:
                 dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
                 # 格式化为 yyyy-MM-dd 格式
                 formatted_date = dt.strftime('%Y-%m-%d')
-                print(formatted_date)
+                self.logger.debug(formatted_date)
                 return formatted_date
             except ValueError:
-                print("输入的时间字符串格式不符合要求。")
+                self.logger.error("输入的时间字符串格式不符合要求。")
         else:
-            print("未获取到有效的时间字符串。")
+            self.logger.warn("未获取到有效的时间字符串。")
         return None
 
     def get_stock_report_file(self, stock_code='601668', market="沪深京", start_date='20200101', end_date='20241231'):
         # 获取特定股票的公告列表
         stock_gg_date_df = ak.stock_zh_a_disclosure_report_cninfo(symbol=stock_code, market=market,
                                                                  start_date=start_date, end_date=end_date)
-        print(stock_gg_date_df.to_string())
+        # self.logger.debug(stock_gg_date_df.to_string())
         # 筛选出年报公告
         annual_reports = stock_gg_date_df[stock_gg_date_df['公告标题'].str.contains('年度报告')]
-        print(annual_reports.to_string())
+        # self.logger.debug(annual_reports.to_string())
 
         file_list = []
         # 下载年报文件
@@ -60,7 +62,7 @@ class stockAnnualReport:
                 if response.status_code == 200:
                     with open(file_name, 'wb') as file:
                         file.write(response.content)
-                    print(f'{file_name} 下载成功')
+                        self.logger.debug(f'{file_name} 下载成功')
 
                     # 读取 PDF 文件
                     dfs = tabula.read_pdf(file_name, pages='all')
@@ -71,21 +73,21 @@ class stockAnnualReport:
                         df.to_csv(file_name_md, sep="|", na_rep="nan")
                     file_list.append(file_name)
                 else:
-                    print(f'{file_name} 下载失败，状态码: {response.status_code}')
+                    self.logger.warn(f'{file_name} 下载失败，状态码: {response.status_code}')
             except Exception as e:
-                print(f'{file_name} 下载时出现错误: {e}')
+                self.logger.error(f'{file_name} 下载时出现错误: {e}')
         return file_list
 
     # 主营构成 表格
     def get_stock_zygc(self, stock_code='SH601668', market="沪深京"):
         stock_zygc_em_df = ak.stock_zygc_em(symbol=stock_code)
         stock_zygc_em_df = stock_zygc_em_df.applymap(self.format_float)
-        print(stock_zygc_em_df)
+        self.logger.debug(stock_zygc_em_df)
 
         return stock_zygc_em_df
 
     # 获取所有股票的报表
-    def get_stock_border_report(self,  market="SH", date='20240331', indicator='年报'):
+    def get_stock_border_report(self,  market="SH", date='20241231', indicator='年报'):
         if market == 'SH' or market == 'SZ':
             # 资产负债表
             stock_zcfz_em_df = ak.stock_zcfz_em(date=date)
@@ -114,6 +116,11 @@ class stockAnnualReport:
     # 财务指标
     def get_stock_report(self, stock_code='601668', market="SH", indicator='年报',years = 5):
         try:
+            def convert_and_assign_code(df, source_col, target_col):
+                if source_col in df.columns:
+                    df[target_col] = df[source_col].astype(str)
+                return df
+
             if market == 'SH' or market == 'SZ':
                 # 资产负债表
                 # code = f'{market}{stock_code}'
@@ -142,23 +149,25 @@ class stockAnnualReport:
                     indicator = '报告期'
                 stock_zcfz_em_df = ak.stock_financial_hk_report_em(
                     stock=stock_code, symbol="资产负债表", indicator=indicator)
-                print(stock_zcfz_em_df.to_string())
+                self.logger.debug(stock_zcfz_em_df)
                 stock_lrb_em_df = ak.stock_financial_hk_report_em(
-                    stock=stock_code, symbol="综合损益表", indicator=indicator)
+                    stock=stock_code, symbol="利润表", indicator=indicator)
                 stock_xjll_em_df = ak.stock_financial_hk_report_em(
                     stock=stock_code, symbol="现金流量表", indicator=indicator)
 
                 stock_zcfz_em_df = self.filter_stock_reprt_df(df=stock_zcfz_em_df, years=years,date_column='REPORT_DATE')
                 stock_lrb_em_df = self.filter_stock_reprt_df(df=stock_lrb_em_df, years=years,date_column='REPORT_DATE')
                 stock_xjll_em_df = self.filter_stock_reprt_df(df=stock_xjll_em_df, years=years,date_column='REPORT_DATE')
-                print(stock_zcfz_em_df)
+
+
+                self.logger.debug(stock_zcfz_em_df)
             elif market == 'usa':
                 # {"资产负债表", "综合损益表", "现金流量表"}
                 # {"年报", "单季报", "累计季报"}
                 stock_code = self.get_stock_code(symbol=stock_code)
                 stock_zcfz_em_df = ak.stock_financial_us_report_em(
                     stock=stock_code, symbol="资产负债表", indicator=indicator)
-                print(stock_zcfz_em_df.to_string())
+                self.logger.debug(stock_zcfz_em_df.to_string())
                 stock_lrb_em_df = ak.stock_financial_us_report_em(
                     stock=stock_code, symbol="综合损益表", indicator=indicator)
                 stock_xjll_em_df = ak.stock_financial_us_report_em(
@@ -168,8 +177,13 @@ class stockAnnualReport:
                 stock_lrb_em_df = self.filter_stock_reprt_df(df=stock_lrb_em_df, years=years, date_column='REPORT_DATE')
                 stock_xjll_em_df = self.filter_stock_reprt_df(df=stock_xjll_em_df, years=years,
                                                               date_column='REPORT_DATE')
-                print(stock_zcfz_em_df)
 
+
+                self.logger.debug(stock_zcfz_em_df)
+
+            stock_zcfz_em_df = convert_and_assign_code(stock_zcfz_em_df, 'SECURITY_CODE', '股票代码')
+            stock_lrb_em_df = convert_and_assign_code(stock_lrb_em_df, 'SECURITY_CODE', '股票代码')
+            stock_xjll_em_df = convert_and_assign_code(stock_xjll_em_df, 'SECURITY_CODE', '股票代码')
 
             stock_zcfz_em_df.apply(lambda x: x.map(self.format_float))
             stock_lrb_em_df.apply(lambda x: x.map(self.format_float))
@@ -177,9 +191,9 @@ class stockAnnualReport:
             return stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df
 
         except Exception as e:
-            print(f"get_stock_report 发生错误 {stock_code}: {e}")
-            import traceback
-            traceback.print_exc()
+            self.logger.error(f"get_stock_report 发生错误 {stock_code}: {e}")
+
+            # traceback.print_exc()
             return None, None, None
 
 
@@ -191,7 +205,7 @@ class stockAnnualReport:
 
         stock_code_ = "SH601668"
         stock_zygc_em_df = self.get_stock_zygc(stock_code=stock_code_, market=market_)
-        print(stock_zygc_em_df)
+        self.logger.debug(stock_zygc_em_df)
 
     def get_stock_code(self, market='usa',symbol='105.TSLA'):
         if market == 'usa':
