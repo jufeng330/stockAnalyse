@@ -45,7 +45,7 @@ def index():
                 {stock_financial_analysis_indicator_df}
                 
                 """
-    qwen_token =  'sk-8d852738bdd847669ebe105bbfa2c756'
+    qwen_token =  'sk-969bede797ca4aa2b436835882efcd6c'
     # 设置默认值
     ai_platform = request.form.get('ai_platform', 'qwen')
     ai_model = request.form.get('ai_model', 'qwen3-8b')
@@ -144,13 +144,13 @@ def index():
                 strategies_selected.append(strategy)
 
         # "公司基本面分析结果内容"
-        stock_analysis = stockAIAnalysis.stockAIAnalysis(system_prompt=system_prompt,
-                                                         prompt_template=message_format, ai_platform=ai_platform,
-                                                         model=ai_model, api_token=api_code)
+        stock_analysis = stockAIAnalysis.StockAnalyzer(system_prompt=system_prompt,
+                                                       prompt_template=message_format, ai_platform=ai_platform,
+                                                       model=ai_model, api_token=api_code)
 
-        stock_report_analysis = stockAIAnalysis.stockAIAnalysis(system_prompt=system_prompt,
-                                                                prompt_template=message_format, ai_platform=ai_platform,
-                                                                model=ai_model, api_token=api_code)
+        stock_report_analysis = stockAIAnalysis.StockAnalyzer(system_prompt=system_prompt,
+                                                              prompt_template=message_format, ai_platform=ai_platform,
+                                                              model=ai_model, api_token=api_code)
 
         # 创建线程池执行器
         with ThreadPoolExecutor(max_workers=3) as executor:

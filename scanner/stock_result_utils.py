@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import pandas as pd
 import numpy as np
 import sys
+import re
 
 
 class  StockFileUtils:
@@ -31,8 +32,8 @@ class  StockFileUtils:
         self.market = market
         now = datetime.now()
         self.time_str = now.strftime("%Y%m%d%H%M%S")
-        self.filePath = os.path.join(os.path.dirname(__file__), f'result/tmp_{self.time_str}')
-        self.analyseFilePath = os.path.join(os.path.dirname(__file__), f'result/analyse_{self.time_str}')
+        self.filePath = os.path.join(os.path.dirname(__file__), f'result/{market}_tmp_{self.time_str}')
+        self.analyseFilePath = os.path.join(os.path.dirname(__file__), f'result/{market}_analyse_{self.time_str}')
         os.makedirs(self.filePath, exist_ok=True)
         os.makedirs(self.analyseFilePath, exist_ok=True)
 
@@ -117,7 +118,13 @@ class  StockFileUtils:
         if price is None:
             return '0'
         base = (price // 10) * 10
-        return f"{int(base)}-{int(base + 10)}"
+        if base is None:
+            return '0'
+        try:
+            return f"{int(base)}-{int(base + 10)}"
+        except ValueError:
+            return '0'
+
 
     def save_results_by_price(self,results: List[Dict]) -> None:
         """按价格区间保存分析结果至文件"""
@@ -127,7 +134,7 @@ class  StockFileUtils:
             for stock in results:
                 price = float(stock['当前价格'].replace('¥', ''))
                 if price is None:
-                    price = 0
+                    price = 0.0
                 category = self.format_price_category(price)
                 price_groups.setdefault(category, []).append(stock)
 
@@ -184,7 +191,8 @@ class  StockFileUtils:
                 "\n各价格区间分布：",
                 "-" * 80
             ])
-            for category, stocks in sorted(price_groups.items(), key=lambda x: float(x[0].split('-')[0])):
+            # for category, stocks in sorted(price_groups.items(), key=lambda x: float(x[0].split('-')[0])):
+            for category, stocks in sorted(price_groups.items(),key=lambda x: int(re.findall(r'\d+', x[0])[0])):
                 output_lines.extend([
                     f"\n价格区间 {category}元：",
                     f"  - 股票数量: {len(stocks)}",
@@ -210,3 +218,24 @@ class  StockFileUtils:
             f.write(f"Error: {str(e)}\n")
             f.write("=" * 80 + "\n")
             f.write(f"详细堆栈信息:\n{traceback.format_exc()}")
+
+    def create_middle_file(self, file_name,df: pd.DataFrame) -> None:
+        """保存过程日志"""
+
+        if df is None:
+            return
+
+        filename = os.path.join(self.analyseFilePath, f'{file_name}.md')
+        file_content = df.to_markdown()
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(file_content)
+
+    def create_text_file(self, file_name,file_content) -> None:
+        """保存过程日志"""
+
+        if file_content is None:
+            return
+
+        filename = os.path.join(self.analyseFilePath, f'{file_name}.md')
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(file_content)

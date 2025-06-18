@@ -24,7 +24,7 @@ from stocklib.stock_annual_report import stockAnnualReport
 def debug_log(message):
     print(f"[DEBUG] {message}")
 
-class stockAIAnalysis:
+class StockAiAnalyzer:
     def __init__(self,system_prompt=None,prompt_template=None,model=None,ai_platform=None,api_token = None):
         load_dotenv()
         # 加载环境变量中的 OpenAI API 密钥

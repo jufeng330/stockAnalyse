@@ -1,19 +1,9 @@
-from datetime import datetime
 import logging
 import traceback
-import sys
-import os
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Union
-from .technical_params import TechnicalParams
+from datetime import datetime
 
-import numpy as np
 import pandas as pd
-import akshare as ak
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
-from stocklib.stock_company import stockCompanyInfo
-from stocklib.utils_report_date import ReportDateUtils
+import numpy as np
 
 
 class StockStrategy:
@@ -45,8 +35,9 @@ class StockStrategy:
             #   【营业增长率、利润增长率、负债率 】
         """
         market = df_stock_data['market']
-        stock_company = stockCompanyInfo(marker=market, symbol=stock_code)
         stock_name = df_stock_data.loc['股票简称'] if '股票简称' in df_stock_data.index else ''
+        if stock_name == '':
+            stock_name = df_stock_data.loc['名称_x'] if '名称_x' in df_stock_data.index else ''
 
         # 处理股本数量（通过行索引获取，无需指定列名）
         total_shares = df_stock_data.loc['总股本'] if '总股本' in df_stock_data.index else -1
@@ -63,16 +54,31 @@ class StockStrategy:
         turnover_rate = df_stock_data.loc['换手率'] if '换手率' in df_stock_data.index else -1
         change_60d = df_stock_data.loc['60日涨跌幅'] if '60日涨跌幅' in df_stock_data.index else -1000
         change_ytd = df_stock_data.loc['年初至今涨跌幅'] if '年初至今涨跌幅' in df_stock_data.index else -1000
-
+        price = float(df_stock_data.loc['今开'] if '今开' in df_stock_data.index else -1)
         # 处理估值与财务指标（统一通过行索引访问）
         roe = df_stock_data.loc['ROE'] if 'ROE' in df_stock_data.index else -1
+        if roe == -1:
+            roe = df_stock_data.loc['净资产收益率'] if '净资产收益率' in df_stock_data.index else -1
         pe = df_stock_data.loc['市盈率-动态'] if '市盈率-动态' in df_stock_data.index else -1
+        if pe == -1:
+            pe_price = float(df_stock_data.loc['基本每股收益'] if '基本每股收益' in df_stock_data.index else -1)
+            pe = (price / pe_price) if (price > 0 and pe_price > 0) else -1
         pb = df_stock_data.loc['市净率'] if '市净率' in df_stock_data.index else -1
+        if pb == -1:
+            pb_price = float(df_stock_data.loc['每股净资产_x'] if '每股净资产_x' in df_stock_data.index else -1)
+            pb = (price / pb_price) if (price > 0 and pb_price > 0) else -1
         dynamic_pe = df_stock_data.loc['市盈率-动态'] if '市盈率-动态' in df_stock_data.index else -1
         ps_ratio = df_stock_data.loc['市销率'] if '市销率' in df_stock_data.index else -1
         dividend_yield = df_stock_data.loc['股息率'] if '股息率' in df_stock_data.index else -1
+
+        revenue_total = df_stock_data.loc['营业总收入'] if '营业总收入' in df_stock_data.index else -1
         revenue_growth = df_stock_data.loc['营业总收入同比'] if '营业总收入同比' in df_stock_data.index else -1
+        if revenue_growth == -1:
+            revenue_growth = df_stock_data.loc['营业总收入同比增长率'] if '营业总收入同比增长率' in df_stock_data.index else -1
+
         profit_growth = df_stock_data.loc['净利润同比'] if '净利润同比' in df_stock_data.index else -1
+        if profit_growth == -1:
+            profit_growth = df_stock_data.loc['净利润同比增长率'] if '净利润同比增长率' in df_stock_data.index else -1
         debt_ratio = df_stock_data.loc['资产负债率'] if '资产负债率' in df_stock_data.index else -1
         dcf = -1  # 保持空值
 
@@ -98,6 +104,7 @@ class StockStrategy:
             '动态市盈率': dynamic_pe,
             '市销率': ps_ratio,
             '股息率': dividend_yield,
+            '营业总收入': revenue_total,
             '营业增长率': revenue_growth,
             '利润增长率': profit_growth,
             '负债率': debt_ratio,
@@ -187,8 +194,42 @@ class StockStrategy:
         if (result):
             score += 5
             buy_signal_str += f"均值回归策略 信号 触发买入\n"
-
+        result = self.calculate_vol_inc(df=df_history_data,  ratio=1.5)
+        if score>0:
+            score += result
+            buy_signal_str += f"成交量放大:{result} 触发买入\n"
         return score, buy_signal_str
+
+    def calculate_vol_inc(self, df: pd.DataFrame, ratio=1.5):
+        # 确保DataFrame中有足够的数据计算10日平均
+        if len(df) < 10:
+            return 0  # 数据不足返回0分
+
+        # 计算10日平均成交量（成交量_10）
+        col_name = '成交量'
+        col_name_avg = col_name+"_10"
+        df[col_name_avg] = df[col_name].rolling(window=10).mean()
+
+        # 获取今日和昨日的数据
+        today = df.iloc[-1]
+        yesterday = df.iloc[-2]
+
+        # 初始化分数
+        score = 0
+
+        # 检查今日成交量与10日平均的关系
+        ratio2 = ratio * 1.33
+        if today[col_name] >= today[col_name_avg] * ratio2:
+            score = 50
+        elif today[col_name] >= today[col_name_avg] * ratio:
+            score = 30
+        # 检查今日成交量与昨日成交量的关系
+        if today[col_name] >= yesterday[col_name] * ratio2:
+            score = max(score, 40)  # 取最高分
+        elif today[col_name] >= yesterday[col_name] * ratio:
+            score = max(score, 20)  # 取最高分
+        return score
+
 
 
     def has_recent_buy_signal(self, df: pd.DataFrame, date_column: str = '日期',signal_column: str = 'macd_signal') -> bool:
@@ -290,3 +331,221 @@ class StockStrategy:
             return '建议观望'
         else:
             return '建议观望'
+
+
+
+    def get_stock_continue_postive(self,df_financial,date,col_name='总资产净利润率(%)',col_adjustment='全年利润率为正',continue_year=3,threshold=0.01,condition_type='>'):
+        """
+        判断股票是否持续盈利，连续三年利润率均为正，则返回True，否则返回False。
+        """
+        date_financial = date,
+        # 筛选最近三年的数据（无论利润率正负）
+        col_lrl = col_name
+        if not (col_name in df_financial.columns):
+            return set(df_financial['股票代码'])
+        df_recent_three_years =  df_financial[(df_financial['报告期'] > date) ].copy()
+        # 确保报告期为日期类型
+        df_recent_three_years['报告期'] = pd.to_datetime(df_recent_three_years['报告期'])
+        # 提取年份信息（用于分组）
+        df_recent_three_years['年份'] = df_recent_three_years['报告期'].dt.year
+        # df_recent_three_years[col_lrl] = df_recent_three_years[col_lrl].apply(lambda x: x if isinstance(x, str) else float('nan'))
+        # 2. 移除百分比符号
+        def convert_unit_vectorized(s):
+            # 处理缺失值
+            mask_na = s.isna()
+            result = pd.Series(index=s.index, dtype=float)
+            result[mask_na] = np.nan
+
+            # 转为字符串并去除空格
+            s_str = s.astype(str).str.strip()
+
+            # 处理百分比
+            mask_percent = s_str.str.contains('%', na=False)
+            percent_values = s_str[mask_percent].str.replace('%', '', regex=False)
+            result[mask_percent] = pd.to_numeric(percent_values, errors='coerce') / 100
+
+            # 处理"万"单位
+            mask_wan = s_str.str.contains('万', na=False) & ~mask_percent
+            wan_values = s_str[mask_wan].str.replace('万', '', regex=False)
+            result[mask_wan] = pd.to_numeric(wan_values, errors='coerce') * 10000
+
+            # 处理"亿"单位
+            mask_yi = s_str.str.contains('亿', na=False) & ~mask_percent
+            yi_values = s_str[mask_yi].str.replace('亿', '', regex=False)
+            result[mask_yi] = pd.to_numeric(yi_values, errors='coerce') * 100000000
+
+            # 处理纯数值
+            mask_numeric = ~mask_percent & ~mask_wan & ~mask_yi
+            result[mask_numeric] = pd.to_numeric(s_str[mask_numeric], errors='coerce')
+
+            return result
+
+        # 应用向量化函数
+        df_recent_three_years[col_lrl] = convert_unit_vectorized(df_recent_three_years[col_lrl])
+        # 按股票和年份分组，检查每年是否所有记录的利润率均为正
+        df_recent_three_years[col_lrl] = pd.to_numeric(df_recent_three_years[col_lrl], errors='coerce')
+        if len(df_recent_three_years) == 0:
+            return set(df_financial['股票代码'])
+        if condition_type == '>':
+            result = df_recent_three_years.groupby(['股票代码', '年份']).apply(
+                lambda x: (x[col_lrl] > threshold).all()
+            )
+        elif condition_type == '<':
+            result = df_recent_three_years.groupby(['股票代码', '年份']).apply(
+                lambda x: (x[col_lrl] < threshold).all()
+            )
+        elif condition_type == '<=':
+            result = df_recent_three_years.groupby(['股票代码', '年份']).apply(
+                lambda x: (x[col_lrl] <= threshold).all()
+            )
+        elif condition_type == '>=':
+            result = df_recent_three_years.groupby(['股票代码', '年份']).apply(
+                lambda x: (x[col_lrl] >= threshold).all()
+            )
+        else:
+            result = df_recent_three_years.groupby(['股票代码', '年份']).apply(
+                lambda x: (x[col_lrl] > threshold).all()
+            )
+
+        print(f'df_recent_three_years:{type(result)}')
+        if not isinstance(result, pd.Series):
+            error_msg = (
+                f"错误: groupby().apply() 返回了 DataFrame 而非 Series。\n"
+                f"可能原因: 1) 分组键有重复值 2) lambda 函数返回了多列结果。\n"
+                f"请检查数据结构: df_recent_three_years[['股票代码', '年份']].duplicated().any() 是否为 True"
+            )
+            raise TypeError(error_msg)
+        # <class 'pandas.core.series.Series'> ✅ 可以用 name 参数
+        positive_three_years = result.reset_index(name = col_adjustment)
+
+        # 筛选出连续三年利润率均为正的股票
+        # qualified_stocks = positive_three_years.groupby('股票代码').filter(lambda x: x[col_lrl_rename].all() and x['年份'].nunique() >= continue_year)['股票代码'].unique()
+
+        # 1. 先按 col_adjustment = true 过滤数据
+        filtered_data = positive_three_years[positive_three_years[col_adjustment]==True]
+        stock_row_counts = filtered_data.groupby('股票代码').size().reset_index(name='行数')
+        qualified_stocks = stock_row_counts[stock_row_counts['行数'] >= continue_year]['股票代码'].tolist()
+        qualified_stocks_set = set(qualified_stocks)
+
+        return qualified_stocks_set
+
+    def get_stock_avg_postive(self, df_financial, date, col_name='总资产净利润率(%)',
+                                   col_adjustment='全年利润率为正',threshold=0.01,condition_type='>'):
+        """
+        判断股票是连续三年的平均值超过ratio，则返回True，否则返回False。
+        """
+        date_financial = date,
+        # 筛选最近三年的数据（无论利润率正负）
+        col_lrl = col_name
+        col_lrl_rename = col_adjustment
+        if not (col_name in df_financial.columns):
+            return set(df_financial['股票代码'])
+        df_recent_three_years = df_financial[
+            (df_financial['报告期'] > date) ].copy()
+        # 确保报告期为日期类型
+        df_recent_three_years['报告期'] = pd.to_datetime(df_recent_three_years['报告期'])
+        # 提取年份信息（用于分组）
+        df_recent_three_years['年份'] = df_recent_three_years['报告期'].dt.year
+
+        # df_recent_three_years[col_lrl] = df_recent_three_years[col_lrl].apply(lambda x: x if isinstance(x, str) else float('nan'))
+        # 2. 移除百分比符号
+        def convert_unit_vectorized(s):
+            # 处理缺失值
+            mask_na = s.isna()
+            result = pd.Series(index=s.index, dtype=float)
+            result[mask_na] = np.nan
+
+            # 转为字符串并去除空格
+            s_str = s.astype(str).str.strip()
+
+            # 处理百分比
+            mask_percent = s_str.str.contains('%', na=False)
+            percent_values = s_str[mask_percent].str.replace('%', '', regex=False)
+            result[mask_percent] = pd.to_numeric(percent_values, errors='coerce') / 100
+
+            # 处理"万"单位
+            mask_wan = s_str.str.contains('万', na=False) & ~mask_percent
+            wan_values = s_str[mask_wan].str.replace('万', '', regex=False)
+            result[mask_wan] = pd.to_numeric(wan_values, errors='coerce') * 10000
+
+            # 处理"亿"单位
+            mask_yi = s_str.str.contains('亿', na=False) & ~mask_percent
+            yi_values = s_str[mask_yi].str.replace('亿', '', regex=False)
+            result[mask_yi] = pd.to_numeric(yi_values, errors='coerce') * 100000000
+
+            # 处理纯数值
+            mask_numeric = ~mask_percent & ~mask_wan & ~mask_yi
+            result[mask_numeric] = pd.to_numeric(s_str[mask_numeric], errors='coerce')
+
+            return result
+
+        # 应用向量化函数
+        df_recent_three_years[col_lrl] = convert_unit_vectorized(df_recent_three_years[col_lrl])
+
+        # 按股票和年份分组，检查每年是否所有记录的利润率均为正
+        df_recent_three_years[col_lrl] = pd.to_numeric(df_recent_three_years[col_lrl], errors='coerce')
+
+        # 筛选出连续三年平均利润率均为正的股票
+        avg_profit = df_recent_three_years.groupby('股票代码')[col_lrl].mean().reset_index()
+
+        stock_array = ['AAPL', 'GOOGL', 'MSFT', 'TSLA']
+        print(avg_profit[avg_profit['股票代码'].isin(stock_array)].to_markdown())
+        print(df_recent_three_years[df_recent_three_years['股票代码'].isin(stock_array)][['股票代码', col_lrl]].to_markdown())
+
+        # 筛选出平均利润大于阈值的股票
+        if condition_type == '>':
+            qualified_stocks = avg_profit[avg_profit[col_lrl] > threshold]['股票代码'].tolist()
+        elif condition_type == '<':
+            qualified_stocks = avg_profit[avg_profit[col_lrl] < threshold]['股票代码'].tolist()
+        elif condition_type == '<=':
+            qualified_stocks = avg_profit[avg_profit[col_lrl] <= threshold]['股票代码'].tolist()
+        elif condition_type == '>=':
+            qualified_stocks = avg_profit[avg_profit[col_lrl] >= threshold]['股票代码'].tolist()
+        else:
+            qualified_stocks = avg_profit[avg_profit[col_lrl] > threshold]['股票代码'].tolist()
+
+        qualified_stocks_set = set(qualified_stocks)
+        return qualified_stocks_set
+
+
+    def calculate_stock_roe(self, df_stock, df_indicator_mv, stock_code) :
+        df_indicator_mv_date = df_indicator_mv[df_indicator_mv['日期'] == '2025-06-06'].copy()
+
+        # 如果同一股票在该日期有多行数据，选择最新记录（根据其他列判断，如时间戳）
+        # 这里假设按 '更新时间' 列降序排序后取第一条
+        df_indicator_mv_date = df_indicator_mv_date.sort_values(
+            by='更新时间', ascending=False
+        ).drop_duplicates(subset='股票代码', keep='first')
+
+        # 3. 合并两个数据框
+        df_merged = pd.merge(
+            left=df_indicator_mv_date ,
+            right=df_stock,
+            left_on='股票代码',
+            right_on='代码',
+            how='inner'  # 只保留两边都有的股票
+        )
+        df_merged['ROE'] = df_merged['净资产收益率'] / df_merged['总市值'] * 100
+        return df_merged
+
+    def find_macd_stock(self, df_stock, stock_code):
+        """
+         根据macd指标，验证每个macd指标都是正常的。每个macd都能超过10天上涨或者下跌，macd指标90%都可以带来超5%的收益。
+
+        :param df_stock:
+        :param stock_code:
+        :return:
+        """
+
+        return pd.DataFrame()
+
+    def find_vol_inc_stock(self, df_stock, stock_code):
+        """
+         根据成交量指标，验证每次放量成交指标90%都可以带来超5%的收益。
+
+        :param df_stock:
+        :param stock_code:
+        :return:
+        """
+
+        return pd.DataFrame()

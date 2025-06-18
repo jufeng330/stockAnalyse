@@ -6,14 +6,25 @@ import tabula
 from datetime import datetime, timedelta
 import logging
 import traceback
+from .utils_report_date import ReportDateUtils
+from .utils_file_cache import FileCacheUtils
 
 
 class stockAnnualReport:
+    """
+    获取年报大数据信息
+    获取特定股票的公告列表
+    主营构成：只能获取A股
+    获取公司三大报表： get_stock_report
+
+    """
     def __init__(self):
         # 定义 current_date 并格式化
         self.current_date = datetime.now()
         self.current_date_str = self.current_date.strftime("%Y%m%d")
         self.logger = logging.getLogger(__name__)
+        self.report_util = ReportDateUtils()
+        self.cache_service = FileCacheUtils(market='none')
 
     # 定义格式化函数，作为静态方法
     @staticmethod
@@ -85,7 +96,7 @@ class stockAnnualReport:
         self.logger.debug(stock_zygc_em_df)
 
         return stock_zygc_em_df
-
+    """ 
     # 获取所有股票的报表
     def get_stock_border_report(self,  market="SH", date='20241231', indicator='年报'):
         if market == 'SH' or market == 'SZ':
@@ -112,10 +123,22 @@ class stockAnnualReport:
         stock_lrb_em_df.applymap(self.format_float)
         stock_xjll_em_df.applymap(self.format_float)
         return stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df
-
+    """
     # 财务指标
     def get_stock_report(self, stock_code='601668', market="SH", indicator='年报',years = 5):
         try:
+
+            cache = True
+            report_type = market + "_" + stock_code + '_stock_report'
+            current_date = self.report_util.get_current_report_year_st(format='%Y',market=market)+str(years)
+            report_data  = self.cache_service.read_from_serialized(current_date, report_type)
+            if report_data is None:
+                stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = None,None,None
+            else:
+                stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = report_data
+            if cache and stock_zcfz_em_df is not None and stock_lrb_em_df is not None and stock_xjll_em_df is not None:
+                return stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df
+
             def convert_and_assign_code(df, source_col, target_col):
                 if source_col in df.columns:
                     df[target_col] = df[source_col].astype(str)
@@ -137,9 +160,6 @@ class stockAnnualReport:
                 stock_zcfz_em_df = self.filter_stock_reprt_indicator(df=stock_zcfz_em_df, indicator=indicator)
                 stock_lrb_em_df = self.filter_stock_reprt_indicator(df=stock_lrb_em_df, indicator=indicator)
                 stock_xjll_em_df = self.filter_stock_reprt_indicator(df=stock_xjll_em_df, indicator=indicator)
-
-
-
 
             elif market == 'H':
                 # 资产负债表 choice of {"年度", "报告期"
@@ -188,25 +208,16 @@ class stockAnnualReport:
             stock_zcfz_em_df.apply(lambda x: x.map(self.format_float))
             stock_lrb_em_df.apply(lambda x: x.map(self.format_float))
             stock_xjll_em_df.apply(lambda x: x.map(self.format_float))
-            return stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df
 
+
+
+            if cache and stock_zcfz_em_df is not None and stock_lrb_em_df is not None and stock_xjll_em_df is not None:
+                self.cache_service.write_to_cache_serialized(current_date, report_type, [stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df] )
+            return stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df
         except Exception as e:
             self.logger.error(f"get_stock_report 发生错误 {stock_code}: {e}")
-
-            # traceback.print_exc()
+            traceback.print_exc()
             return None, None, None
-
-
-    def stock_test(self):
-        stock_code_ = "106.BABA"
-        stock_code_ = "09988"
-        market_ = '港股'
-        # get_stock_report_file(stock_code = stock_code_,market=market_,start_date = '20200101',end_date = '20241231')
-
-        stock_code_ = "SH601668"
-        stock_zygc_em_df = self.get_stock_zygc(stock_code=stock_code_, market=market_)
-        self.logger.debug(stock_zygc_em_df)
-
     def get_stock_code(self, market='usa',symbol='105.TSLA'):
         if market == 'usa':
             parts = symbol.split('.', 1)

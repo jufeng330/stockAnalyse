@@ -7,25 +7,27 @@ import logging
 import traceback
 import sys
 import os
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Union
-from .technical_params import TechnicalParams
-from .stock_strategy import StockStrategy
+from datetime import datetime
+from typing import Dict, Optional, Tuple
+from stock_analyse.stocklib.technical_params import TechnicalParams
 
 import numpy as np
 import pandas as pd
-import akshare as ak
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from stocklib.stock_company import stockCompanyInfo
 from stocklib.utils_report_date import ReportDateUtils
+from stocklib.utils_file_cache import FileCacheUtils
+from stocklib.stock_strategy import StockStrategy
+
+
 # -------------------------------
 # **股票分析引擎**
 # -------------------------------
 class StockAnalyzer:
     """股票分析引擎，计算各类技术指标"""
 
-    def __init__(self, params: Optional[TechnicalParams] = None):
+    def __init__(self, params: Optional[TechnicalParams] = None,market='SH'):
         """
         初始化股票分析引擎
 
@@ -36,6 +38,9 @@ class StockAnalyzer:
         self.params = params or TechnicalParams.default()
         self.dateUtils = ReportDateUtils()
         self.stock_strategy = StockStrategy()
+        self.cache_service = FileCacheUtils(market=market)
+        self.cache_switch = True
+
 
     def _setup_logging(self) -> None:
         """配置日志记录"""
@@ -153,10 +158,21 @@ class StockAnalyzer:
             stock_service = stockCompanyInfo(marker=market, symbol=stock_code)
             end_date_str  = self.dateUtils.get_current_history_date_st()
             start_date_str = self.dateUtils.get_start_history_date_st()
-            # # 日期，开盘，收盘，最高，最低，成交量，成交额，振幅，涨跌幅，涨跌额，换手率，股票代码
-            df_history_data = stock_service.get_stock_history_data(start_date_str,end_date_str)
+            # end_date_str = '20250607'
+
+            report_type = 'history_'+stock_code
+            date = end_date_str
+            df_history_data = None
+            if self.cache_switch :
+                df_history_data = self.cache_service.read_from_csv(date, report_type=report_type)
+            if df_history_data is None:
+                # # 日期，开盘，收盘，最高，最低，成交量，成交额，振幅，涨跌幅，涨跌额，换手率，股票代码
+                df_history_data = stock_service.get_stock_history_data(start_date_str,end_date_str)
+                if self.cache_switch:
+                    self.cache_service.write_to_csv(date, report_type, df_history_data)
+
             result = self.compute_result(df_history_data, stock, stock_code)
-            print(result)
+            # print(result)
             return result
 
         except Exception as e:

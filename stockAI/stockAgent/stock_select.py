@@ -5,18 +5,28 @@ import os
 import numpy as np
 import json
 import traceback
-# 添加 stock_analyse 目录到 Python 模块搜索路径
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 import pandas as pd
 import datetime
-import gradio as gr
 import akshare as ak
-from stocklib.stock_company import stockCompanyInfo
-from stocklib.stock_annual_report import stockAnnualReport
+# 添加 stock_analyse 目录到 Python 模块搜索路径
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+print(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
+# 调试：打印可能的模块路径
+possible_path = os.path.join(os.path.dirname(__file__), '../../', 'stocklib', 'stock_company.py')
+print(f"检查模块是否存在: {os.path.exists(possible_path)}")
+
+# 调试：打印所有可能的 stocklib 路径
+for path in sys.path:
+    lib_path = os.path.join(path, 'stocklib', 'stock_company.py')
+    print(f"检查路径: {lib_path}")
+    if os.path.exists(lib_path):
+        print(f"找到模块: {lib_path}")
 from stocklib.stock_border import stockBorderInfo
 from stocklib.dcf_model import stockDCFSimpleModel
-from .stock_ai_analysis import stockAIAnalysis
+from .stock_ai_analyzer import  StockAiAnalyzer
+
 
 
 # 添加调试日志函数
@@ -525,13 +535,13 @@ class stockSelectService:
 
     def stock_analyse(self, ai_platform, api_token, current_date_str, market, model, stock_code):
         market, stock_code = self.process_stock_and_market(market, stock_code)
-        ai_service_2 = stockAIAnalysis(model=model, ai_platform=ai_platform,
+        ai_service_2 = StockAiAnalyzer(model=model, ai_platform=ai_platform,
                                        api_token=api_token)
         report = ai_service_2.stock_indicator_analyse(market=market, symbol=stock_code,
                                                       start_date='2025-01-01',
                                                       end_date=current_date_str)
         print(report)
-        ai_service = stockAIAnalysis(model=model, ai_platform=ai_platform,
+        ai_service = StockAiAnalyzer(model=model, ai_platform=ai_platform,
                                      api_token=api_token)
         report = ai_service.stock_report_analyse(market=market, symbol=stock_code)
         print(report)

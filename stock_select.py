@@ -16,27 +16,35 @@ def main():
     print("\n" + "=" * 80)
     print("Market-Wide High-Score Stock Scanner".center(76))
     print("=" * 80)
+    markets = ['SH','H']
+    for market in markets:
+        scanner = TopStockScanner(max_workers=20,market=market)  # 已提升至20线程
+        file_utils = scanner.file_utils
+        try:
+            print("\n开始全盘扫描股票……")
+            high_score_stocks = scanner.scan_high_score_stocks(batch_size=20,type=2,strategy_filter='avg')
+            if not high_score_stocks:
+                print("\n未找到得分大于等于85分的股票。")
+                return
+            file_utils.save_results_by_price(high_score_stocks)
+            df_high_score_stocks,stats = scanner.backtest_stocks(high_score_stocks,  '2025-06-06')
+            file_utils.create_middle_file('回测结果',df_high_score_stocks)
+            file_utils.create_text_file('回测结果_统计', stats)
+            print(f"\n回测结果：{stats}")
+            print(f"\n分析完成！结果已保存至 scanner 文件夹中：")
+            print("1. 按价格区间保存的详细分析文件（price_XX_YY.txt）")
+            print("2. 汇总报告（summary.txt）")
 
-    scanner = TopStockScanner(max_workers=20,market='usa')  # 已提升至20线程
-    file_utils = scanner.file_utils
-    try:
-        print("\n开始全盘扫描股票……")
-        high_score_stocks = scanner.scan_high_score_stocks(batch_size=20)
-        if not high_score_stocks:
-            print("\n未找到得分大于等于85分的股票。")
-            return
-        file_utils.save_results_by_price(high_score_stocks)
+            print("\n" + "=" * 80)
 
-        print(f"\n分析完成！结果已保存至 scanner 文件夹中：")
-        print("1. 按价格区间保存的详细分析文件（price_XX_YY.txt）")
-        print("2. 汇总报告（summary.txt）")
-        print("\n" + "=" * 80)
-        input("\n按Enter键退出……")
 
-    except Exception as e:
-        file_utils.save_error_log(e)
-        print("错误日志已保存至 scanner/error_log.txt")
-        input("\n按Enter键退出……")
+        except Exception as e:
+            file_utils.save_error_log(e)
+            print("错误日志已保存至 scanner/error_log.txt")
+
+
+    input("\n按Enter键退出……")
+
 
 if __name__ == "__main__":
     main()

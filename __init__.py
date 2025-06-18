@@ -3,4 +3,4 @@
 # 显式导入 stocklib 和 stockAI 子包
 from . import stocklib
 from . import stockAI
-from . import  scanner
+from . import scanner

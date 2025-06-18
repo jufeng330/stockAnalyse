@@ -158,7 +158,7 @@ class stockConceptData:
         :return: 所有概念板块的名称和链接
         :rtype: pandas.DataFrame
         """
-        _stock_board_concept_name_ths_df = stock_board_concept_name_ths()
+        _stock_board_concept_name_ths_df = self.stock_board_concept_name_ths()
         name_list = _stock_board_concept_name_ths_df["概念名称"].tolist()
         url_list = [
             item.split("/")[-2] for item in _stock_board_concept_name_ths_df["网址"].tolist()

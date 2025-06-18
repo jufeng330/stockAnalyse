@@ -125,6 +125,8 @@ class stockIndicatorQuantitative:
             df = df.reset_index(drop=True)
             df['开盘'] = pd.to_numeric(df['开盘'], errors="coerce")
             df['收盘'] = pd.to_numeric(df['收盘'], errors="coerce")
+        if '股票代码' not in df.columns:
+            df['股票代码'] = stock_code
 
         return df
 

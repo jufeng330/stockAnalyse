@@ -10,9 +10,24 @@ from sklearn.model_selection import cross_val_predict,cross_val_score,train_test
 from sklearn.preprocessing import StandardScaler
 # from tensorflow.keras.models import Sequential
 # from tensorflow.keras.layers import Dense
+from .utils_stock import StockUtils
 import traceback
 
 class stockAKIndicator:
+    """
+    股票分析工具类，用于获取股票数据和计算技术指标。
+    包含以下功能：
+    - 获取实时股票数据
+    - 获取历史股票数据
+    - 计算技术指标
+    - 计算移动平均线
+    - 计算MACD指标
+    - 计算RSI指标
+    - 计算KDJ指标
+    - 计算BOLL指标
+    - 计算ATR指标
+    - 计算OBV指标
+    """
     def __init__(self):
         # 获取当前日期
         current_date = datetime.datetime.now()
@@ -26,6 +41,7 @@ class stockAKIndicator:
         previous_year = current_date - datetime.timedelta(days=100)
         self.previous_year_str = previous_year.strftime("%Y%m%d")
         self.logger = logging.getLogger(__name__)
+        self.stockUtils = StockUtils()
 
 
     @staticmethod
@@ -91,24 +107,36 @@ class stockAKIndicator:
 
                 # 3.历史行情数据 - 前复权
                 # 日期，开盘，收盘，最高，最低，成交量，成交额，振幅，涨跌幅，涨跌额，换手率，股票代码
-                code = stock_code
-                stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date_str,
-                                                        end_date=end_date_str,
-                                                        adjust="qfq")
 
-                def format_float(x):
-                    if isinstance(x, float):
-                        return '{:.2f}'.format(x)
-                    return x
+                sina_code = self.stockUtils.get_stock_zh_code(code=stock_code)
+                stock_zh_a_hist_df = ak.stock_zh_a_daily(symbol=sina_code, start_date=start_date_str,
+                                                         end_date=end_date_str, adjust="qfq")
 
-                # 应用格式化函数
-                stock_zh_a_hist_df = stock_zh_a_hist_df.applymap(format_float)
-                # self.logger.debug(stock_zh_a_hist_df)
-                df = stock_zh_a_hist_df
+                df = self.stockUtils.format_history_stock_code(stock_zh_a_hist_df, stock_code)
+
             except Exception as e:
-                self.logger.error(f"获取 A 股数据时出现错误: {e}")
-                traceback.print_exc()
+                self.logger.error(f"获取 A 股数据{stock_code}时出现错误: {e}")
+                try:
+
+                    code = stock_code
+                    stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date_str,
+                                                            end_date=end_date_str,
+                                                            adjust="qfq")
+
+                    df = stock_zh_a_hist_df
+
+                except Exception as e2:
+                    self.logger.error(f"获取 A 股数据{stock_code}时出现错误: {e2}")
+                    traceback.print_exc()
         if df is not None:
+            def format_float(x):
+                if isinstance(x, float):
+                    return '{:.2f}'.format(x)
+                return x
+
+            # 应用格式化函数
+            df = df.apply(lambda x: x.map(format_float))
+
             df = df.reset_index(drop=True)
             numeric_columns = ['开盘', '收盘', '最高', '最低', '成交量']
 

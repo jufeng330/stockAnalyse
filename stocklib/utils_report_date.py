@@ -28,10 +28,51 @@ class ReportDateUtils:
             dates.append(date)
         return dates
 
-    def get_current_report_year_st(self):
-        today = datetime.datetime.now()
-        date =  self.get_report_year_str(days=0)
+    def get_current_report_year_st(self,format='%Y%m%d',market='SH'):
+        if market  == 'SH' or market == 'SZ':
+            date =  self.get_report_year_str(days=0,format=format,postfix_str='0331')
+        elif market == 'H':
+            date =  self.get_report_year_str(days=365,format= format,postfix_str = '1231')
+        elif market == 'usa':
+            date =  self.get_report_year_str(days=365,format= format,postfix_str = '1231')
+        else:
+            date = self.get_report_year_str(days=0, format= format,postfix_str='0331')
+
         return date
+
+    def get_current__history_date_str(self, format='%Y%m%d',days = 0):
+        current_date = datetime.datetime.now()
+        if (days > 0):
+            new_date = current_date - datetime.timedelta(days=days)
+            current_date = new_date
+        date = current_date.strftime(format)
+        return date
+
+    def get_report_date_add_str(self, date_str='20241231', days=365, format='%Y%m%d',postfix_str = '1231'):
+        """
+        获取指定日期加上指定天数后的年份，拼接"1231"
+
+        参数:
+        date_str: 输入的日期字符串，默认为'20241231'
+        format: 输入日期的格式，默认为'%Y%m%d'
+        days: 要增加的天数，默认为365
+
+        返回:
+        字符串：增加指定天数后的年份 + "1231"
+        """
+        # 将输入的日期字符串转换为datetime对象
+        input_date = datetime.datetime.strptime(date_str, format)
+
+        # 增加指定天数
+        new_date = input_date + datetime.timedelta(days=days)
+
+        # 获取新日期的年份并拼接"1231"
+        result = f"{new_date.year}{postfix_str}"
+
+        input_date = datetime.datetime.strptime(result, '%Y%m%d')
+        result = input_date.strftime(format)
+
+        return result
 
     def get_current_history_date_st(self):
         date =  datetime.datetime.now().strftime("%Y%m%d")
@@ -46,7 +87,7 @@ class ReportDateUtils:
         return date
 
 
-    def get_report_year_str(self, days=0):
+    def get_report_year_str(self, days=0,format='%Y%m%d',postfix_str = '0331'):
         # 获取当前日期
         current_date = datetime.datetime.now()
         # 计算减去指定天数后的日期
@@ -57,9 +98,19 @@ class ReportDateUtils:
         # 获取减去指定天数后的年份
         target_year = new_date.year
         # 拼接年份和 '0331'
-        target_date_str = str(target_year) + '0331'
+        target_date_str = str(target_year) + postfix_str
+        if format == '%Y%m%d':
+            target_date_str = str(target_year) + postfix_str
+        elif format == '%Y-%m-%d':
+            if len(postfix_str) == 4:
+                postfix_str = postfix_str[:2] + '-' + postfix_str[2:]
+            target_date_str = str(target_year) + '-'+postfix_str
+        elif format == '%Y':
+            target_date_str = str(target_year)
+        else:
+            target_date_str = str(target_year) + postfix_str
         return target_date_str
-    def get_report_hk_year_str(self, days=0):
+    def get_report_hk_year_str(self, days=0,postfix_str = '1231'):
         # 获取当前日期
         current_date = datetime.datetime.now()
         # 计算减去指定天数后的日期
@@ -70,9 +121,36 @@ class ReportDateUtils:
         # 获取减去指定天数后的年份
         target_year = new_date.year-1
         # 拼接年份和 '0331'
-        target_date_str = str(target_year) + '1231'
+        target_date_str = str(target_year) + postfix_str
         return target_date_str
 
+    from datetime import datetime, timedelta
+
+    def get_history_date_str(self, days=0,format='%Y%m%d'):
+        # 获取当前日期
+        current_date = datetime.datetime.now()
+        # 计算减去指定天数后的日期
+        if days <= 0:
+            new_date = current_date
+        else:
+            new_date = current_date - datetime.timedelta(days=days)
+        target_date_str = new_date.strftime(format)
+        return target_date_str
+    def get_report_last_five_year(self, date=None):
+        # 如果没有传入日期，使用当前日期
+        if date is None:
+            current_date = datetime.datetime.now()
+        else:
+            # 将输入的日期字符串转换为datetime对象
+            current_date = datetime.datetime.strptime(date, '%Y%m%d')
+
+        # 计算五年前的日期
+        five_years_ago = current_date.replace(year=current_date.year - 5)
+
+        # 将结果转换为字符串格式
+        target_date_str = five_years_ago.strftime('%Y')
+
+        return target_date_str
 
     def get_stock_code(self, market='usa',symbol='105.TSLA'):
         if market == 'usa':
@@ -136,7 +214,7 @@ class ReportDateUtils:
 
         # 创建透视表
         print(f"正在创建透视表... 索引列: {index_cols}，列字段: {item_col}，值字段: {value_col}")
-        print(df[df['SECURITY_CODE']=='BABA'].to_markdown())
+        # print(df[df['SECURITY_CODE']=='BABA'].to_markdown())
         pivot_df = df.pivot_table(
             values=value_col,
             index=index_cols,
@@ -144,7 +222,7 @@ class ReportDateUtils:
             aggfunc=aggfunc,
             fill_value=fill_value
         ).reset_index()
-        print(pivot_df[pivot_df['SECURITY_CODE'] == 'BABA'].to_markdown())
+        # print(pivot_df[pivot_df['SECURITY_CODE'] == 'BABA'].to_markdown())
 
         # 移除列名的层级索引名称
         pivot_df.columns.name = None
@@ -274,15 +352,16 @@ class ReportDateUtils:
             # 计算同比数据
 
             for a_field, h_field in value_mapping.items():
-                if h_field in h_share_df.columns:
+                if a_field in a_share_df.columns:
                     # 获取A股目标列名
                     # target_column = list(field_mapping.keys())[list(field_mapping.values()).index(h_field)]
 
                     # 按股票代码分组，计算同比
-                    grouped = a_share_df.groupby('股票代码')[h_field]
+                    grouped = a_share_df.groupby('股票代码')[a_field]
 
                     # 计算同比增长率（保留两位小数）
-                    a_share_df[a_field] = grouped.pct_change(periods=1).map(
+                    # 计算同比增长率（保留两位小数）
+                    a_share_df[a_field] = grouped.pct_change(periods=1, fill_method=None).map(
                         lambda x: f"{x:.2%}" if pd.notna(x) else None)
 
                     # 替换无穷大值为None
@@ -542,3 +621,307 @@ class ReportDateUtils:
                                                                                           None)
 
         return a_share_df
+
+    def financial_indicator_map_usa_fields(self,df):
+        """
+        将美股数据字段映射到统一字段名
+        :param df: 包含美股原始字段的DataFrame
+        :return: 映射后的DataFrame
+        """
+        # 定义美股字段到统一字段的映射字典
+        usa_field_mapping = {
+            # 通用统一字段
+            'SECUCODE': '证券代码',
+            'SECURITY_CODE': '股票代码',
+            'SECURITY_NAME_ABBR': '股票简称',
+            'ORG_CODE': '机构代码',
+            'REPORT_DATE': '报告日期',
+            'OPERATE_INCOME': '营业收入',
+            'OPERATE_INCOME_YOY': '营业收入同比增长率',
+            'GROSS_PROFIT': '毛利润',
+            'GROSS_PROFIT_YOY': '毛利润同比增长率',
+            'BASIC_EPS': '基本每股收益',
+            'DILUTED_EPS': '稀释每股收益',
+            'GROSS_PROFIT_RATIO': '毛利率',
+            'ROE_AVG': '平均净资产收益率',
+            'ROA': '总资产收益率',
+            'CURRENT_RATIO': '流动比率',
+            'DEBT_ASSET_RATIO': '资产负债率',
+            'PARENT_HOLDER_NETPROFIT': '归属于母公司股东净利润',
+            'ACCOUNTS_RECE_TR': '应收账款周转率',
+            'INVENTORY_TR': '存货周转率',
+            'TOTAL_ASSETS_TR': '总资产周转率',
+            'ACCOUNTS_RECE_TDAYS': '应收账款周转天数',
+            'INVENTORY_TDAYS': '存货周转天数',
+            'TOTAL_ASSETS_TDAYS': '总资产周转天数',
+            'SPEED_RATIO': '速动比率',
+            'OCF_LIQDEBT': '经营活动现金流净额与流动负债比率',
+            'EQUITY_RATIO': '股东权益比率',
+            'BASIC_EPS_YOY': '基本每股收益同比增长率',
+            'GROSS_PROFIT_RATIO_YOY': '毛利率同比增长率',
+            'NET_PROFIT_RATIO_YOY': '净利率同比增长率',
+            'ROE_AVG_YOY': '平均净资产收益率同比增长率',
+            'ROA_YOY': '总资产收益率同比增长率',
+            'DEBT_ASSET_RATIO_YOY': '资产负债率同比增长率',
+            'CURRENT_RATIO_YOY': '流动比率同比增长率',
+            'SPEED_RATIO_YOY': '速动比率同比增长率',
+
+            # 美股特有字段（统一字段名+_usa）
+            'SECURITY_INNER_CODE': '证券内部代码_usa',
+            'ACCOUNTING_STANDARDS': '会计准则_usa',
+            'NOTICE_DATE': '公告日期_usa',
+            'FINANCIAL_DATE': '财务日期_usa',
+            'STD_REPORT_DATE': '标准报告日期_usa',
+            'CURRENCY': '货币类型_usa',
+            'DATE_TYPE': '日期类型_usa',
+            'DATE_TYPE_CODE': '数据类型代码_usa',
+            'REPORT_TYPE': '报告类型_usa',
+            'REPORT_DATA_TYPE': '报告数据类型_usa',
+            'ORGTYPE': '机构类型_usa',
+        }
+
+        # 过滤掉不存在的字段，避免KeyError
+        valid_fields = {k: v for k, v in usa_field_mapping.items() if k in df.columns}
+
+        # 执行字段映射并返回新DataFrame
+        return df.rename(columns=valid_fields)
+
+    def financial_indicator_map_hk_fields(self,df):
+        """
+        将港股数据字段映射到统一字段名
+        :param df: 包含港股原始字段的DataFrame
+        :return: 映射后的DataFrame
+        """
+        # 定义港股字段到统一字段的映射字典
+        hk_field_mapping = {
+            # 通用统一字段
+            'SECUCODE': '证券代码',
+            'SECURITY_CODE': '股票代码',
+            'SECURITY_NAME_ABBR': '股票简称',
+            'ORG_CODE': '机构代码',
+            'REPORT_DATE': '报告日期',
+            'OPERATE_INCOME': '营业收入',
+            'OPERATE_INCOME_YOY': '营业收入同比增长率',
+            'GROSS_PROFIT': '毛利润',
+            'GROSS_PROFIT_YOY': '毛利润同比增长率',
+            'BASIC_EPS': '基本每股收益',
+            'DILUTED_EPS': '稀释每股收益',
+            'GROSS_PROFIT_RATIO': '毛利率',
+            'ROE_AVG': '平均净资产收益率',
+            'ROA': '总资产收益率',
+            'CURRENT_RATIO': '流动比率',
+            'DEBT_ASSET_RATIO': '资产负债率',
+            'HOLDER_PROFIT': '归属于母公司股东净利润',
+
+            # 港股特有字段（统一字段名+_hk）
+            'PER_NETCASH_OPERATE': '经营活动每股净现金流量_hk',
+            'PER_OI': '每股经营活动现金流量_hk',
+            'BPS': '每股净资产_hk',
+            'HOLDER_PROFIT_YOY': '归属于母公司股东的净利润同比增长率_hk',
+            'EPS_TTM': '滚动市盈率每股收益_hk',
+            'OPERATE_INCOME_QOQ': '营业收入环比增长率_hk',
+            'NET_PROFIT_RATIO': '净利率_hk',
+            'GROSS_PROFIT_QOQ': '毛利润环比增长率_hk',
+            'HOLDER_PROFIT_QOQ': '归属于母公司股东的净利润环比增长率_hk',
+            'ROE_YEARLY': '年度净资产收益率_hk',
+            'ROIC_YEARLY': '年度投入资本回报率_hk',
+            'TAX_EBT': '息税前利润税负_hk',
+            'OCF_SALES': '销售商品、提供劳务收到的现金占营业收入比重_hk',
+            'CURRENTDEBT_DEBT': '流动负债占总负债比重_hk',
+            'START_DATE': '起始日期_hk',
+            'FISCAL_YEAR': '会计年度_hk',
+            'CURRENCY': '货币类型_hk',
+            'IS_CNY_CODE': '是否人民币代码_hk',
+        }
+
+        # 过滤掉不存在的字段，避免KeyError
+        valid_fields = {k: v for k, v in hk_field_mapping.items() if k in df.columns}
+
+        # 执行字段映射并返回新DataFrame
+        return df.rename(columns=valid_fields)
+    def financial_indicator_map_sh_fields(self,df):
+        """
+        将港股数据字段映射到统一字段名
+        :param df: 包含港股原始字段的DataFrame
+        :return: 映射后的DataFrame
+        """
+        # 定义港股字段到统一字段的映射字典
+        a_share_field_mapping = {
+            # 通用统一字段（与美股/港股含义一致）
+            '日期': '报告日期',
+            '摊薄每股收益(元)': '摊薄每股收益',  # 港股/美股无此指标，A股特有
+            '加权每股收益(元)': '加权每股收益',  # A股特有
+            '扣除非经常性损益后的每股收益(元)': '扣除非经常性损益后的每股收益',  # 统一字段
+            '每股净资产_调整前(元)': '每股净资产调整前',  # A股特有
+            '每股净资产_调整后(元)': '每股净资产调整后',  # A股特有
+            '每股经营性现金流(元)': '每股经营性现金流',  # 统一字段（对应港股PER_OI）
+            '每股资本公积金(元)': '每股资本公积金',  # A股特有
+            '每股未分配利润(元)': '每股未分配利润',  # A股特有
+            '调整后的每股净资产(元)': '调整后的每股净资产',  # A股特有
+            '总资产利润率(%)': '总资产利润率',  # A股特有
+            '主营业务利润率(%)': '主营业务利润率',  # A股特有
+            '总资产净利润率(%)': '总资产净利润率',  # 对应港股/美股ROA
+            '成本费用利润率(%)': '成本费用利润率',  # A股特有
+            '营业利润率(%)': '营业利润率',  # A股特有
+            '主营业务成本率(%)': '主营业务成本率',  # A股特有
+            '销售净利率(%)': '销售净利率',  # 对应港股/美股NET_PROFIT_RATIO
+            '股本报酬率(%)': '股本报酬率',  # A股特有
+            '净资产报酬率(%)': '净资产报酬率',  # A股特有（类似港股ROE_AVG）
+            '资产报酬率(%)': '资产报酬率',  # A股特有
+            '销售毛利率(%)': '销售毛利率',  # 统一字段（对应港股/美股GROSS_PROFIT_RATIO）
+            '股息发放率(%)': '股息发放率',  # A股特有
+            '投资收益率(%)': '投资收益率',  # A股特有
+            '主营业务利润(元)': '主营业务利润',  # A股特有
+            '净资产收益率(%)': '净资产收益率',  # 统一字段（对应港股ROE_AVG）
+            '加权净资产收益率(%)': '加权净资产收益率',  # A股特有
+            '扣除非经常性损益后的净利润(元)': '扣除非经常性损益后的净利润',  # 统一字段
+            '主营业务收入增长率(%)': '主营业务收入增长率',  # 统一字段（对应港股/美股OPERATE_INCOME_YOY）
+            '净利润增长率(%)': '净利润增长率',  # A股特有
+            '净资产增长率(%)': '净资产增长率',  # A股特有
+            '总资产增长率(%)': '总资产增长率',  # A股特有
+            '应收账款周转率(次)': '应收账款周转率',  # 统一字段（对应美股ACCOUNTS_RECE_TR）
+            '应收账款周转天数(天)': '应收账款周转天数',  # 统一字段（对应美股ACCOUNTS_RECE_TDAYS）
+            '存货周转天数(天)': '存货周转天数',  # 统一字段（对应美股INVENTORY_TDAYS）
+            '存货周转率(次)': '存货周转率',  # 统一字段（对应美股INVENTORY_TR）
+            '固定资产周转率(次)': '固定资产周转率',  # A股特有
+            '总资产周转率(次)': '总资产周转率',  # 统一字段（对应美股TOTAL_ASSETS_TR）
+            '总资产周转天数(天)': '总资产周转天数',  # 统一字段（对应美股TOTAL_ASSETS_TDAYS）
+            '流动资产周转率(次)': '流动资产周转率',  # A股特有
+            '流动资产周转天数(天)': '流动资产周转天数',  # A股特有
+            '股东权益周转率(次)': '股东权益周转率',  # A股特有
+            '流动比率': '流动比率',  # 统一字段（对应港股/美股CURRENT_RATIO）
+            '速动比率': '速动比率',  # 统一字段（对应美股SPEED_RATIO）
+            '现金比率(%)': '现金比率',  # A股特有
+            '利息支付倍数': '利息支付倍数',  # A股特有
+            '长期债务与营运资金比率(%)': '长期债务与营运资金比率',  # A股特有
+            '股东权益比率(%)': '股东权益比率',  # 统一字段（对应美股EQUITY_RATIO）
+            '长期负债比率(%)': '长期负债比率',  # A股特有
+            '股东权益与固定资产比率(%)': '股东权益与固定资产比率',  # A股特有
+            '负债与所有者权益比率(%)': '负债与所有者权益比率',  # A股特有
+            '长期资产与长期资金比率(%)': '长期资产与长期资金比率',  # A股特有
+            '资本化比率(%)': '资本化比率',  # A股特有
+            '固定资产净值率(%)': '固定资产净值率',  # A股特有
+            '资本固定化比率(%)': '资本固定化比率',  # A股特有
+            '产权比率(%)': '产权比率',  # A股特有
+            '清算价值比率(%)': '清算价值比率',  # A股特有
+            '固定资产比重(%)': '固定资产比重',  # A股特有
+            '资产负债率(%)': '资产负债率',  # 统一字段（对应港股/美股DEBT_ASSET_RATIO）
+            '总资产(元)': '总资产',  # A股特有
+            '经营现金净流量对销售收入比率(%)': '经营现金净流量对销售收入比率',  # A股特有
+            '资产的经营现金流量回报率(%)': '资产的经营现金流量回报率',  # A股特有
+            '经营现金净流量与净利润的比率(%)': '经营现金净流量与净利润的比率',  # A股特有
+            '经营现金净流量对负债比率(%)': '经营现金净流量对负债比率',  # A股特有
+            '现金流量比率(%)': '现金流量比率',  # A股特有
+            '短期股票投资(元)': '短期股票投资',  # A股特有
+            '短期债券投资(元)': '短期债券投资',  # A股特有
+            '短期其它经营性投资(元)': '短期其它经营性投资',  # A股特有
+            '长期股票投资(元)': '长期股票投资',  # A股特有
+            '长期债券投资(元)': '长期债券投资',  # A股特有
+            '长期其它经营性投资(元)': '长期其它经营性投资',  # A股特有
+            '1年以内应收帐款(元)': '1年以内应收帐款',  # A股特有
+            '1-2年以内应收帐款(元)': '1-2年以内应收帐款',  # A股特有
+            '2-3年以内应收帐款(元)': '2-3年以内应收帐款',  # A股特有
+            '3年以内应收帐款(元)': '3年以内应收帐款',  # A股特有
+            '1年以内预付货款(元)': '1年以内预付货款',  # A股特有
+            '1-2年以内预付货款(元)': '1-2年以内预付货款',  # A股特有
+            '2-3年以内预付货款(元)': '2-3年以内预付货款',  # A股特有
+            '3年以内预付货款(元)': '3年以内预付货款',  # A股特有
+            '1年以内其它应收款(元)': '1年以内其它应收款',  # A股特有
+            '1-2年以内其它应收款(元)': '1-2年以内其它应收款',  # A股特有
+            '2-3年以内其它应收款(元)': '2-3年以内其它应收款',  # A股特有
+            '3年以内其它应收款(元)': '3年以内其它应收款',  # A股特有
+        }
+
+        # 过滤掉不存在的字段，避免KeyError
+        valid_fields = {k: v for k, v in a_share_field_mapping.items() if k in df.columns}
+
+        # 执行字段映射并返回新DataFrame
+        return df.rename(columns=valid_fields)
+
+    def get_finnancial_report_by_year(self, date, df_financial, market='SH', indicator='年报'):
+        """
+        获取指定年份的财务报表数据
+        :param date_financial: 财务报表的日期，格式为 'YYYY-MM-DD'
+        :param df_financial: 包含财务报表数据的DataFrame
+        :param date_financial:
+        :param df_financial:
+        :return:
+        """
+        date_financial = date  # self.get_current_report_year_st(format='%Y-%m-%d', market=market)
+        if '报告期' in df_financial.columns:
+            df_financial_current = df_financial[df_financial['报告期'] >= date_financial]
+        elif '报告日期' in df_financial.columns:
+            date_filter = datetime.datetime.strptime(date_financial, "%Y-%m-%d").date()
+            df_financial_current = df_financial[df_financial['报告日期'] >= date_filter]
+        else:
+            df_financial_current = df_financial
+        """
+        if market == 'SH' or market == 'SZ':
+        # date_financial = self.reportUtils.get_report_year_str(date=date_financial,market=market)
+        elif market == 'usa':
+        # date_financial = self.reportUtils.get_report_year_str(date=date_financial,market=market)
+        elif market == 'H':
+        # date_financial = self.reportUtils.get_report_hk_year_str(date=date_financial)
+         """
+        return df_financial_current
+
+    def get_finnancial_report_by_latest(self, df_financial):
+        """
+        获取报告期最大的一条数据
+        :param date_financial: 财务报表的日期，格式为 'YYYY-MM-DD'
+        :param df_financial: 包含财务报表数据的DataFrame
+        :param date_financial:
+        :param df_financial:
+        :return:
+        """
+
+        df_financial['报告期'] = pd.to_datetime(df_financial['报告期'])
+        # 获取每个股票代码下报告期最大的记录索引
+        max_indices = df_financial.groupby('股票代码')['报告期'].idxmax()
+        # 根据索引选择对应的行
+        df_financial_current = df_financial.loc[max_indices]
+        return df_financial_current
+
+
+    def convert_column_to_number(self,df,col_name = '利润率'):
+        """
+        金额类的转换
+        :param df:
+        :param col_name:
+        :return:
+        """
+
+        def convert_unit_vectorized(s):
+            # 处理缺失值
+            mask_na = s.isna()
+            result = pd.Series(index=s.index, dtype=float)
+            result[mask_na] = np.nan
+
+            # 转为字符串并去除空格
+            s_str = s.astype(str).str.strip()
+
+            # 处理百分比
+            mask_percent = s_str.str.contains('%', na=False)
+            percent_values = s_str[mask_percent].str.replace('%', '', regex=False)
+            result[mask_percent] = pd.to_numeric(percent_values, errors='coerce') / 100
+
+            # 处理"万"单位
+            mask_wan = s_str.str.contains('万', na=False) & ~mask_percent
+            wan_values = s_str[mask_wan].str.replace('万', '', regex=False)
+            result[mask_wan] = pd.to_numeric(wan_values, errors='coerce') * 10000
+
+            # 处理"亿"单位
+            mask_yi = s_str.str.contains('亿', na=False) & ~mask_percent
+            yi_values = s_str[mask_yi].str.replace('亿', '', regex=False)
+            result[mask_yi] = pd.to_numeric(yi_values, errors='coerce') * 100000000
+
+            # 处理纯数值
+            mask_numeric = ~mask_percent & ~mask_wan & ~mask_yi
+            result[mask_numeric] = pd.to_numeric(s_str[mask_numeric], errors='coerce')
+
+            return result
+
+        # 应用向量化函数
+        if col_name in df.columns:
+            df[col_name] = convert_unit_vectorized(df[col_name])
+        return df
