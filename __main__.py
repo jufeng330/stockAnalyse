@@ -1,6 +1,5 @@
 import sys
 import os
-import traceback
 
 # 获取项目根目录
 root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -9,15 +8,97 @@ from stocklib.stock_company import stockCompanyInfo
 from stocklib.stock_annual_report import stockAnnualReport
 from stocklib.stock_border import stockBorderInfo
 from stockAI.stockAgent.stock_ai_analyzer import  StockAiAnalyzer
-from stockAI.stockAgent.stock_select import stockSelectService
 from scanner.stock_fh_analyser import *
 from scanner.stock_financial_analyser import *
 from scanner.stock_report_analyser import *
+from scanner.stock_analyzer import StockAnalyzer
+from stocklib.utils_file_cache import FileCacheUtils
+from stocklib.stock_concept_service import stockConcepService
+from stocklib.stock_wave_analyser import StockWaveAnalyzer
+from stocklib.stock_sentiment_analysis import StockSentimentAnalysis
+# matplotlib.use('Agg')
+# matplotlib.use('TkAgg')  # 或 'Qt5Agg'
 
-import matplotlib
-matplotlib.use('Agg')
 import warnings
 warnings.filterwarnings("ignore", message="Valid config keys have changed in V2")
+
+
+
+def print_stock_wave():
+
+    stock_sen = StockSentimentAnalysis()
+    sentiment_score,sentiment_analysis = stock_sen.get_sentiment_analysis()
+    print(sentiment_score)
+    print(f"公司情绪分析内容: {sentiment_analysis}")
+    # 确保安装最新版本
+    print(f"当前AKShare版本: {ak.__version__}")
+
+
+
+    stock = StockWaveAnalyzer()
+    # 调用函数获取数据
+    for code in ['600028','600028','600028','600028','600028']:
+        result_df = stock.analysis_stock_wave()
+        if result_df is not None:
+            print((result_df.to_markdown()))
+        df_wave,total_trend,last_trend = stock.analysis_stock_pren_wave()
+        print(f'{code}:{total_trend},{last_trend} ,{not df_wave.iloc[-1]}')
+
+
+
+    print(f'End')
+
+def print_stock_concept():
+    # 确保安装最新版本
+    print(f"当前AKShare版本: {ak.__version__}")
+
+
+
+    stock = stockConcepService()
+    # 调用函数获取数据
+    stock.get_all_sectors_and_stocks()
+
+    stock_company = stockCompanyInfo()
+    df = stock_company.save_stock_board_all_concept_name()
+
+    print(f'End')
+
+
+def print_stock_strategy():
+    market = 'SH'
+    code_list = ['301096','605365', '600028']
+    stock = StockAnalyzer(market=market)
+    try:
+
+        stockService = stockBorderInfo(market= market)
+        # df_stock = stock.get_stock_border_info()
+        data = {
+            '代码': ['300750'],
+            'market': ['SZ']
+        }
+        # 创建DataFrame
+        df_stock = pd.DataFrame(data)
+        df_stock_data = stockService.get_stock_spot()
+
+        for code in code_list:
+            try:
+                df_stock = df_stock_data[df_stock_data['股票代码'] == code].copy()
+                df_stock['market'] = market
+                summary = stock.analyze_stock(stock=df_stock.iloc[0], market="SH")
+
+                print(f"符合条件的股票数量: {len(summary)}")
+                print("达标股票汇总:")
+
+            except Exception as e:
+                print(f"调用方法时发生属性错误，请检查对象是否正确初始化: {e}")
+                traceback.print_exc()
+
+
+    except AttributeError as e:
+        print(f"调用方法时发生属性错误，请检查对象是否正确初始化: {e}")
+    except Exception as e:
+        print(f"发生未知错误: {e}")
+        traceback.print_exc()
 
 def print_stock_report(market='usa'):
 
@@ -43,8 +124,34 @@ def print_fh_stock():
         print(f"发生未知错误: {e}")
         traceback.print_exc()
 
+
+
 def print_report_stock():
     stock = StockReportAnalyser(market='SH')
+
+    market_list = ['SH',  'usa']
+    date_list = ['20241231','20231231','20221231','20211231','20201231']
+    # date_list = ['20221231']
+
+    # market = 'SH'
+    # date = '20241231'
+    for market in market_list:
+        cache_service = FileCacheUtils(market=market, cache_dir='history_' + market)
+        for date in date_list:
+            try:
+
+                stock_border = stockBorderInfo(market=market)
+                stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df = stock_border.get_stock_border_report(market,
+                                                                                                           date=date,
+                                                                                                           indicator='年报')
+                cache_service.write_to_cache_db(date, 'zcfz', stock_zcfz_em_df)
+                cache_service.write_to_cache_db(date, 'lrb', stock_lrb_em_df)
+                cache_service.write_to_cache_db(date, 'xjll', stock_xjll_em_df)
+
+            except Exception as e:
+                print(f"调用方法时发生属性错误，请检查对象是否正确初始化: {e}")
+
+
     try:
         df_report_filter_zcfz,df_report_filter_lrb,df_report_filter_xjll,df_pivot_zcfz,df_pivot_lrb,df_pivot_xjll = stock.get_report_codes()
         print(f"符合条件的股票数量: {len(df_pivot_zcfz)}")
@@ -324,9 +431,13 @@ def print_stock_company():
 
 
 if __name__ == '__main__':
+    print_stock_wave()
+    print_stock_strategy()
 
-
+    print_stock_concept()
     print_report_stock()
+
+    print_stock_strategy()
 
     print_financial_stock()
 

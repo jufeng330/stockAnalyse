@@ -138,7 +138,7 @@ def analyze_and_predict(directory, content):
     # 发送请求给ChatGPT进行分析和预测
     instruction = '请模拟中国A股的分析大师'
     message = prompt
-    model = 'qwen-plus'
+    model = 'qwen-turbo'
     try:
         if mode_type == 'open-ai':
             # 发送请求给ChatGPT进行分析和预测

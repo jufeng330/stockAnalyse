@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>查询结果</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        td {
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ccc;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+        .caption {
+            margin-top: 5px;
+            font-weight: bold;
+        }
+        .md-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <h1>查询结果</h1>
+    <h2>公司基本情况</h2>
+    <!-- 修改为显示 Markdown 内容 -->
+    <!-- 修改为显示 Markdown 内容 -->
+    <div class="md-content" id="stock-summary">{{ stock_summary }}</div>
+
+    <h2>公司基本面分析结果</h2>
+    <div class="md-content" id="fundamental-analysis">{{ fundamental_analysis }}</div>
+
+    <h2>公司年报分析</h2>
+    <div class="md-content" id="annual-report-analysis">{{ annual_report_analysis }}</div>
+
+    <h2>公司情绪分析</h2>
+    <div class="md-content" id="sentiment-analysis">{{ sentiment_analysis }}</div>
+
+    <h2>技术指标分析</h2>
+    <table>
+        <tr>
+            {% for i in range(0, image_paths|length, 2) %}
+                <td>
+                    <div class="caption">{{ strategies[i] }}</div>
+                    <img src="{{ image_paths[i] }}" alt="{{ strategies[i] }} 策略图片">
+                </td>
+                {% if i + 1 < image_paths|length %}
+                    <td>
+                        <div class="caption">{{ strategies[i+1] }}</div>
+                        <img src="{{ image_paths[i+1] }}" alt="{{ strategies[i+1] }} 策略图片">
+                    </td>
+                {% endif %}
+                </tr><tr>
+            {% endfor %}
+        </tr>
+    </table>
+    <script>        // 配置 marked 选项
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            smartypants: true
+        });
+
+        // 渲染所有 Markdown 内容
+        document.addEventListener('DOMContentLoaded', function() {
+            // 渲染公司基本情况
+            const stockSummaryElement = document.getElementById('stock-summary');
+            if (stockSummaryElement && stockSummaryElement.textContent.trim()) {
+                stockSummaryElement.innerHTML = marked.parse(stockSummaryElement.textContent);
+            }
+
+            // 渲染基本面分析结果
+            const fundamentalElement = document.getElementById('fundamental-analysis');
+            if (fundamentalElement && fundamentalElement.textContent.trim()) {
+                fundamentalElement.innerHTML = marked.parse(fundamentalElement.textContent);
+            }
+
+            // 渲染年报分析
+            const annualReportElement = document.getElementById('annual-report-analysis');
+            if (annualReportElement && annualReportElement.textContent.trim()) {
+                annualReportElement.innerHTML = marked.parse(annualReportElement.textContent);
+            }
+
+            // 渲染情绪分析
+            const sentimentElement = document.getElementById('sentiment-analysis');
+            if (sentimentElement && sentimentElement.textContent.trim()) {
+                sentimentElement.innerHTML = marked.parse(sentimentElement.textContent);
+            }
+        });
+    </script>
+    
+</body>
+</html>

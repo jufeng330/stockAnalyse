@@ -7,8 +7,11 @@ from .stock_ak_indicator import stockAKIndicator
 # from .stock_border import stockBorderInfo
 from .utils_report_date import ReportDateUtils
 from .utils_file_cache import FileCacheUtils
+from .stock_concept_service import stockConcepService
 import traceback
-
+from .mysql_cache import MySQLCache
+import time
+from tqdm import tqdm
 
 import logging
 
@@ -33,6 +36,7 @@ class stockCompanyInfo:
         # self.border = stockBorderInfo(self.market)
         self.report_util = ReportDateUtils()
         self.cache_service = FileCacheUtils(market=self.market)
+        self.mysql = MySQLCache()
 
     #  获取概念板块名称
     def get_stock_board_all_concept_name(self):
@@ -40,21 +44,157 @@ class stockCompanyInfo:
         获取概念板块名称
         :return:
         """
+        if self.market == self.HongKong or self.market == self.usa:
+            return self.get_default_df()
+        concept_sectors = self.mysql.read_from_cache(date='20250331', report_type='stock_concept_data')
+        # concept_sectors = self.cache_service.read_from_serialized(date='20250331', report_type='stock_concept_data');
+        if concept_sectors is None or concept_sectors.empty:
+            stock_concept_service = stockConcepService()
+            concept_sectors, industry_sectors = stock_concept_service.get_all_sectors_and_stocks()
+        return concept_sectors
+
+    def get_stock_board_all_industry_name(self):
+        """
+        获取行业信息
+        :return:
+        """
+        if self.market == self.HongKong or self.market == self.usa:
+            return self.get_default_df()
+        industry_sectors = self.mysql.read_from_cache(date='20250331', report_type='stock_industry_data')
+        # industry_sectors = self.cache_service.read_from_serialized(date='20250331', report_type='stock_industry_data');
+        if industry_sectors is None or industry_sectors.empty:
+            stock_concept_service = stockConcepService()
+            concept_sectors, industry_sectors = stock_concept_service.get_all_sectors_and_stocks()
+        return industry_sectors
+
+    def get_stock_board_concept_name(self):
+        """
+        获取概念板块名称
+        :return:
+        """
+        if self.market == self.HongKong or self.market == self.usa:
+            return self.get_default_df()
+
+        df_concept = self.mysql.read_from_cache(date='20250331', report_type='stock_concept_data')
+        if df_concept is not None and not df_concept.empty:
+            return df_concept
+
+        stock_concept_service = stockConcepService()
+        df_concept, df_industry = stock_concept_service.get_all_sectors_and_stocks()
+
+        return df_concept
+    def get_stock_concept_by_name(self,concept_name,industry_sectors):
+        """
+        获取概念板块名称
+        :return:
+        """
+        if self.market  == self.HongKong or self.market == self.usa:
+            return self.get_default_df()
+        report_type = 'stock_concept_data'
+        date = '20250331'
+        df_data = self.mysql.read_from_cache(date=date, report_type=report_type,
+                                             conditions={"所属板块": concept_name})
+        if df_data is  None or  df_data.empty:
+            # 获取成分股
+            df_data = ak.stock_board_industry_cons_em(symbol=concept_name, df=industry_sectors)
+            df_data["所属板块"] = concept_name
+            df_data["板块类型"] = "行业"
+            self.mysql.write_to_cache(date=date, report_type=report_type,
+                                      data=df_data)
+        return df_data
+
+    def get_stock_industry_by_name(self, concept_name, industry_sectors):
+        """
+        获取概念板块名称
+        :return:
+        """
+        if self.market == self.HongKong or self.market == self.usa:
+            return self.get_default_df()
+        report_type = 'stock_industry_data'
+        date = '20250331'
+        df_data = self.mysql.read_from_cache(date=date, report_type=report_type,
+                                             conditions={"所属板块": concept_name})
+        if df_data is None or df_data.empty:
+            # 获取成分股
+            df_data = ak.stock_board_industry_cons_em(symbol=concept_name, df=industry_sectors)
+            df_data["所属板块"] = concept_name
+            df_data["板块类型"] = "行业"
+            self.mysql.write_to_cache(date=date, report_type=report_type,
+                                      data=df_data)
+        return df_data
+
+    def get_stock_industry_by_code(self, code, date='2025-08-06'):
+        """
+        获取概念板块名称
+        :return:
+        """
+        border_name = ''
+        if self.market == self.HongKong or self.market == self.usa:
+            return "行业"
+        report_type = 'stock_industry_data'
+        date = '20250331'
+        try:
+            # select * from   stock_industry_data_SH where 代码 = '839729' limit 10
+            df_data = self.mysql.read_from_cache(date=date, report_type=report_type,
+                                                 conditions={"代码": code})
+            if df_data is not None and not df_data.empty:
+                border_name = ','.join(df_data['所属板块'].astype(str))if '所属板块' in df_data.columns else ''
+                # 获取成分股
+
+            return border_name
+        except Exception as e:
+            logging.warn(f"获取{code}成分股失败: {e}")
+        return "行业"
+    def get_stock_concept_by_code(self, code, date='2025-08-06'):
+        """
+        获取概念板块名称
+        :return:
+        """
+        border_name = ''
+        if self.market == self.HongKong or self.market == self.usa:
+            return "行业"
+        report_type = 'stock_concept_data'
+        date = '20250331'
+        # select * from   stock_industry_data_SH where 代码 = '839729' limit 10
+        df_data = self.mysql.read_from_cache(date=date, report_type=report_type,
+                                             conditions={"代码": code})
+        if df_data is not None and not df_data.empty:
+            border_name = ','.join(df_data['所属板块'].astype(str)) if '所属板块' in df_data.columns else ''
+            # 获取成分股
+
+        return border_name
+
+    def save_stock_board_all_concept_name(self):
+        """
+        获取概念板块名称
+        :return:
+        """
         if self.market  == self.HongKong or self.market == self.usa:
             return self.get_default_df()
         stock_concept_service = stockConceptData()
-        stock_board = stock_concept_service.stock_board_concept_name_ths()
+        industry_sectors = stock_concept_service.stock_board_concept_name_ths()
+        # self.mysql.write_to_cache(date='20250331',report_type='stock_concept_thx',data = industry_sectors)
+        # 获取行业板块成分股
+        print("获取行业板块成分股...")
+        industry_stocks_list = []
+        for _, row in tqdm(industry_sectors.iterrows(), total=len(industry_sectors), desc="行业板块进度"):
+            sector_name = row["概念名称"]
+            try:
+                # 获取成分股
+                stocks = stock_concept_service.stock_board_concept_cons_ths(symbol=sector_name,
+                                                                     stock_board_ths_map_df=industry_sectors)
+                stocks["概念名称"] = sector_name
+                # stocks["板块类型"] = "行业"
+                self.mysql.write_to_cache(date='20250331', report_type='stock_concept_thx_data',
+                                          data=stocks)
 
-        return stock_board
+                # 避免请求过于频繁
+                time.sleep(1)
+            except Exception as e:
+                print(f"获取{sector_name}成分股失败: {e}")
+                continue
+        return industry_sectors
 
-    # 获取概念板块的数据情况
-    def get_stock_board_concept_name(self, symbol, df_stock_board):
-        if self.market  == self.HongKong or self.market == self.usa:
-            return self.get_default_df()
-        stock_concept_service = stockConceptData()
-        concept_info_df = stock_concept_service.stock_board_concept_info_ths(symbol=symbol,
-                                                                     stock_board_ths_map_df=df_stock_board)
-        return concept_info_df
 
     # 主营业务介绍 根据主营业务网络搜索相关事件报道
     def get_stock_zyjs(self):
@@ -171,6 +311,8 @@ class stockCompanyInfo:
     def get_stock_news(self):
         # 个股新闻
         stock_news_em_df = stockNewsData.stock_news_em(symbol=self.symbol, pageSize=10)
+        if stock_news_em_df is None or stock_news_em_df.empty:
+            return stock_news_em_df
         # 删除指定列
         stock_news_em_df = stock_news_em_df.drop(["文章来源", "新闻链接"], axis=1)
 

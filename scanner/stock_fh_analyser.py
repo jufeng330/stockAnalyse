@@ -18,9 +18,6 @@ from torch.ao.quantization.fx import convert
 from tqdm import tqdm
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from .stock_analyzer import  StockAnalyzer
-
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from stocklib.stock_border import stockBorderInfo
@@ -57,6 +54,8 @@ class StockFenHengAnalyser:
         stock = stockBorderInfo(market=self.market)
         # "名称","代码", "现金分红 - 股息率"  年份
         df_fh = stock.get_stock_fhps_info()
+        if df_fh is None or df_fh.empty:
+            return pd.DataFrame(), pd.DataFrame()
         # 使用示例
         if type == 'continue':
             qualified_data, summary = self.filter_stocks_with_dividend(df_fh = df_fh, min_years=min_years, threshold=threshold)

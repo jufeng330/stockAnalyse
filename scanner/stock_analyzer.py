@@ -37,9 +37,10 @@ class StockAnalyzer:
         self._setup_logging()
         self.params = params or TechnicalParams.default()
         self.dateUtils = ReportDateUtils()
-        self.stock_strategy = StockStrategy()
+        self.stock_strategy = StockStrategy(market = market)
         self.cache_service = FileCacheUtils(market=market)
-        self.cache_switch = True
+        self.market = market
+        self.cache_switch = False
 
 
     def _setup_logging(self) -> None:
@@ -151,6 +152,10 @@ class StockAnalyzer:
 
     def analyze_stock(self, stock,market="SH") -> Dict:
         """针对单只股票执行完整的技术分析流程"""
+        if isinstance(stock, pd.DataFrame):
+            # 如果是DataFrame且只有一行，转换为Series
+            if len(stock) == 1:
+                stock = stock.iloc[0]
         stock_code = stock['代码']
         market = stock['market']
         try:
@@ -172,6 +177,8 @@ class StockAnalyzer:
                     self.cache_service.write_to_csv(date, report_type, df_history_data)
 
             result = self.compute_result(df_history_data, stock, stock_code)
+
+
             # print(result)
             return result
 
@@ -232,6 +239,11 @@ class StockAnalyzer:
             df_copy = df_history_data.copy(deep=True)
             self.calculate_indicators(df_copy)
             score2, score2_suggestion = self.stock_strategy.calculate_score_simple(df_copy)
+            result_2 = self.stock_strategy.find_vol_inc_stock(df_copy, stock_code)
+            print(f'find_vol_inc_stock:{result_2}')
+            result_3 = self.stock_strategy.find_macd_inc_stock(df_copy, stock_code)
+            print(f'find_macd_inc_stock:{result_3}')
+
             return score2, score2_suggestion
         except Exception as e:
             self.logger.error(f"分析股票score2 {stock_code} 失败：{str(e)}")

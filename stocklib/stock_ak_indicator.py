@@ -169,13 +169,13 @@ class stockAKIndicator:
             data['MA_30'] = data['收盘'].rolling(window=long_window, min_periods=1).mean()
             data['MA_5'] = data['收盘'].rolling(window=short_window).mean()
             # 生成交易信号
-            data['ma_signal'] = 0
+            data['mac_signal'] = 0
             # 使用 .loc 进行赋值，确保操作在原始 DataFrame 上进行
-            data.loc[short_window:, 'ma_signal'] = np.where(
+            data.loc[short_window:, 'mac_signal'] = np.where(
                 data.loc[short_window:, 'MA_10'] > data.loc[short_window:, 'MA_30'],
                 1, 0
             )
-            data['ma_signal_position'] = data['ma_signal'].diff()
+            data['mac_signal_position'] = data['mac_signal'].diff()
             # 输出交易信号
             # self.logger.debug(data[['收盘', 'MA_10', 'MA_30', 'ma_signal', 'ma_signal_position']].tail(20))
             return data
@@ -201,11 +201,11 @@ class stockAKIndicator:
         data['Lower_Band'] = data['Middle_Band'] - (2 * data['Std_Dev'])
 
         # 生成均线策略信号
-        data['MAC_Signal'] = 0
-        data.loc[short_window:, 'MA_Signal'] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
+        data['SMA_Signal'] = 0
+        data.loc[short_window:, 'SMA_Signal'] = np.where(data['MA_10'][short_window:] > data['MA_30'][short_window:], 1, -1)
 
 
-        data['MA_Position'] = data['MA_Signal'].diff()
+        data['SMA_Position'] = data['SMA_Signal'].diff()
 
         # 生成布林带策略信号
         data['bb_signal'] = 0
@@ -234,12 +234,14 @@ class stockAKIndicator:
 
         # 生成交易信号
         data['macd_signal_index'] = 0
-        # 买入信号
-        data.loc[(data["macd_dif"] < data["macd_signal"]) & (
-                data["macd_dif"].shift(1) > data["macd_signal"].shift(1)), 'macd_signal_index'] = 1
-        # 短期均线下穿长期均线，卖出信号
+
+        # 传统金叉买入（原代码可能有误）
         data.loc[(data["macd_dif"] > data["macd_signal"]) & (
-                data["macd_dif"].shift(1) < data["macd_signal"].shift(1)), 'macd_signal_index'] = -1
+                data["macd_dif"].shift(1) < data["macd_signal"].shift(1)), 'macd_signal_index'] = 1
+
+        # 传统死叉卖出（原代码可能有误）
+        data.loc[(data["macd_dif"] < data["macd_signal"]) & (
+                data["macd_dif"].shift(1) > data["macd_signal"].shift(1)), 'macd_signal_index'] = -1
 
         data['macd_signal_position'] = data['macd_signal_index'].diff()
 

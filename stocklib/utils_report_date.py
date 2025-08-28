@@ -925,3 +925,77 @@ class ReportDateUtils:
         if col_name in df.columns:
             df[col_name] = convert_unit_vectorized(df[col_name])
         return df
+
+    def get_business_day(date: datetime.date = None, n: int = 1, direction: str = 'backward') -> datetime.date:
+        """
+        获取指定日期的第N个工作日（周一至周五）的日期。
+
+        Args:
+            date: 基准日期，如果为None则使用当前日期。
+            n: 需要获取的工作日偏移量，正数表示向前查找，负数表示向后查找。
+            direction: 查找方向，'backward'（默认）表示向前查找，'forward'表示向后查找。
+
+        Returns:
+            第N个工作日的日期。
+        """
+        if date is None:
+            date = datetime.date.today()
+
+        if direction.lower() not in ['backward', 'forward']:
+            raise ValueError("direction参数必须是'backward'或'forward'")
+
+        # 根据方向设置步长（向前为减，向后为加）
+        step = -1 if direction.lower() == 'backward' else 1
+        current_date = date
+        count = 0
+
+        while True:
+            current_date += datetime.timedelta(days=step)
+            weekday = current_date.weekday()  # 0是周一，6是周日
+
+            # 如果是工作日（周一至周五），计数器加1
+            if weekday < 5:  # 0-4对应周一至周五
+                count += 1
+
+                # 当找到第N个工作日时返回
+                if count >= abs(n):
+                    return current_date
+
+    import datetime
+
+    def calculate_stock_progress(self):
+        # 获取当前日期时间
+        now = datetime.datetime.now()
+
+        # 定义开盘时间（默认为今天，如果今天不是交易日，需要调整为最近的交易日）
+        morning_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        morning_end = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        afternoon_start = now.replace(hour=13, minute=0, second=0, microsecond=0)
+        afternoon_end = now.replace(hour=15, minute=0, second=0, microsecond=0)
+
+        # 计算总交易时长（分钟）
+        total_minutes = (morning_end - morning_start).total_seconds() / 60 + \
+                        (afternoon_end - afternoon_start).total_seconds() / 60
+
+        # 判断当前时间是否在交易时间段内
+        if now < morning_start:
+            # 未开盘
+            progress = 0.0
+        elif morning_start <= now <= morning_end:
+            # 上午交易时间内
+            elapsed_minutes = (now - morning_start).total_seconds() / 60
+            progress = elapsed_minutes / total_minutes
+        elif morning_end < now < afternoon_start:
+            # 午休时间
+            progress = (morning_end - morning_start).total_seconds() / 60 / total_minutes
+        elif afternoon_start <= now <= afternoon_end:
+            # 下午交易时间内
+            morning_elapsed = (morning_end - morning_start).total_seconds() / 60
+            afternoon_elapsed = (now - afternoon_start).total_seconds() / 60
+            progress = (morning_elapsed + afternoon_elapsed) / total_minutes
+        else:
+            # 已收盘
+            progress = 1.0
+
+        return progress
+

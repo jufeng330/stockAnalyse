@@ -5,6 +5,8 @@ import pandas as pd
 import datetime
 import re
 import numpy as np
+from sqlalchemy.sql.functions import current_date
+
 from .stock_concept_data import stockConceptData
 from .stock_news_data import stockNewsData
 from .stock_ak_indicator import stockAKIndicator
@@ -342,7 +344,8 @@ class stockBorderInfo:
                 dates.dt.year.astype(str),
                 np.nan  # 处理无效日期
             )
-
+        if '营业总收入' in df_stock_financial_all.columns:
+            df_stock_financial_all = self.stock_utils.pd_convert_to_float(df_stock_financial_all, '营业总收入')
         return df_stock_financial_all
 
     #获取所有的板块信息  日期         概念名称 成分股数量  网址     代码
@@ -357,7 +360,6 @@ class stockBorderInfo:
         stock_board = stock_concept_service.stock_board_concept_name_ths()
 
         return stock_board
-
     # 获取所有股票的代码和名称
     def get_stock_all_code(self):
         """
@@ -683,8 +685,22 @@ class stockBorderInfo:
             # df_stock = pd.merge(df_stock, df_indicator, left_on='代码', right_on='代码', how='left')
             # 分红配送，"名称","代码","送转股份 - 送转总比例","送转股份 - 送转比例","送转股份 - 转股比例","现金分红 - 现金分红比例","预案公告日","股权登记日","除权除息日","方案进度","最新公告日期","每股收益","每股净资产","每股公积金","每股未分配利润","净利润同比增长","总股本","现金分红 - 股息率"
             try :
-                df_fh = self.get_stock_fhps_info(date='20241231')
+                df_fh = self.get_stock_fhps_group_info()
                 df_merge = pd.merge(df_merge, df_fh, left_on='代码', right_on='代码', how='left')
+                stock_service = stockCompanyInfo(marker=self.market, symbol='601919')
+                df_concept = stock_service.get_stock_board_all_concept_name()
+                df_concept = df_concept.groupby('代码')['所属板块'].agg(
+                    lambda x: ','.join(x.dropna())  # 先去除空值，再用逗号连接
+                ).reset_index()
+                df_border = stock_service.get_stock_board_all_industry_name()
+                df_concept_renamed = df_concept.rename(columns={"所属板块": "概念板块"})
+                df_border_renamed = df_border.rename(columns={"所属板块": "行业板块"})
+
+                # 与df_merge进行左连接
+                df_merge = pd.merge(df_merge, df_concept_renamed[["代码", "概念板块"]],
+                                    on="代码", how="left")
+                df_merge = pd.merge(df_merge, df_border_renamed[["代码", "行业板块"]],
+                                    on="代码", how="left")
             except Exception as e:
                 self.logger.error(f"获取分红数据失败:{e}")
 
@@ -692,6 +708,21 @@ class stockBorderInfo:
             # 板块数据
             # df_concept = self.get_stock_board_all_concept_name()
             # print(df_concept)
+        if '总市值' in df_merge.columns:
+            # 计算总市值（单位：亿）
+            market_cap_billion = df_merge['总市值'] / 100000000
+
+            # 根据条件判断市值规模
+            df_merge['市值规模'] = np.where(
+                market_cap_billion >= 500,  # 第一个条件：总市值 >= 500亿
+                '大盘股',
+                np.where(
+                    market_cap_billion >= 100,  # 第二个条件：总市值 >= 100亿（且<500亿）
+                    '中盘股',
+                    '小盘股'  # 其他情况：小盘股
+                )
+            )
+
 
         if '净资产收益率' in df_merge.columns and  'ROE'  not in df_merge.columns:
             df_merge['ROE'] = df_merge['净资产收益率']
@@ -699,6 +730,7 @@ class stockBorderInfo:
         elif '平均净资产收益率' in df_merge.columns and  'ROE'  not in df_merge.columns:
             df_merge['ROE'] = df_merge['平均净资产收益率']
             df_merge = self.stock_utils.pd_convert_to_float(df=df_merge, col_name='ROE')
+
 
         return df_merge
 
@@ -739,6 +771,42 @@ class stockBorderInfo:
 
         return df_stock
 
+    def get_famous_stock_info(self):
+        date = '20250331'
+        if self.market  == 'usa' or self.market == 'H':
+            cache_key = f"stock_famous_{self.market}"
+        else:
+            current_date = self.reportUtils.get_current_history_date_st()
+            cache_key = f"stock_famous_{self.market}_{current_date}"
+        stock_famous_spot_em_df = self.cache_service.read_from_serialized(date, cache_key)
+        if stock_famous_spot_em_df is None:
+            if self.market == 'H':
+                stock_famous_spot_em_df = ak.stock_hk_famous_spot_em()
+            elif self.market == 'usa':
+                # symbol="科技类"; choice of {'科技类', '金融类', '医药食品类', '媒体类', '汽车能源类', '制造零售类'}
+                dfs = [
+                    ak.stock_us_famous_spot_em(symbol='科技类'),
+                    ak.stock_us_famous_spot_em(symbol='金融类'),
+                    ak.stock_us_famous_spot_em(symbol='汽车能源类'),
+                    ak.stock_us_famous_spot_em(symbol='医药食品类')
+                ]
+                stock_famous_spot_em_df = pd.concat(dfs, ignore_index=True)
+            else:
+                stock_famous_spot_em_df = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
+            self.cache_service.write_to_cache_serialized(date, cache_key, stock_famous_spot_em_df)
+
+        if stock_famous_spot_em_df is not None:
+            code_col = '代码'  # 替换为实际列名
+            # 使用正则表达式移除前缀 (bj|sz|sh)，不区分大小写
+            stock_famous_spot_em_df[code_col] = stock_famous_spot_em_df[code_col].str.replace(
+                r'^(bj|sz|sh)', '', case=False, regex=True
+            ).str.upper()
+            if self.market == 'usa':
+                stock_famous_spot_em_df['股票代码'] = stock_famous_spot_em_df['代码'].apply(
+                    lambda x: self.reportUtils.get_stock_code(market=self.market, symbol=x))
+            else:
+                stock_famous_spot_em_df['股票代码'] = stock_famous_spot_em_df['代码']
+        return stock_famous_spot_em_df
 
     def get_stock_fhps_info(self,date='20241231'):
         """
@@ -746,16 +814,20 @@ class stockBorderInfo:
          # 分红配送，"名称","代码","送转股份 - 送转总比例","送转股份 - 送转比例","送转股份 - 转股比例","现金分红 - 现金分红比例","预案公告日","股权登记日","除权除息日","方案进度","最新公告日期","每股收益","每股净资产","每股公积金","每股未分配利润","净利润同比增长","总股本","现金分红 - 股息率"
         :return:
         """
-        df_fh = self.get_stock_fhps_info()
+        df_fh = self.get_stock_fhps_yearly_info()
         date_start_str = date
         date_end_str = self.reportUtils.get_report_date_add_str(date_str=date, days=365)
-        date_start = datetime.datetime.strptime(date_start_str, "%Y%m%d").date()
-        date_end = datetime.datetime.strptime(date_end_str, "%Y%m%d").date()
+        # date_start = datetime.datetime.strptime(date_start_str, "%Y%m%d").date()
+        # date_end = datetime.datetime.strptime(date_end_str, "%Y%m%d").date()
+
+        date_start = pd.to_datetime(date_start_str, format="%Y%m%d")
+        date_end = pd.to_datetime(date_end_str, format="%Y%m%d")
+
         df_fh = df_fh[df_fh['最新公告日期'].between(date_start, date_end, inclusive='left')]
         return df_fh;
 
-
-    def get_stock_fhps_info(self):
+    # 股息率的平均值
+    def get_stock_fhps_group_info(self):
         """
 
         分红数据
@@ -764,6 +836,122 @@ class stockBorderInfo:
         :return:
         """
         date = '20241231'
+        cache_key = f"stock_fhps"
+        if self.market  == 'usa' or self.market == 'H':
+            cache_key = f"stock_fhps_{self.market}"
+        date_start_str = date
+        date_end_str = self.reportUtils.get_report_date_add_str(date_str=date, days=365)
+        date_start = datetime.datetime.strptime(date_start_str, "%Y%m%d").date()
+        date_end = datetime.datetime.strptime(date_end_str, "%Y%m%d").date()
+        df_fh = self.cache_service.read_from_serialized(date, cache_key)
+        if df_fh is not None:
+            try:
+                df_fh['年份'] = df_fh['最新公告日期'].apply(lambda x: x.year)
+                date_columns = ['预案公告日', '股权登记日', '除权除息日', '最新公告日期']
+                for col in date_columns:
+                    # 将列转换为字符串，再转换为 datetime，确保所有非日期值转为 NaT
+                    df_fh[col] = pd.to_datetime(df_fh[col].astype(str), errors='coerce')
+                numeric_cols = ['现金分红-股息率', '每股收益', '每股净资产', '每股公积金', '每股未分配利润',
+                                '净利润同比增长']
+                df_fh[numeric_cols] = df_fh[numeric_cols].fillna(0)
+                grouped = df_fh.groupby(['年份', '代码']).agg({
+                    '名称': 'first',
+                    '送转股份-送转总比例': 'first',
+                    '送转股份-送转比例': 'first',
+                    '送转股份-转股比例': 'first',
+                    '现金分红-现金分红比例': lambda x: x.dropna().tolist(),
+                    '现金分红-股息率': 'sum',
+                    '每股收益': 'sum',
+                    '每股净资产': 'last',
+                    '每股公积金': 'last',
+                    '每股未分配利润': 'last',
+                    '净利润同比增长': 'last',
+                    '总股本': 'first',
+                    '预案公告日': lambda x: x.min(),
+                    '股权登记日': lambda x: x.max(),
+                    '除权除息日': lambda x: x.max(),
+                    '方案进度': lambda x: x.dropna().tolist(),
+                    '最新公告日期': 'max'
+                }).reset_index()
+
+                numeric_cols = grouped.select_dtypes(include=['number']).columns.tolist()
+                yearly_avg = grouped.groupby('代码')[numeric_cols].mean().reset_index()
+                return yearly_avg
+            except  Exception as e:
+                self.logger.error(f"获取分红数据失败:{e}")
+                traceback.print_exc()
+                raise
+
+        self.cache_service.read_from_serialized('stock_fhps_info',date)
+        try:
+
+            # date = self.reportUtils.get_current_report_year_st()
+            #  date = date
+            # 分红数据
+            date_array = ['20250331','20241231','20240930','20240630','20240331',
+                          '20231231','20230930','20230630','20230331'
+                            ,'20221231','20220930','20220630','20220331'
+                            ,'20211231','20210930','20210630','20210331'
+                            ,'20201231','20200930','20200630','20200331','20191231']
+
+            df_fh =  pd.DataFrame()
+            if self.market == 'SH' or self.market == 'SZ':
+                for date_item in date_array:
+                    df_fh_1 = ak.stock_fhps_em(date=date_item)
+                    if df_fh.empty :
+                        df_fh = df_fh_1.copy()
+                    else:
+                        if df_fh_1 is not None and df_fh_1.empty == False:
+                            df_fh = pd.concat([df_fh, df_fh_1], ignore_index=True)
+                        else:
+                            self.logger.info(f"获取分红数据是空的:{date_item}")
+                self.cache_service.write_to_cache_serialized(date, cache_key,df_fh)
+                df_fh =  df_fh[df_fh['最新公告日期'].between(date_start, date_end, inclusive='left')]
+                df_fh['年份'] = df_fh['最新公告日期'].apply(lambda x: x.year)
+                numeric_cols = ['现金分红-股息率', '每股收益', '每股净资产', '每股公积金', '每股未分配利润',
+                                '净利润同比增长']
+                df_fh[numeric_cols] = df_fh[numeric_cols].fillna(0)
+                date_columns = ['预案公告日', '股权登记日', '除权除息日', '最新公告日期']
+                for col in date_columns:
+                    # 将列转换为字符串，再转换为 datetime，确保所有非日期值转为 NaT
+                    df_fh[col] = pd.to_datetime(df_fh[col].astype(str), errors='coerce')
+                grouped = df_fh.groupby(['年份', '代码']).agg({
+                    '名称': 'first',
+                    '送转股份-送转总比例': 'first',
+                    '送转股份-送转比例': 'first',
+                    '送转股份-转股比例': 'first',
+                    '现金分红-现金分红比例': lambda x: x.dropna().tolist(),
+                    '现金分红-股息率': 'sum',
+                    '每股收益': 'sum',
+                    '每股净资产': 'last',
+                    '每股公积金': 'last',
+                    '每股未分配利润': 'last',
+                    '净利润同比增长': 'last',
+                    '总股本': 'first',
+                    '预案公告日': lambda x: x.min(),
+                    '股权登记日': lambda x: x.max(),
+                    '除权除息日': lambda x: x.max(),
+                    '方案进度': lambda x: x.dropna().tolist(),
+                    '最新公告日期': 'max'
+                }).reset_index()
+                numeric_cols = grouped.select_dtypes(include=['number']).columns.tolist()
+                yearly_avg = grouped.groupby('代码')[numeric_cols].mean().reset_index()
+                return yearly_avg
+            else:
+                return pd.DataFrame()
+        except Exception as e:
+            self.logger.error(f"获取分红数据失败:{e}")
+            return pd.DataFrame()
+
+    def get_stock_fhps_yearly_info(self,date = '20241231'):
+        """
+
+        分红数据
+         # 分红配送，"名称","代码","送转股份 - 送转总比例","送转股份 - 送转比例","送转股份 - 转股比例","现金分红 - 现金分红比例","预案公告日","股权登记日","除权除息日","方案进度","最新公告日期","每股收益","每股净资产","每股公积金","每股未分配利润","净利润同比增长","总股本","现金分红 - 股息率"
+        "名称","代码", "现金分红 - 股息率"
+        :return:
+        """
+
         cache_key = f"stock_fhps"
         if self.market  == 'usa' or self.market == 'H':
             cache_key = f"stock_fhps_{self.market}"

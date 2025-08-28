@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>股票分析结果</title>
+    <title>公司分析结果</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
 
     <!-- 配置Tailwind自定义颜色和字体 -->
     <script>
@@ -41,14 +42,52 @@
             .card-shadow {
                 @apply shadow-lg hover:shadow-xl transition-shadow duration-300;
             }
+            .responsive-table {
+                @apply overflow-x-auto;
+            }
+            .md-table {
+                @apply w-full min-w-full border-collapse my-4;
+            }
+            .md-table th {
+                @apply bg-gray-50 text-left py-3 px-4 border border-gray-200 font-semibold text-gray-700 whitespace-nowrap;
+            }
+            .md-table td {
+                @apply py-3 px-4 border border-gray-200 text-gray-800;
+                min-width: 100px; /* 设置最小宽度，避免列过窄 */
+            }
+            .md-table tr:nth-child(even) {
+                @apply bg-gray-50;
+            }
+            .md-table tr:hover {
+                @apply bg-gray-100;
+            }
+
+            /* 针对signal列单独扩大宽度（关键） */
+                .tab-content .md-content table th:nth-child(29), /* 假设signal是第23列（根据实际列数调整） */
+                .tab-content .md-content table td:nth-child(29) {
+                  min-width: 500px; /* 强制signal列最小宽度（可按需调整，如600px） */
+                  max-width: none; /* 取消最大宽度限制 */
+                }
+                .tab-content .md-content table th:nth-child(28), /* 假设signal是第23列（根据实际列数调整） */
+                .tab-content .md-content table td:nth-child(28) {
+                  min-width: 500px; /* 强制signal列最小宽度（可按需调整，如600px） */
+                  max-width: none; /* 取消最大宽度限制 */
+                }
+
+                /* 表头样式优化（可选） */
+                .tab-content .md-content th {
+                  background-color: #f5f5f5; /* 表头灰色背景，区分内容区 */
+                  font-weight: bold;
+                }
         }
     </style>
 </head>
+
 <body class="font-inter bg-gray-50 text-dark">
     <div class="container mx-auto px-4 py-8 max-w-6xl">
         <!-- 页面标题 -->
         <header class="mb-10 text-center">
-            <h1 class="text-[clamp(1.8rem,4vw,2.8rem)] font-bold text-dark mb-2">股票分析结果</h1>
+            <h1 class="text-[clamp(1.8rem,4vw,2.8rem)] font-bold text-dark mb-2">查询结果</h1>
             <div class="w-24 h-1 bg-primary mx-auto rounded-full"></div>
         </header>
 
@@ -85,7 +124,7 @@
                         <i class="fa fa-file-text-o mr-1"></i>年报分析
                     </button>
                 </li>
-                <li class="mr-2" role="presentation">
+                <li role="presentation">
                     <button
                         class="inline-block p-4 border-b-2 border-transparent rounded-t-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
                         id="sentiment-tab"
@@ -94,17 +133,6 @@
                         role="tab"
                     >
                         <i class="fa fa-smile-o mr-1"></i>情绪分析
-                    </button>
-                </li>
-                <li role="presentation">
-                    <button
-                        class="inline-block p-4 border-b-2 border-transparent rounded-t-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                        id="technical-tab"
-                        data-tab="technical-analysis"
-                        type="button"
-                        role="tab"
-                    >
-                        <i class="fa fa-bar-chart mr-1"></i>技术指标分析
                     </button>
                 </li>
             </ul>
@@ -126,37 +154,30 @@
             <div id="sentiment-analysis" class="tab-pane hidden bg-white rounded-xl p-6 mb-8 card-shadow">
                 <div class="md-content">{{ sentiment_analysis }}</div>
             </div>
-
-            <!-- 技术指标分析 -->
-            <div id="technical-analysis" class="tab-pane hidden bg-white rounded-xl p-6 mb-8 card-shadow">
-                <table class="w-full border-collapse">
-                    <tr>
-                        {% for i in range(0, image_paths|length, 2) %}
-                            <td class="p-4 text-center border border-gray-200 rounded-lg m-2">
-                                <div class="caption font-medium text-gray-700 mb-2">{{ strategies[i] }}</div>
-                                <img src="{{ image_paths[i] }}" alt="{{ strategies[i] }} 策略图片" class="rounded shadow-md hover:scale-[1.02] transition-transform duration-300">
-                            </td>
-                            {% if i + 1 < image_paths|length %}
-                                <td class="p-4 text-center border border-gray-200 rounded-lg m-2">
-                                    <div class="caption font-medium text-gray-700 mb-2">{{ strategies[i+1] }}</div>
-                                    <img src="{{ image_paths[i+1] }}" alt="{{ strategies[i+1] }} 策略图片" class="rounded shadow-md hover:scale-[1.02] transition-transform duration-300">
-                                </td>
-                            {% endif %}
-                            </tr><tr>
-                        {% endfor %}
-                    </tr>
-                </table>
-            </div>
         </div>
     </div>
 
     <script>
-        // 配置marked选项
+        // 配置marked选项，增强表格解析
         marked.setOptions({
             breaks: true,
             gfm: true,
-            smartypants: true
+            smartypants: true,
+            tables: true,  // 明确启用表格支持
+            pedantic: false,
+            sanitize: false
         });
+
+        // 自定义表格渲染器，确保表格被正确包裹
+        const renderer = new marked.Renderer();
+        renderer.table = function(header, body) {
+            return `<div class="responsive-table">
+                        <table class="md-table">
+                            ${header}
+                            ${body}
+                        </table>
+                    </div>`;
+        };
 
         // Tab切换功能
         document.addEventListener('DOMContentLoaded', function() {
@@ -190,25 +211,25 @@
                 // 公司基本情况
                 const stockSummaryElement = document.getElementById('stock-summary');
                 if (stockSummaryElement && stockSummaryElement.textContent.trim()) {
-                    stockSummaryElement.innerHTML = marked.parse(stockSummaryElement.textContent);
+                    stockSummaryElement.innerHTML = marked.parse(stockSummaryElement.textContent, { renderer: renderer });
                 }
 
                 // 基本面分析
                 const fundamentalElement = document.querySelector('#fundamental-analysis .md-content');
                 if (fundamentalElement && fundamentalElement.textContent.trim()) {
-                    fundamentalElement.innerHTML = marked.parse(fundamentalElement.textContent);
+                    fundamentalElement.innerHTML = marked.parse(fundamentalElement.textContent, { renderer: renderer });
                 }
 
                 // 年报分析
                 const annualReportElement = document.querySelector('#annual-report-analysis .md-content');
                 if (annualReportElement && annualReportElement.textContent.trim()) {
-                    annualReportElement.innerHTML = marked.parse(annualReportElement.textContent);
+                    annualReportElement.innerHTML = marked.parse(annualReportElement.textContent, { renderer: renderer });
                 }
 
                 // 情绪分析
                 const sentimentElement = document.querySelector('#sentiment-analysis .md-content');
                 if (sentimentElement && sentimentElement.textContent.trim()) {
-                    sentimentElement.innerHTML = marked.parse(sentimentElement.textContent);
+                    sentimentElement.innerHTML = marked.parse(sentimentElement.textContent, { renderer: renderer });
                 }
             }
 
@@ -236,6 +257,14 @@
 
             document.querySelectorAll('.md-content ol').forEach(ol => {
                 ol.classList.add('list-decimal');
+            });
+
+            // 为表格中的长文本添加处理
+            document.querySelectorAll('.md-table td').forEach(cell => {
+                // 允许长文本换行
+                cell.style.wordBreak = 'break-word';
+                // 确保有足够的内边距
+                cell.style.padding = '0.75rem 1rem';
             });
         });
     </script>

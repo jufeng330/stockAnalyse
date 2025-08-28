@@ -167,7 +167,7 @@ class stockConceptData:
         return temp_map
 
 
-    def stock_board_concept_cons_ths(self,symbol: str = "阿里巴巴概念") -> pd.DataFrame:
+    def stock_board_concept_cons_ths(self,symbol: str = "阿里巴巴概念",stock_board_ths_map_df = None) -> pd.DataFrame:
         """
         同花顺-板块-概念板块-成份股
         http://q.10jqka.com.cn/gn/detail/code/301558/
@@ -176,7 +176,8 @@ class stockConceptData:
         :return: 成份股
         :rtype: pandas.DataFrame
         """
-        stock_board_ths_map_df = self.stock_board_concept_name_ths()
+        if stock_board_ths_map_df is None:
+            stock_board_ths_map_df = self.stock_board_concept_name_ths()
         symbol = (
             stock_board_ths_map_df[stock_board_ths_map_df["概念名称"] == symbol]["网址"]
             .values[0]
@@ -189,6 +190,7 @@ class stockConceptData:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
             "Cookie": f"v={v_code}",
+            "Upgrade-Insecure-Requests":1
         }
         url = f"http://q.10jqka.com.cn/gn/detail/field/264648/order/desc/page/1/ajax/1/code/{symbol}"
         r = requests.get(url, headers=headers)

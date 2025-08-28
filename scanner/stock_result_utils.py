@@ -19,7 +19,7 @@ class  StockFileUtils:
 
     """
 
-    def __init__(self, min_score: float = 30,market = 'SH'):
+    def __init__(self, min_score: float = 30,market = 'SH',name = '1'):
         """
         初始化扫描器
 
@@ -31,9 +31,12 @@ class  StockFileUtils:
         self.logger = logging.getLogger(__name__)
         self.market = market
         now = datetime.now()
-        self.time_str = now.strftime("%Y%m%d%H%M%S")
-        self.filePath = os.path.join(os.path.dirname(__file__), f'result/{market}_tmp_{self.time_str}')
-        self.analyseFilePath = os.path.join(os.path.dirname(__file__), f'result/{market}_analyse_{self.time_str}')
+        self.time_str =  now.strftime("%Y%m%d%H")
+        current_dir = os.path.dirname(__file__)  # 得到 stockLib 目录路径
+        parent_dir = os.path.dirname(current_dir)  # 得到 stock_analyse 目录路径
+        self.cache_dir = os.path.join(parent_dir, 'cache/selector_result')
+        self.filePath = os.path.join(self.cache_dir , f'{market}_analyse_{name}_{self.time_str}')
+        self.analyseFilePath = os.path.join(self.cache_dir , f'{market}_analyse_{name}_{self.time_str}')
         os.makedirs(self.filePath, exist_ok=True)
         os.makedirs(self.analyseFilePath, exist_ok=True)
 
@@ -239,3 +242,12 @@ class  StockFileUtils:
         filename = os.path.join(self.analyseFilePath, f'{file_name}.md')
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(file_content)
+
+    def read_text_file(self, file_name) -> str:
+        """读取过程日志"""
+        filename = os.path.join(self.analyseFilePath, f'{file_name}')
+        if not os.path.exists(filename):
+            return ""
+        with open(filename, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+        return file_content

@@ -55,8 +55,6 @@ class StockUtils:
         """
         将字段转换成float类型
         """
-
-
         # 2. 移除百分比符号
         def convert_unit(value):
             if pd.isna(value):

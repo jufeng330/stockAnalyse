@@ -24,104 +24,110 @@ class stockNewsData:
         :return: 个股新闻
         :rtype: pandas.DataFrame
         """
-        options = webdriver.ChromeOptions()
-        options.add_experimental_option('excludeSwitches', ['enable-logging'])  # 禁止打印日志
-        options.add_argument('--ignore-certificate-errors')
-        # linux下所需参数
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-extensions')
-        options.add_argument('headless')
-        # 当前文件夹里chromedriver路径
+        try:
+            options = webdriver.ChromeOptions()
+            options.add_experimental_option('excludeSwitches', ['enable-logging'])  # 禁止打印日志
+            options.add_argument('--ignore-certificate-errors')
+            # linux下所需参数
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-extensions')
+            options.add_argument('headless')
+            # 当前文件夹里chromedriver路径
 
-        service = Service(chrome_driver_path)
-        driver = webdriver.Chrome(service=service, options=options)
+            service = Service(chrome_driver_path)
+            driver = webdriver.Chrome(service=service, options=options)
 
-        # 构建请求参数
-        params = {
-            "uid": "",
-            "keyword": symbol,
-            "type": ["cmsArticleWebOld"],
-            "client": "web",
-            "clientType": "web",
-            "clientVersion": "curr",
-            "param": {
-                "cmsArticleWebOld": {
-                    "searchScope": "default",
-                    "sort": "default",
-                    "pageIndex": 1,
-                    "pageSize": pageSize,
-                    "preTag": "<em>",
-                    "postTag": "</em>"
+            # 构建请求参数
+            params = {
+                "uid": "",
+                "keyword": symbol,
+                "type": ["cmsArticleWebOld"],
+                "client": "web",
+                "clientType": "web",
+                "clientVersion": "curr",
+                "param": {
+                    "cmsArticleWebOld": {
+                        "searchScope": "default",
+                        "sort": "default",
+                        "pageIndex": 1,
+                        "pageSize": pageSize,
+                        "preTag": "<em>",
+                        "postTag": "</em>"
+                    }
                 }
             }
-        }
 
-        # 转换为 JSON 字符串
-        params_json = json.dumps(params)
+            # 转换为 JSON 字符串
+            params_json = json.dumps(params)
 
-        # 进行 URL 编码
-        encoded_params = quote(params_json, safe='')
-        # 构建完整的请求URL
-        url = (f'https://search-api-web.eastmoney.com/search/jsonp?'
-               f'cb=jQuery35108613950799967576_1701396301284&param={encoded_params}&_=1701396301285')
+            # 进行 URL 编码
+            encoded_params = quote(params_json, safe='')
+            # 构建完整的请求URL
+            url = (f'https://search-api-web.eastmoney.com/search/jsonp?'
+                   f'cb=jQuery35108613950799967576_1701396301284&param={encoded_params}&_=1701396301285')
 
-        driver.get(url)
-        data_text = driver.page_source
-        # print(data_text)
-        pattern = re.compile(r'"bizCode"(.*?)\)</pre>', re.DOTALL)
-        data_re_list = pattern.findall(data_text)
-        # print(data_re_list)
-        data_json = json.loads(
-            '{"bizCode"' + data_re_list[0]
-        )
-        temp_df = pd.DataFrame(data_json["result"]["cmsArticleWebOld"])
-        temp_df.rename(
-            columns={
-                "date": "发布时间",
-                "mediaName": "文章来源",
-                "code": "-",
-                "title": "新闻标题",
-                "content": "新闻内容",
-                "url": "新闻链接",
-                "image": "-",
-            },
-            inplace=True,
-        )
-        temp_df["关键词"] = symbol
-        temp_df = temp_df[
-            [
-                "关键词",
-                "新闻标题",
-                "新闻内容",
-                "发布时间",
-                "文章来源",
-                "新闻链接",
+            driver.get(url)
+            data_text = driver.page_source
+            # print(data_text)
+            pattern = re.compile(r'"bizCode"(.*?)\)</pre>', re.DOTALL)
+            data_re_list = pattern.findall(data_text)
+            # print(data_re_list)
+            data_json = json.loads(
+                '{"bizCode"' + data_re_list[0]
+            )
+            temp_df = pd.DataFrame(data_json["result"]["cmsArticleWebOld"])
+            temp_df.rename(
+                columns={
+                    "date": "发布时间",
+                    "mediaName": "文章来源",
+                    "code": "-",
+                    "title": "新闻标题",
+                    "content": "新闻内容",
+                    "url": "新闻链接",
+                    "image": "-",
+                },
+                inplace=True,
+            )
+            temp_df["关键词"] = symbol
+            temp_df = temp_df[
+                [
+                    "关键词",
+                    "新闻标题",
+                    "新闻内容",
+                    "发布时间",
+                    "文章来源",
+                    "新闻链接",
+                ]
             ]
-        ]
-        temp_df["新闻标题"] = (
-            temp_df["新闻标题"]
-            .str.replace(r"\(<em>", "", regex=True)
-            .str.replace(r"</em>\)", "", regex=True)
-        )
-        temp_df["新闻标题"] = (
-            temp_df["新闻标题"]
-            .str.replace(r"<em>", "", regex=True)
-            .str.replace(r"</em>", "", regex=True)
-        )
-        temp_df["新闻内容"] = (
-            temp_df["新闻内容"]
-            .str.replace(r"\(<em>", "", regex=True)
-            .str.replace(r"</em>\)", "", regex=True)
-        )
-        temp_df["新闻内容"] = (
-            temp_df["新闻内容"]
-            .str.replace(r"<em>", "", regex=True)
-            .str.replace(r"</em>", "", regex=True)
-        )
-        temp_df["新闻内容"] = temp_df["新闻内容"].str.replace(r"\u3000", "", regex=True)
-        temp_df["新闻内容"] = temp_df["新闻内容"].str.replace(r"\r\n", " ", regex=True)
-        return temp_df
+            temp_df["新闻标题"] = (
+                temp_df["新闻标题"]
+                .str.replace(r"\(<em>", "", regex=True)
+                .str.replace(r"</em>\)", "", regex=True)
+            )
+            temp_df["新闻标题"] = (
+                temp_df["新闻标题"]
+                .str.replace(r"<em>", "", regex=True)
+                .str.replace(r"</em>", "", regex=True)
+            )
+            temp_df["新闻内容"] = (
+                temp_df["新闻内容"]
+                .str.replace(r"\(<em>", "", regex=True)
+                .str.replace(r"</em>\)", "", regex=True)
+            )
+            temp_df["新闻内容"] = (
+                temp_df["新闻内容"]
+                .str.replace(r"<em>", "", regex=True)
+                .str.replace(r"</em>", "", regex=True)
+            )
+            temp_df["新闻内容"] = temp_df["新闻内容"].str.replace(r"\u3000", "", regex=True)
+            temp_df["新闻内容"] = temp_df["新闻内容"].str.replace(r"\r\n", " ", regex=True)
+            return temp_df
+        except Exception as e:
+            print(f"stock_news_em {symbol} Error: {e}")
+            return pd.DataFrame()
+
+
 
 
     def save_to_excel(df: pd.DataFrame, symbol: str):

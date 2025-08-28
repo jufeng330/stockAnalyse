@@ -13,6 +13,8 @@ from litellm import maritalk_key
 # from akshare import stock_individual_basic_info_hk_xq
 from tqdm import tqdm
 from .stock_analyzer import  StockAnalyzer
+from .stock_select_strategy import StockSelectStrategy
+
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
@@ -33,7 +35,7 @@ from .stock_result_utils import  StockFileUtils
 class TopStockScanner:
     """全盘筛选高打分股票的扫描器"""
 
-    def __init__(self, max_workers: int = 20, min_score: float = 30,market = 'SH'):
+    def __init__(self, max_workers: int = 20, min_score: float = 30,market = 'SH',strategy_type ='1'):
         """
         初始化扫描器
 
@@ -46,7 +48,9 @@ class TopStockScanner:
         self.min_score = min_score
         self.logger = logging.getLogger(__name__)
         self.market = market
-        self.file_utils = StockFileUtils(market = self.market)
+        self.stockSelector = StockSelectStrategy(market=self.market,strategy_type = strategy_type)
+        strategy_name = self.stockSelector.get_strategy_name(strategy_type)
+        self.file_utils = StockFileUtils(market = self.market,name = strategy_name)
         self.cache_service = FileCacheUtils(market=self.market, cache_dir='history_' + market)
         self.reportUtils = ReportDateUtils()
         self.stock_strategy = StockStrategy()
@@ -123,12 +127,9 @@ class TopStockScanner:
         """扫描全盘股票，返回高打分结果列表"""
         try:
             df_stocks_data = self.get_all_stocks()
-            if type == 1:
-                df_normal= self.get_stock_normal_info(df_stock= df_stocks_data)
-            elif type == 2:
-                df_normal = self.get_stock_quality_info(df_stock=df_stocks_data)
-            else:
-                df_normal = df_stocks_data
+
+
+            df_normal = self.stockSelector.select_stock(df_stocks_data,strategy_type = type,strategy_filter = strategy_filter)
 
             set_normal  = set(df_normal['代码'])
             df_stocks_data = df_stocks_data[df_stocks_data['代码'].astype(str).isin(set_normal)]
@@ -136,32 +137,7 @@ class TopStockScanner:
             # all_stocks = df_stocks_data['代码'].astype(str).str.startswith("600").loc[lambda x: x].index[:200].tolist()
             # all_stocks = df_stocks_data['代码'].astype(str).str.tolist()
 
-            all_stocks = df_stocks_data
-            all_stocks['market'] = self.market
-            # all_stocks = all_stocks.head(100)
-            total_stocks = len(all_stocks)
-            self.logger.info(f"\n开始扫描 {total_stocks} 支股票……")
-            results = []
-            total_batches = (total_stocks + batch_size - 1) // batch_size
-            GREEN = '\033[92m'
-            RESET = '\033[0m'
-            bar_format = f"{GREEN}{{l_bar}}{{bar}}{{r_bar}}{RESET}"
-            with tqdm(total=total_batches, desc="批次处理进度", ncols=80,bar_format = bar_format) as pbar:
-                for i in range(0, total_stocks, batch_size):
-                    batch_number = i // batch_size + 1
-                    self.logger.info(f"\r当前进度: 批次 {batch_number}/{total_batches}")
-                    batch = all_stocks.iloc[i:i + batch_size]
-                    batch_results = self.process_batch(batch)
-                    results.extend(batch_results)
-                    if i + batch_size < total_stocks:
-                        time.sleep(random.uniform(3, 5))
-                    if results and ((len(results) % 100 == 0) or (i + batch_size >= total_stocks)):
-                        self.file_utils.save_intermediate_results(results)
-                        # 更新进度条
-                    pbar.update(1)
-                    pbar.set_description(f"批次处理进度 (当前批次: {batch_number}/{total_batches})")
-
-            self.logger.info("\n扫描结束！")
+            results = self.scan_stock(batch_size, df_stocks_data)
 
             if results:
                 df_results = pd.DataFrame(results)
@@ -173,6 +149,175 @@ class TopStockScanner:
             self.logger.error(f"全盘扫描失败：{str(e)}")
             traceback.print_exc()
             raise
+
+    def scan_stock(self, batch_size, df_stocks_data):
+        all_stocks = df_stocks_data
+        all_stocks['market'] = self.market
+        # all_stocks = all_stocks.head(100)
+        total_stocks = len(all_stocks)
+        self.logger.info(f"\n开始扫描 {total_stocks} 支股票……")
+        results = []
+        total_batches = (total_stocks + batch_size - 1) // batch_size
+        GREEN = '\033[92m'
+        RESET = '\033[0m'
+        bar_format = f"{GREEN}{{l_bar}}{{bar}}{{r_bar}}{RESET}"
+        with tqdm(total=total_batches, desc="批次处理进度", ncols=80, bar_format=bar_format) as pbar:
+            for i in range(0, total_stocks, batch_size):
+                batch_number = i // batch_size + 1
+                self.logger.info(f"\r当前进度: 批次 {batch_number}/{total_batches}")
+                batch = all_stocks.iloc[i:i + batch_size]
+                batch_results = self.process_batch(batch)
+                results.extend(batch_results)
+                if i + batch_size < total_stocks:
+                    time.sleep(random.uniform(3, 5))
+                if results and ((len(results) % 100 == 0) or (i + batch_size >= total_stocks)):
+                    self.file_utils.save_intermediate_results(results)
+                    # 更新进度条
+                pbar.update(1)
+                pbar.set_description(f"批次处理进度 (当前批次: {batch_number}/{total_batches})")
+        self.logger.info("\n扫描结束！")
+        return results
+
+    def backtest_stocks(self, list_high_score_stocks, analysis_date='2025-06-06'):
+        """
+        回测一批股票在分析日期之后的涨跌情况
+
+        参数:
+        df_high_score_stocks: 高得分股票数据框
+        analysis_date: 分析日期
+
+        返回:
+        回测结果数据框和统计信息
+        """
+        # 转换分析日期为日期格式
+        analysis_date = pd.to_datetime(analysis_date)
+        # 结果存储列表
+        results = []
+        # 遍历每只股票
+        df_high_score_stocks = pd.DataFrame(list_high_score_stocks)
+        for i in range(1, 4):
+            df_high_score_stocks[f'day_{i}_return'] = 0.0
+            df_high_score_stocks[f'day_{i}_is_up'] = None
+        for idx, row in df_high_score_stocks.iterrows():
+            stock_code = row['股票代码']
+            stock_name = row['stock_name']
+            # 获取该股票的历史数据，假设结束日期为分析日期后的7天
+            # 实际应用中可能需要调整时间范围
+
+            current_date = datetime.now().strftime('%Y%m%d')
+            # 计算60天前的日期作为开始日
+            start_date = (datetime.now() - timedelta(days=60)).strftime('%Y%m%d')
+            end_date = current_date
+
+            stock_company = stockCompanyInfo(marker=self.market,symbol=stock_code)
+
+            # 获取历史数据
+            try:
+                stock_data = stock_company.get_stock_history_data(
+                    start_date_str=start_date,
+                    end_date_str=end_date
+                )
+
+                # 确保数据不为空
+                if stock_data is None or stock_data.empty:
+                    continue
+
+                # 找到分析日期或之后的第一个交易日
+                stock_data['日期'] = pd.to_datetime(stock_data['日期']).dt.date
+                df_data = len(stock_data[stock_data['日期'].apply(lambda x: x >= analysis_date.date())])
+                if len(df_data) == 0:
+                    continue
+                first_trade_date =df_data['日期'].iloc[0]
+                # 获取分析日期的价格
+                col_price = '收盘'
+                future_data = stock_data[stock_data['日期'].apply(lambda x: x >= first_trade_date)]
+                analysis_price = float(future_data[col_price].iloc[0])
+
+
+                for i in range(1, 4):
+                    target_date = first_trade_date + pd.Timedelta(days=1)
+                    # 找到目标日期或之后的第一个交易日
+                    future_data = stock_data[stock_data['日期'].apply(lambda x: x >= target_date)]
+
+                    if not future_data.empty:
+                        future_price = float(future_data.iloc[0][col_price] ) # 假设列名为'close'
+                        price_change_pct = (future_price - analysis_price) / analysis_price * 100
+                        is_up = price_change_pct > 0
+
+                        df_high_score_stocks.at[idx, f'day_{i}_return'] = price_change_pct
+                        df_high_score_stocks.at[idx, f'day_{i}_is_up'] = is_up
+                        first_trade_date = future_data.iloc[0]['日期']
+                    else:
+                        df_high_score_stocks.at[idx, f'day_{i}_return'] = None
+                        df_high_score_stocks.at[idx, f'day_{i}_is_up'] = None
+
+
+            except Exception as e:
+                print(f"Error processing stock {stock_code}: {e}")
+                continue
+
+        # 统计信息
+        stats = self.generate_statistics_report(df_high_score_stocks)
+        stats_s1 = self.generate_statistics_report(df_high_score_stocks,type='强烈推荐买入')
+        stats_s2 = self.generate_statistics_report(df_high_score_stocks, type='建议买入')
+
+        stats_result = f'整体统计信息:\n {stats} 强烈推荐买入统计信息:{stats_s1}\n 建议买入统计信息{stats_s2}'
+
+        return df_high_score_stocks, stats_result
+
+    def generate_statistics_report(self, df_result, type='all'):
+        """
+        生成统计报告，输出每只股票在第1、2、3天后的涨跌幅平均值和涨跌数量
+
+        参数:
+        results_df: 回测结果数据框
+
+        返回:
+        统计报告字符串
+        """
+        if df_result.empty:
+            return "没有可用的回测数据"
+        if type == 'all':
+            df = df_result
+        else:
+            df = df_result[df_result['投资建议'] == type]
+
+        report = "===== 股票回测统计报告 =====\n\n"
+
+        for i in range(1, 4):
+            day_return_col = f'day_{i}_return'
+            day_is_up_col = f'day_{i}_is_up'
+
+            if day_return_col  not in df.columns or day_is_up_col not in df.columns:
+                continue
+            avg_return = df[day_return_col].mean()
+            up_count = len(df[df[day_is_up_col] == True])
+            down_count =len(df[df[day_is_up_col] == False])
+            total_count = len(df)
+            if total_count>0:
+                report += f"第{i}天统计:\n"
+                report += f"  平均涨跌幅: {avg_return:.2f}%\n"
+                report += f"  上涨数量: {up_count} ({up_count / total_count * 100:.2f}%)\n"
+                report += f"  下跌数量: {down_count} ({down_count / total_count * 100:.2f}%)\n\n"
+            else:
+                report += f"第{i}天统计:\n"
+                report += f"  总数量: 0\n"
+
+
+        return report
+
+    """
+     下面是废弃的代码，暂时保留
+    """
+
+
+
+
+
+
+
+
+
 
 
     def get_stock_normal_info(self, df_stock = None, strategy_filter ='avg') -> pd.DataFrame:
@@ -332,127 +477,3 @@ class TopStockScanner:
 
         return df_filtered
 
-    def backtest_stocks(self, list_high_score_stocks, analysis_date='2025-06-06'):
-        """
-        回测一批股票在分析日期之后的涨跌情况
-
-        参数:
-        df_high_score_stocks: 高得分股票数据框
-        analysis_date: 分析日期
-
-        返回:
-        回测结果数据框和统计信息
-        """
-        # 转换分析日期为日期格式
-        analysis_date = pd.to_datetime(analysis_date)
-        # 结果存储列表
-        results = []
-        # 遍历每只股票
-        df_high_score_stocks = pd.DataFrame(list_high_score_stocks)
-        for i in range(1, 4):
-            df_high_score_stocks[f'day_{i}_return'] = 0.0
-            df_high_score_stocks[f'day_{i}_is_up'] = None
-        for idx, row in df_high_score_stocks.iterrows():
-            stock_code = row['股票代码']
-            stock_name = row['stock_name']
-            # 获取该股票的历史数据，假设结束日期为分析日期后的7天
-            # 实际应用中可能需要调整时间范围
-
-            current_date = datetime.now().strftime('%Y%m%d')
-            # 计算60天前的日期作为开始日
-            start_date = (datetime.now() - timedelta(days=60)).strftime('%Y%m%d')
-            end_date = current_date
-
-            stock_company = stockCompanyInfo(marker=self.market,symbol=stock_code)
-
-            # 获取历史数据
-            try:
-                stock_data = stock_company.get_stock_history_data(
-                    start_date_str=start_date,
-                    end_date_str=end_date
-                )
-
-                # 确保数据不为空
-                if stock_data is None or stock_data.empty:
-                    continue
-
-                # 找到分析日期或之后的第一个交易日
-                stock_data['日期'] = pd.to_datetime(stock_data['日期']).dt.date
-                first_trade_date = stock_data[stock_data['日期'].apply(lambda x: x >= analysis_date.date())]['日期'].iloc[0]
-                # 获取分析日期的价格
-                col_price = '收盘'
-                future_data = stock_data[stock_data['日期'].apply(lambda x: x >= first_trade_date)]
-                analysis_price = float(future_data[col_price].iloc[0])
-
-
-                for i in range(1, 4):
-                    target_date = first_trade_date + pd.Timedelta(days=1)
-                    # 找到目标日期或之后的第一个交易日
-                    future_data = stock_data[stock_data['日期'].apply(lambda x: x >= target_date)]
-
-                    if not future_data.empty:
-                        future_price = float(future_data.iloc[0][col_price] ) # 假设列名为'close'
-                        price_change_pct = (future_price - analysis_price) / analysis_price * 100
-                        is_up = price_change_pct > 0
-
-                        df_high_score_stocks.at[idx, f'day_{i}_return'] = price_change_pct
-                        df_high_score_stocks.at[idx, f'day_{i}_is_up'] = is_up
-                        first_trade_date = future_data.iloc[0]['日期']
-                    else:
-                        df_high_score_stocks.at[idx, f'day_{i}_return'] = None
-                        df_high_score_stocks.at[idx, f'day_{i}_is_up'] = None
-
-
-            except Exception as e:
-                print(f"Error processing stock {stock_code}: {e}")
-                continue
-
-        # 统计信息
-        stats = self.generate_statistics_report(df_high_score_stocks)
-        stats_s1 = self.generate_statistics_report(df_high_score_stocks,type='强烈推荐买入')
-        stats_s2 = self.generate_statistics_report(df_high_score_stocks, type='建议买入')
-
-        stats_result = f'整体统计信息:\n {stats} 强烈推荐买入统计信息:{stats_s1}\n 建议买入统计信息{stats_s2}'
-
-        return df_high_score_stocks, stats_result
-
-    def generate_statistics_report(self, df_result, type='all'):
-        """
-        生成统计报告，输出每只股票在第1、2、3天后的涨跌幅平均值和涨跌数量
-
-        参数:
-        results_df: 回测结果数据框
-
-        返回:
-        统计报告字符串
-        """
-        if df_result.empty:
-            return "没有可用的回测数据"
-        if type == 'all':
-            df = df_result
-        else:
-            df = df_result[df_result['投资建议'] == type]
-
-        report = "===== 股票回测统计报告 =====\n\n"
-
-        for i in range(1, 4):
-            day_return_col = f'day_{i}_return'
-            day_is_up_col = f'day_{i}_is_up'
-
-            if day_return_col  not in df.columns or day_is_up_col not in df.columns:
-                continue
-            avg_return = df[day_return_col].mean()
-            up_count = len(df[df[day_is_up_col] == True])
-            down_count =len(df[df[day_is_up_col] == False])
-            total_count = len(df)
-            if total_count>0:
-                report += f"第{i}天统计:\n"
-                report += f"  平均涨跌幅: {avg_return:.2f}%\n"
-                report += f"  上涨数量: {up_count} ({up_count / total_count * 100:.2f}%)\n"
-                report += f"  下跌数量: {down_count} ({down_count / total_count * 100:.2f}%)\n\n"
-            else:
-                report += f"第{i}天统计:\n"
-                report += f"  总数量: 0\n"
-
-
-        return report

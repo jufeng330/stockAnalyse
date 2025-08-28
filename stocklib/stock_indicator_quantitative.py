@@ -16,7 +16,9 @@ from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 # from tensorflow.keras.models import Sequential
 # from tensorflow.keras.layers import Dense
-
+from .utils_file_cache import FileCacheUtils
+from .stock_border import stockBorderInfo
+from .stock_company import stockCompanyInfo
 
 
 class stockIndicatorQuantitative:
@@ -33,6 +35,7 @@ class stockIndicatorQuantitative:
         previous_year = current_date - datetime.timedelta(days=100)
         self.previous_year_str = previous_year.strftime("%Y%m%d")
 
+
     @staticmethod
     def get_stock_code(df):
         if '股票代码' in df.columns:
@@ -45,10 +48,13 @@ class stockIndicatorQuantitative:
     # 根据code获取每日成交数据
     def stock_day_data_code(self,stock_code, market, start_date_str, end_date_str):
         df = None
+        stock_service = stockBorderInfo(market = market)
+        stock_company = stockCompanyInfo(marker = market,symbol = stock_code)
         if market == 'usa':
             try:
                 # 1. 获取美股实时行情数据
-                stock_us_spot_df = ak.stock_us_spot_em()
+
+                stock_us_spot_df = stock_service.get_stock_spot()
                 print("美股实时行情数据：")
                 # 查找阿里巴巴的代码
                 baba_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
@@ -61,11 +67,12 @@ class stockIndicatorQuantitative:
                     df = stock_us_hist_df
                     # print(stock_us_hist_df)
                 else:
-                    stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str, end_date=end_date_str)
+                    stock_us_hist_df =stock_company.get_stock_history_data(start_date_str=start_date_str, end_date_str=end_date_str)
+                    # stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str, end_date=end_date_str)
                     df = stock_us_hist_df
                     # print(stock_us_hist_df)
             except Exception as e:
-                print(f"获取美股数据时出现错误: {e}")
+                print(f"获取美股数据时出现错误: {e} ")
         elif market == 'H':  # 港股数据获取
             try:
                 # 获取港股历史数据
@@ -123,8 +130,14 @@ class stockIndicatorQuantitative:
                 print(f"获取 A 股数据时出现错误: {e}")
         if df is not None:
             df = df.reset_index(drop=True)
-            df['开盘'] = pd.to_numeric(df['开盘'], errors="coerce")
-            df['收盘'] = pd.to_numeric(df['收盘'], errors="coerce")
+            if '开盘' not  in df.columns and '开盘价' in df.columns:
+                df = df.rename(columns={'开盘价': '开盘'})
+            if '收盘' not  in df.columns and '收盘价' in df.columns:
+                df = df.rename(columns={'收盘价': '收盘'})
+            if '开盘' in df.columns:
+                df['开盘'] = pd.to_numeric(df['开盘'], errors="coerce")
+            if '收盘' in df.columns:
+                df['收盘'] = pd.to_numeric(df['收盘'], errors="coerce")
         if '股票代码' not in df.columns:
             df['股票代码'] = stock_code
 

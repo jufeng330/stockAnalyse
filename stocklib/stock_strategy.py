@@ -4,13 +4,16 @@ from datetime import datetime
 
 import pandas as pd
 import numpy as np
+from .utils_report_date import ReportDateUtils
 
 
 class StockStrategy:
     """股票分析器，用于计算股票的各种指标"""
-    def __init__(self):
+    def __init__(self,market='SH'):
         now = datetime.now()
         self._setup_logging()
+        self.date_utils = ReportDateUtils()
+        self.market = market
     def _setup_logging(self) -> None:
         """配置日志记录"""
         logging.basicConfig(
@@ -35,9 +38,10 @@ class StockStrategy:
             #   【营业增长率、利润增长率、负债率 】
         """
         market = df_stock_data['market']
-        stock_name = df_stock_data.loc['股票简称'] if '股票简称' in df_stock_data.index else ''
-        if stock_name == '':
-            stock_name = df_stock_data.loc['名称_x'] if '名称_x' in df_stock_data.index else ''
+        stock_name = next(
+            (df_stock_data.loc[key] for key in ['股票简称', '名称_x', '名称'] if key in df_stock_data.index),
+            ''
+        )
 
         # 处理股本数量（通过行索引获取，无需指定列名）
         total_shares = df_stock_data.loc['总股本'] if '总股本' in df_stock_data.index else -1
@@ -46,6 +50,12 @@ class StockStrategy:
         # 处理市值相关字段
         market_cap = df_stock_data.loc['总市值'] if '总市值' in df_stock_data.index else -1
         circulating_cap = df_stock_data.loc['流通市值'] if '流通市值' in df_stock_data.index else -1
+        circulating_type = df_stock_data.loc['市值规模'] if '市值规模' in df_stock_data.index else -1
+
+        concept_name = df_stock_data.loc['概念板块'] if '概念板块' in df_stock_data.index else ''
+        border_name = df_stock_data.loc['行业板块'] if '行业板块' in df_stock_data.index else ''
+        gx_ratio = df_stock_data.loc['现金分红-股息率'] if '现金分红-股息率' in df_stock_data.index else 0
+
 
         # 处理行情数据（假设 df_history_data 按行索引存储）
         price = df_stock_data.loc['最新价'] if '最新价' in df_stock_data.index else -1
@@ -85,30 +95,31 @@ class StockStrategy:
         result = {
             'stock_code': stock_code,
             'stock_name': stock_name,
+            '行业': border_name,  # 需额外数据填充，此处留空
+            '市值规模': circulating_type,
             'analysis_date': datetime.now().strftime('%Y-%m-%d'),
             '市值': market_cap,
             '流通市值': circulating_cap,
             '股本数量': total_shares,
-            '行业': '',  # 需额外数据填充，此处留空
-
             'price': price,
             'price_change': price_change,
             '振幅': amplitude,
             '换手率': turnover_rate,
             '60日涨跌幅': change_60d,
             '年初至今涨跌幅': change_ytd,
-
             'ROE': roe,
             'PE': pe,
             'PB': pb,
             '动态市盈率': dynamic_pe,
             '市销率': ps_ratio,
             '股息率': dividend_yield,
+            '平均股息率': gx_ratio,
             '营业总收入': revenue_total,
             '营业增长率': revenue_growth,
             '利润增长率': profit_growth,
             '负债率': debt_ratio,
-            'DCF': dcf
+            'DCF': dcf,
+            '概念板块': concept_name
         }
 
         df_result = pd.DataFrame([result])
@@ -124,14 +135,14 @@ class StockStrategy:
           随机指标：%K < 20为超卖，+5分；%K > 80为超买，-5分。
         """
         try:
-            score, buy_signal_str = self.calculate_score_indicate(df_history_data)
+            score, buy_signal_str = self.calculate_score_indicate(df_history_data,df_stock = df_stock)
             return score, buy_signal_str
         except Exception as e:
             self.logger.error(f"计算打分失败：{str(e)}")
             traceback.print_exc()
             raise
 
-    def calculate_score_indicate(self, df_history_data: pd.DataFrame):
+    def calculate_score_indicate(self, df_history_data: pd.DataFrame,df_stock = None):
         """
                计算股票综合打分（基本打分满分100分），并根据 OBV 与随机指标调整±5分，
 
@@ -151,26 +162,84 @@ class StockStrategy:
         """
         score = 0
         buy_signal_str = '买入的信号'
+        stock_code = df_history_data['股票代码']
+
+        from .stock_wave_analyser import StockWaveAnalyzer
+        wave_service = StockWaveAnalyzer(market=self.market,symbol=stock_code)
+
+        df_wave,total_trend,last_trend = wave_service.analysis_stock_trend(stock_df = df_history_data)
+        wave_percent = df_wave['波动百分比'].iloc[-1]
+        if total_trend == '上升':
+            if last_trend == '翻转中':
+                if wave_percent<3:
+                    score += 70
+                elif wave_percent<5:
+                    score += 60
+                elif wave_percent<10:
+                    score += 40
+                else:
+                    score += 30
+                buy_signal_str += f"股票趋势:{total_trend} 阶段:{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+            elif last_trend == '探底中':
+                if wave_percent>20:
+                    score += 40
+                elif wave_percent>10:
+                    score += 30
+                else:
+                    score += 20
+
+                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+        elif total_trend == '下降':
+            if last_trend == '翻转中':
+                if wave_percent<3:
+                    score += 30
+                elif wave_percent<5:
+                    score += 20
+                else:
+                    score += 10
+
+                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+            elif last_trend == '探底中':
+                score += 0
+                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+        else:
+            if last_trend == '翻转中':
+                if wave_percent < 3:
+                    score +=20
+                else:
+                    score += 10
+                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+
+        result = self.has_recent_buy_signal(df=df_history_data, signal_column='macd_signal_index')
+        if (result):
+            df_result_accuracy = self.find_macd_inc_stock(df_history_data, stock_code)
+            score_value = df_result_accuracy['score'].iloc[0]
+            score += score_value
+            buy_signal_str += f"MACD 信号 触发买入 {score_value}\n"
+
+        result_inc = self.calculate_vol_inc(df=df_history_data, ratio=1.5,df_stock = df_stock)
+        if (result_inc > 0):
+            df_result_acc = self.find_vol_inc_stock(df_history_data, stock_code)
+            score_inc = df_result_acc['成交量股价上涨得分'].iloc[0]
+            score += score_inc+result_inc
+            buy_signal_str += f"成交量放大:{result_inc} 触发买入  score: {score_inc}\n"
 
         result = self.has_recent_buy_signal(df=df_history_data, signal_column='rsi_signal')
         if (result):
-            score += 15
+            score += 10
             buy_signal_str += f"RSI 信号 触发买入\n"
         result = self.has_recent_buy_signal(df=df_history_data, signal_column='kdj_signal')
         if (result):
-            score += 20
+            score += 5
             buy_signal_str += f"KDJ 信号 触发买入\n"
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='macd_signal_index')
-        if (result):
-            score += 20
-            buy_signal_str += f"MACD 信号 触发买入\n"
+
         result = self.has_recent_buy_signal(df = df_history_data, signal_column='breakout_signal')
         if(result):
             score += 5
             buy_signal_str += f"均线策略 信号 触发买入\n"
         result = self.has_recent_buy_signal(df=df_history_data, signal_column='bb_signal')
         if (result):
-            score += 5
+            score += 10
             buy_signal_str += f"布林带策略 信号 触发买入\n"
 
         result = self.has_recent_buy_signal(df=df_history_data, signal_column='volume_signal')
@@ -194,13 +263,14 @@ class StockStrategy:
         if (result):
             score += 5
             buy_signal_str += f"均值回归策略 信号 触发买入\n"
-        result = self.calculate_vol_inc(df=df_history_data,  ratio=1.5)
-        if score>0:
-            score += result
-            buy_signal_str += f"成交量放大:{result} 触发买入\n"
+
+
+
+        # stock = StockWaveAnalyzer()
+        buy_signal_str = buy_signal_str.replace('\n', '    ')
         return score, buy_signal_str
 
-    def calculate_vol_inc(self, df: pd.DataFrame, ratio=1.5):
+    def calculate_vol_inc(self, df: pd.DataFrame, ratio=1.5,df_stock = None):
         # 确保DataFrame中有足够的数据计算10日平均
         if len(df) < 10:
             return 0  # 数据不足返回0分
@@ -213,21 +283,32 @@ class StockStrategy:
         # 获取今日和昨日的数据
         today = df.iloc[-1]
         yesterday = df.iloc[-2]
-
+        current = df_stock
         # 初始化分数
         score = 0
 
         # 检查今日成交量与10日平均的关系
         ratio2 = ratio * 1.33
+
         if today[col_name] >= today[col_name_avg] * ratio2:
-            score = 50
+            score = 25
         elif today[col_name] >= today[col_name_avg] * ratio:
-            score = 30
+            score = 15
         # 检查今日成交量与昨日成交量的关系
         if today[col_name] >= yesterday[col_name] * ratio2:
-            score = max(score, 40)  # 取最高分
-        elif today[col_name] >= yesterday[col_name] * ratio:
             score = max(score, 20)  # 取最高分
+        elif today[col_name] >= yesterday[col_name] * ratio:
+            score = max(score, 10)  # 取最高分
+        if current is not None and len(current)>0:
+            process = self.date_utils.calculate_stock_progress()
+            if process> 0:
+                current_value = current['成交量'] /process
+            else:
+                current_value = current['成交量']
+            if current_value >= today[col_name] * ratio2:
+                score = max(score, 40)  # 取最高分
+            elif current_value >= today[col_name]  * ratio:
+                score = max(score, 25)  # 取最高分
         return score
 
 
@@ -439,6 +520,7 @@ class StockStrategy:
         col_lrl = col_name
         col_lrl_rename = col_adjustment
         if not (col_name in df_financial.columns):
+            logging.warn(f'get_stock_avg_postive:{self.market}  col_name:{col_name} not in df_financial.columns')
             return set(df_financial['股票代码'])
         df_recent_three_years = df_financial[
             (df_financial['报告期'] > date) ].copy()
@@ -488,9 +570,9 @@ class StockStrategy:
         # 筛选出连续三年平均利润率均为正的股票
         avg_profit = df_recent_three_years.groupby('股票代码')[col_lrl].mean().reset_index()
 
-        stock_array = ['AAPL', 'GOOGL', 'MSFT', 'TSLA']
-        print(avg_profit[avg_profit['股票代码'].isin(stock_array)].to_markdown())
-        print(df_recent_three_years[df_recent_three_years['股票代码'].isin(stock_array)][['股票代码', col_lrl]].to_markdown())
+        # stock_array = ['AAPL', 'GOOGL', 'MSFT', 'TSLA']
+        # print(avg_profit[avg_profit['股票代码'].isin(stock_array)].to_markdown())
+        # print(df_recent_three_years[df_recent_three_years['股票代码'].isin(stock_array)][['股票代码', col_lrl]].to_markdown())
 
         # 筛选出平均利润大于阈值的股票
         if condition_type == '>':
@@ -528,24 +610,177 @@ class StockStrategy:
         df_merged['ROE'] = df_merged['净资产收益率'] / df_merged['总市值'] * 100
         return df_merged
 
-    def find_macd_stock(self, df_stock, stock_code):
+
+    def find_vol_inc_stock(self, df_stock, stock_code,date = None):
         """
-         根据macd指标，验证每个macd指标都是正常的。每个macd都能超过10天上涨或者下跌，macd指标90%都可以带来超5%的收益。
+        根据成交量指标评估放量成交与后续收益的关系并评分
 
-        :param df_stock:
-        :param stock_code:
-        :return:
+          根据成交量 指标，验证每次放量成交指标90 % 都可以带来超5 % 的收益。
+            1、 某条成交量是上10日平均成交量的2倍并且 股票是上涨的
+              、 后续3天涨幅超过5%
+                如果该情况100%返回30分
+              如果该情况平均涨幅找过5% fanh 10分
+              如果下跌
+            2 、 条成交量是上10日平均成交量的2倍并且 股票是下跌的
+               后续3天涨幅超过5%
+                如果该情况100%返回-30分
+              如果该情况平均涨幅找过5% fanh -10分
+        参数:
+        df_stock: 包含股票数据的DataFrame
+        stock_code: 股票代码
+
+        返回:
+        pd.DataFrame: 包含评估结果的DataFrame
         """
+        # 确保数据按日期排序
+        col_date = '日期'
+        df_stock = df_stock.sort_values(col_date)
 
-        return pd.DataFrame()
+        # 计算前10日平均成交量
+        df_stock['vol_avg_10'] = df_stock['成交量'].rolling(window=10).mean()
 
-    def find_vol_inc_stock(self, df_stock, stock_code):
+        # 找出放量且上涨的交易日（条件1）
+        df_stock['is_vol_up'] = (df_stock['成交量'] > 2 * df_stock['vol_avg_10']) & \
+                                (df_stock['收盘'] > df_stock['开盘'])
+
+        # 找出放量且下跌的交易日（条件2）
+        df_stock['is_vol_down'] = (df_stock['成交量'] > 2 * df_stock['vol_avg_10']) & \
+                                  (df_stock['收盘'] < df_stock['开盘'])
+
+        # 计算后续3天的涨幅
+        df_stock['return_3d'] = df_stock['收盘'].pct_change(3).shift(-3) * 100  # 转换为百分比
+
+        # 筛选出符合条件的交易日
+        condition1_days = df_stock[df_stock['is_vol_up']].copy()
+        condition2_days = df_stock[df_stock['is_vol_down']].copy()
+
+        # 计算条件1的得分
+        if len(condition1_days) > 0:
+            condition1_all_over_5 = (condition1_days['return_3d'] > 5).all()
+            condition1_avg_return = condition1_days['return_3d'].mean()
+
+            if condition1_all_over_5:
+                score1 = 50
+            elif condition1_avg_return > 5:
+                score1 = 30
+            elif condition1_avg_return > 1:
+                score1 = 10
+            else:
+                score1 = 0
+        else:
+            score1 = 0
+
+        # 计算条件2的得分
+        if len(condition2_days) > 0:
+            condition2_all_over_5 = (condition2_days['return_3d'] > 5).all()
+            condition2_avg_return = condition2_days['return_3d'].mean()
+
+            if condition2_all_over_5:
+                score2 = 30
+            elif condition2_avg_return > 5:
+                score2 = 10
+            elif condition2_avg_return > 1:
+                score2 = 5
+            else:
+                score2 = 0
+        else:
+            score2 = 0
+
+        # 合并得分
+        total_score = score1 + score2
+
+        # 构建结果DataFrame
+        result_df = pd.DataFrame({
+            '股票代码': [stock_code],
+            '成交量股价上涨符合天数': [len(condition1_days)],
+            '成交量股价上涨平均涨幅': [condition1_days['return_3d'].mean() if len(condition1_days) > 0 else 0],
+            '成交量股价上涨得分': [score1],
+            '成交量股价下跌符合天数': [len(condition2_days)],
+            '成交量股价下跌平均涨幅': [condition2_days['return_3d'].mean() if len(condition2_days) > 0 else 0],
+            '成交量股价下跌得分': [score2],
+            '总得分': [total_score]
+        })
+
+        return result_df
+
+
+
+    def find_macd_inc_stock(self, df_stock,stock_code):
         """
-         根据成交量指标，验证每次放量成交指标90%都可以带来超5%的收益。
+        分析MACD指标的买点卖点，评估交易表现并评分
+        根据成交量指标，验证每次放量成交指标90 % 都可以带来超5 % 的收益。
+            1、 找出
+            macd指标的买点，找出macd指标的卖点
+            2、 计算macd指标相邻的买点和卖点的天数
+            以及涨幅
+            3、 如果100 % 超过10天，以及涨幅超过10 % 分数是50分
+            如果100 % 超过5天，以及涨幅超过5 %
+            其他10分
+        参数:
+        df_stock: 包含股票数据的DataFrame
+        stock_code: 股票代码
 
-        :param df_stock:
-        :param stock_code:
-        :return:
+        返回:
+        dict: 包含评分和平均收益的字典
         """
+        # 确保数据按日期排序
+        col_date = '日期'
+        df_stock = df_stock.sort_values(col_date)
 
-        return pd.DataFrame()
+        # 找出MACD买点和卖点
+        buy_points = df_stock[df_stock['macd_signal_index'] == 1].copy()
+        sell_points = df_stock[df_stock['macd_signal_index'] == -1].copy()
+
+        # 如果没有买点或卖点，直接返回0分
+        if buy_points.empty or sell_points.empty:
+            return pd.DataFrame({
+                '股票代码': [stock_code],
+                'score': 0,
+                'avg_return': 0
+            })
+        # 确保买点在卖点之前，找到相邻的买卖点对
+        buy_sell_pairs = []
+        last_buy_index = -1
+
+        for _, buy in buy_points.iterrows():
+            # 找到该买点之后的第一个卖点
+            subsequent_sells = sell_points[sell_points[col_date] > buy[col_date]]
+            if not subsequent_sells.empty:
+                first_sell = subsequent_sells.iloc[0]
+                buy_sell_pairs.append((buy, first_sell))
+
+        # 如果没有有效的买卖点对，返回0分
+        if not buy_sell_pairs:
+            return  pd.DataFrame({
+            '股票代码': [stock_code],
+            'score': 0,
+            'avg_return': 0
+        })
+
+        # 计算每对买卖点的涨幅
+        returns = []
+        for buy, sell in buy_sell_pairs:
+            return_rate = (sell['收盘'] / buy['收盘'] - 1) * 100  # 转换为百分比
+            returns.append(return_rate)
+
+        # 计算平均收益
+        avg_return = sum(returns) / len(returns)
+
+        # 根据条件评分
+        all_over_10_return = all(r > 10 for r in returns)
+
+        all_over_5_return = all(r > 5 for r in returns)
+
+        if all_over_10_return:
+            score = 50
+        elif all_over_5_return:
+            score = 30
+        else:
+            score = 15
+
+        result_df = pd.DataFrame({
+            '股票代码': [stock_code],
+            'score': score,
+            'avg_return': avg_return
+        })
+        return  result_df

@@ -159,10 +159,39 @@
 
 
 
+
+
+
 }
     </style>
 </head>
 <body>
+ <!-- Header -->
+        <div class="header">
+            <h1>🚀 股票分析系统 - Web V1.0</h1>
+            <div class="header-info">
+                <div class="version-info">
+                    Web V1.0 | WebStockAnalyzer |  {% if auth_enabled %}| 🔐 已认证{% endif %}
+                    <span id="systemStatus" class="status-indicator status-ready">系统就绪</span>
+                </div>
+                <div class="header-buttons">
+                    <button class="config-btn" onclick="showConfig()">⚙️ AI配置</button>
+                    {% if auth_enabled %}
+                    <a href="{{ url_for('logout') }}" class="logout-btn">🚪 退出登录</a>
+                    {% endif %}
+                </div>
+
+                <div class="header-buttons">
+                    <a href="/" class="config-btn">🏠 选股</a>
+                    <a href="/history" class="config-btn">📚 历史记录</a>
+                    <a href="/stock" class="config-btn">📈 股票分析</a>
+                    {% if auth_enabled %}
+                    <a href="{{ url_for('logout') }}" class="logout-btn">🚪 退出登录</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
     <h1>量化交易策略查询</h1>
     <form method="post">
           <!-- AI 配置容器 -->
@@ -186,15 +215,20 @@
                 <div class="group">
                     <label for="ai_model">AI模型:</label>
                     <select id="ai_model" name="ai_model">
-                        <option value="qwen2.5-32B-instruct">qwen2.5-32B-instruct</option>
-                        <option value="qwen3-235b-a22b">qwen3-235b-a22b</option>
-                        <option value="qwen3-8b">qwen3-8b</option>
-                        <option value="qwen2.5-72b-instruct">qwen2.5-72b-instruct</option>
-                        <option value="qwen3-4b">qwen3-4b</option>
+                        <option value="qwen3-235b-a22b-thinking-2507">qwen3-235b-a22b-thinking-2507</option>
+                        <option value="qwen3-30b-a3b-instruct-2507">qwen3-30b-a3b-instruct-2507</option>
+                        <option value="qwen3-30b-a3b-thinking-2507">qwen3-30b-a3b-thinking-2507</option>
+                        <option value="qwen-turbo-2025-07-15">qwen-turbo-2025-07-15</option>
+                        <option value="qwen-turbo-2025-04-28">qwen-turbo-2025-04-28</option>
+                        <option value="qwen-turbo">qwen-turbo</option>
+                        <option value=" deepseek-r1"> deepseek-r1</option>
+                        <option value="qwen-plus-latest">qwen-plus-latest</option>
+                        <option value="qwen-plus-2025-07-14">qwen-plus-2025-07-14</option>
                         <option value="qwen2.5-14b-instruct">qwen2.5-14b-instruct</option>
                         <option value="doubao-1.5-pro-32k-250115">doubao-1.5-pro-32k-250115</option>
                         <option value="doubao-1-5-thinking-pro-250415">doubao-1-5-thinking-pro-250415</option>
                         <option value="deepseek">DeepSeek</option>
+                        <option value="deepseek-r1">deepseek-r1</option>
                         <option value="openai">chat-gpt-3.5</option>
                         <option value="moonshot-v1-128k">moonshot-v1-128k</option>
                         <option value="moonshot-v1-32k">moonshot-v1-32k</option>

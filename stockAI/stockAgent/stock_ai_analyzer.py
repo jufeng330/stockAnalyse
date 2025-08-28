@@ -43,7 +43,7 @@ class StockAiAnalyzer:
         if(model is not None):
             self.model = model
         else:
-            self.model = "qwen-plus"
+            self.model = "qwen-turbo"
         if ai_platform is not None:
             if ai_platform == 'qwen':
                 self.base_http_api_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/'
@@ -87,7 +87,14 @@ class StockAiAnalyzer:
                 {stock_financial_analysis_indicator_df}
                 
                 """
-        self.data_dir = os.path.join(os.path.dirname(__file__), 'result')
+        current_dir = os.path.dirname(__file__)  # 得到 stockAgent 目录路径
+        # 2. 向上两级目录（从stockAgent -> stockAI -> stock_analyse）
+        parent_dir = os.path.dirname(os.path.dirname(current_dir))  # 得到 stock_analyse 目录路径
+        # 3. 拼接cache目录
+        self.data_dir = os.path.join(parent_dir, 'cache/analyzer_result')
+        if os.path.exists(self.data_dir) is False:
+            os.makedirs(self.data_dir)
+        # self.data_dir = os.path.join(os.path.dirname(__file__), 'result')
 
     def aliyun_chat_api_call(self,symbol='', message='你好'):
         current_date = datetime.datetime.now()
@@ -96,7 +103,7 @@ class StockAiAnalyzer:
             debug_log(f"{self.model}_api_call............................")
             if (len(message) > 109024):
                 debug_log(f'消息太长，长度:{len(message)} 截断消息... ')
-                message = message[:108024]
+                # message = message[:108024]
             messages = [
                 {"role": "system", "content": self.instruction},
                 {"role": "user", "content": message}
@@ -130,7 +137,7 @@ class StockAiAnalyzer:
             debug_log(f"openai_api_call............................")
             if (len(message) > 109024):
                 debug_log(f'消息太长，长度:{len(message)} 截断消息... ')
-                message = message[:108024]
+                # message = message[:108024]
 
             client = OpenAI(
                 # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx",
@@ -205,9 +212,9 @@ class StockAiAnalyzer:
         single_industry_df = stock_sector_fund_flow_rank_df[stock_sector_fund_flow_rank_df['名称'] == industry]
 
 
-        df_concept_border = stock_service.get_stock_board_all_concept_name()
+        # df_concept_border = stock_service.get_stock_board_all_industry_name()
         # 获取概念板块的数据情况
-        concept_info_df = stock_service.get_stock_board_concept_name(symbol=symbol, df_stock_board=df_concept_border)
+        concept_info_df = stock_service.get_stock_industry_by_code(code=symbol)
 
         # 个股历史数据查询
         stock_zh_a_hist_df = stock_service.get_stock_history_data(start_date_str=start_date, end_date_str=end_date)
@@ -267,7 +274,7 @@ class StockAiAnalyzer:
                                         stock_zyjs_ths_df, technical_indicators_df,is_mark_down = false):
 
         if is_mark_down :
-            concept_info_df = concept_info_df.to_markdown(index=False) if concept_info_df is not None else ''
+            concept_info_df = concept_info_df if concept_info_df is not None else ''
             single_industry_df = single_industry_df.to_markdown(index=False) if single_industry_df is not None else ''
             stock_financial_analysis_indicator_df = stock_financial_analysis_indicator_df.to_markdown(
                 index=False)
@@ -308,22 +315,36 @@ class StockAiAnalyzer:
                                              concept_info_df)
         debug_log(f"构建最终提示: {finally_prompt}")
         user_message = (
-            f"{finally_prompt}\n"
+            f"{finally_prompt}\n\n"  # 假设finally_prompt已定义，此处保持原逻辑
             f"请基于以上收集到的实时的真实数据，发挥你的A股分析专业知识，对未来3天该股票的价格走势做出深度预测。\n"
             f"在预测中请全面考虑主营业务、基本数据、所在行业数据、所在概念板块数据、历史行情、最近新闻以及资金流动等多方面因素。\n"
             f"给出具体的涨跌百分比数据分析总结。\n\n"
             f"以下是具体问题，请详尽回答：\n\n"
             f"1. 对最近这个股票的资金流动情况以及所在行业的资金流情况和所在概念板块的资金情况分别进行深入分析，"
-            f"请详解这三个维度的资金流入或者流出的主要原因，并评估是否属于短期现象和未来的影响。\n\n"
+            f"请详解这三个维度的资金流入或者流出的主要原因，并评估是否属于短期现象和未来的影响。\n"
+            f"相关数据：\n"
+            f"## 个股资金流：\n{stock_individual_fund_flow_df}\n\n"  # 表格后加空行
+            f"## 行业资金流：\n{single_industry_df}\n\n"  # 表格前后加空行
+            f"## 概念板块资金流：\n{concept_info_df}\n\n"  # 表格前后加空行
+
             f"2. 基于最近财务指标数据，深刻评估公司未来业绩是否有望积极改善，可以关注盈利能力、负债情况等财务指标。"
-            f"同时分析未来财务状况。\n\n"
+            f"同时分析未来财务状况。\n"
+            f"## 财务指标数据：\n{stock_financial_analysis_indicator_df}\n\n"  # 表格前后加空行
+
             f"3. 是否存在与行业或公司相关的积极或者消极的消息，可能对股票价格产生什么影响？分析新闻对市场情绪的具体影响，"
-            f"并评估消息的可靠性和长期影响。\n\n"
+            f"并评估消息的可靠性和长期影响。\n"
+            f"## 相关新闻：\n{stock_news_em_df}\n\n"  # 表格前后加空行
+
             f"4. 基于技术分析指标，如均线、MACD、RSI、CCI等，请提供更为具体的未来走势预测。"
-            f"关注指标的交叉和趋势，并解读当下可能的买卖信号。\n\n"
+            f"关注指标的交叉和趋势，并解读当下可能的买卖信号。\n"
+            f"## 技术指标数据：\n{technical_indicators_df}\n\n"  # 表格前后加空行
+
             f"5. 在综合以上分析的基础上，向投资者推荐在未来3天内采取何种具体操作？"
             f"从不同的投资者角度明确给出买入、卖出、持有或补仓或减仓的建议，并说明理由，附上相应的止盈/止损策略。"
             f"记住给出的策略需要精确给我写出止盈位的价格，充分利用利润点，或者精确写出止损位的价格，规避亏损风险。\n\n"
+            f"## 历史行情参考：\n{stock_zh_a_hist_df}\n\n"  # 表格前后加空行
+            f"## 个股基本信息：\n{stock_individual_info_em_df}\n\n"  # 表格前后加空行
+            f"## 质押数据参考：\n{stock_zyjs_ths_df}\n\n"  # 表格前后加空行
             f"你可以一步一步的去思考，期待你深刻的分析，将有力指导我的投资决策。"
         )
         debug_log(f"构建用户消息: {user_message}")
