@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 
 # 设置OpenAI API密钥
-openai.api_key = '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'
+openai.api_key = ''
 
 load_dotenv()
 # 加载环境变量中的 OpenAI API 密钥
