@@ -14,7 +14,7 @@ class MySQLCache:
     def __init__(
             self,
             db_user: str = 'root',
-            db_password: str = 'my_password',
+            db_password: str = '123456',
             db_host: str = '127.0.0.1',
             db_port: int = '3306',
             db_name: str = 'stock_info',
