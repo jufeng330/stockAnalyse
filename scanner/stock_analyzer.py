@@ -9,7 +9,7 @@ import sys
 import os
 from datetime import datetime
 from typing import Dict, Optional, Tuple
-from stock_analyse.stocklib.technical_params import TechnicalParams
+from stocklib.technical_params import TechnicalParams
 
 import numpy as np
 import pandas as pd

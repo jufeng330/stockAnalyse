@@ -12,8 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple, Union
 import pandas as pd
 import akshare as ak
-from litellm import maritalk_key
-from torch.ao.quantization.fx import convert
+# from litellm import maritalk_key
+# from torch.ao.quantization.fx import convert
 # from akshare import stock_individual_basic_info_hk_xq
 from tqdm import tqdm
 
