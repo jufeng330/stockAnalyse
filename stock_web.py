@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import stocklib.stock_indicator_quantitative as stockIndicatorQuantitative
 import matplotlib
 import stocklib.stock_indicator_html as stockIndicatorHtml
-from stock_analyse.web_sse.stock_analyzer_service import StockAnalyzerService
+from web_sse.stock_analyzer_service import StockAnalyzerService
 from web_sse.sse_manager import SSEManager
 from web_sse.streaminganalyzer import  StreamingAnalyzer
 

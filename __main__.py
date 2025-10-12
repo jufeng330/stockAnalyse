@@ -431,8 +431,6 @@ def print_stock_company():
 
 
 if __name__ == '__main__':
-    print_stock_wave()
-    print_stock_strategy()
 
     print_stock_concept()
     print_report_stock()
@@ -441,8 +439,8 @@ if __name__ == '__main__':
 
     print_financial_stock()
 
-
-
+    print_stock_wave()
+    print_stock_strategy()
 
     print_fh_stock()
 
