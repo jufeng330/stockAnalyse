@@ -16,6 +16,7 @@ from stocklib.utils_file_cache import FileCacheUtils
 from stocklib.stock_concept_service import stockConcepService
 from stocklib.stock_wave_analyser import StockWaveAnalyzer
 from stocklib.stock_sentiment_analysis import StockSentimentAnalysis
+from stocklib.stock_data_init import  stockDataInit
 # matplotlib.use('Agg')
 # matplotlib.use('TkAgg')  # 或 'Qt5Agg'
 
@@ -178,7 +179,7 @@ def print_financial_stock():
         print(f"发生未知错误: {e}")
         traceback.print_exc()
 
-def print_stock_border():
+def print_stock_border(stockSelectService=None):
     global stock, df_fh, market, result, df_stock_board, e
     report_service = stockAnnualReport()
     stock_border_info = stockBorderInfo(market='SH')
@@ -431,6 +432,16 @@ def print_stock_company():
 
 
 if __name__ == '__main__':
+
+    stock = stockDataInit(market='H')
+    stock.init_stock_allmarket_by_day();
+    stock.init_stock_by_year(report_date = '20250930');
+
+    stock = stockDataInit(market='usa')
+    stock.init_stock_by_day();
+    stock.init_stock_by_year(report_date = '20250930');
+
+
 
     print_stock_concept()
     print_report_stock()

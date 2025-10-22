@@ -74,7 +74,12 @@ class MySQLCache:
             return
         table_name =  self._get_table_name(date, report_type, file_type,market)
 
+        is_stock = (table_name.count('_') >= 4) or ( (report_type.count('_') >= 3) and report_type.endswith('indicator'))
+        if is_stock:
+            return ;
 
+        if(table_name is None):
+            return
         if table_name.startswith("history"):
             if 'ma_signal' in data.columns:
                 data = data.rename(columns={'ma_signal': 'mac_signal'})
@@ -149,7 +154,11 @@ class MySQLCache:
         elif report_type.startswith("stock_concept")  or report_type.startswith("stock_industry") :
             table_name = f"{report_type}_{market}"
         elif report_type.startswith("stock_famous_"):
-            table_name = f"stock_famous__{market}"
+            table_name = f"stock_famous_{market}"
+        elif report_type.startswith("stock_fhps"):
+            table_name = f"stock_fhps_{market}"
+        elif report_type.startswith("stock_hsgt_hold"):
+            table_name = f"stock_hsgt_hold_{market}"
         else:
             table_name = f"{report_type}_{date}_{market}"
         return table_name
