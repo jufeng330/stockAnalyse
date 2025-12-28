@@ -87,10 +87,10 @@ class FileCacheUtils:
         """将 DataFrame 使用 pickle 写入二进制缓存"""
         filepath = self._get_cache_filepath(date, report_type ,file_type='pkl')
         try:
-
-            self.mysql.write_to_cache(date, report_type, data,force=force,market=self.market,file_type='pkl')
-            if not force and os.path.exists(filepath) :
+            if not force and os.path.exists(filepath):
                 return
+            self.mysql.write_to_cache(date, report_type, data,force=force,market=self.market,file_type='pkl')
+
             # 创建目录（如果不存在）
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -106,13 +106,13 @@ class FileCacheUtils:
         """从 pickle 缓存中读取数据"""
         filepath = self._get_cache_filepath(date, report_type ,file_type='pkl')
         try:
-            df_mysql =  self.mysql.read_from_cache(date, report_type,market=self.market,file_type='pkl')
             if os.path.exists(filepath):
                 # 从 pickle 文件中读取数据
                 with open(filepath, 'rb') as f:
                     df = pickle.load(f)
                     return df
-            return None  # 文件不存在返回 None
+            df_mysql =  self.mysql.read_from_cache(date, report_type,market=self.market,file_type='pkl')
+            return df_mysql  # 文件不存在返回 None
         except Exception as e:
             print(f"[CACHE] 读取缓存失败: {filepath}, 错误: {e}")
             return None

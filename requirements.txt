@@ -1,3 +1,4 @@
+tabula-py
 # 基础科学计算和数据处理库
 numpy==2.0.0
 pandas==2.2.2
@@ -21,6 +22,10 @@ loguru==0.7.2
 # 可选：数据可视化（未来扩展）
 matplotlib==3.9.2
 seaborn==0.13.2
+TA-LIB
+sklearn
+tabula
+gradio
 
 # 开发和调试工具
 ipython>=7.34.0
@@ -31,3 +36,20 @@ html5lib==1.1
 lxml==4.9.4
 jsonpath==0.82.2
 openpyxl==3.1.5
+dashscope
+dotenv
+markdown
+litellm
+torch
+pymysql
+matplotlib
+py_mini_racer
+litellm
+bs4
+tqdm
+litellm
+selenium
+flask
+pywavelets
+mpld3
+apscheduler

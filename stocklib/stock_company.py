@@ -322,8 +322,13 @@ class stockCompanyInfo:
     def get_stock_fund_flow(self):
         # 获取当前个股所在行业板块情况
         # [序号，名称，今日涨跌幅，主力净流入 - 净额，主力净流入 - 净占比，超大单净流入 - 净额，超大单净流入 - 净占比，大单净流入 - 净额，大单净流入 - 净占比，中单净流入 - 净额，中单净流入 - 净占比，小单净流入 - 净额，小单净流入 - 净占比，主力净流入最大股]
-        stock_sector_fund_flow_rank_df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
-        return stock_sector_fund_flow_rank_df
+        try:
+            stock_sector_fund_flow_rank_df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+            return stock_sector_fund_flow_rank_df
+        except Exception as e:
+            self.logger.error(f"get_stock_fund_flow Error occurred: {e}")
+            return pd.DataFrame()
+
 
     # 历史的个股资金流
     def get_stock_individual_fund_flow(self):

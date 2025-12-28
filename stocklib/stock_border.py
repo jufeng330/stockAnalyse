@@ -185,25 +185,28 @@ class stockBorderInfo:
         report_service = stockAnnualReport()
         if market == 'SH' or market == 'SZ':
             # 资产负债表
-            zcfz_key = f"zcfz_{date}"
+            zcfz_key = f"zcfz"
             stock_zcfz_em_df = self.cache_service.read_from_csv(date, "zcfz")
             if stock_zcfz_em_df is None:
                 stock_zcfz_em_df = ak.stock_zcfz_em(date=date)
                 self.cache_service.write_to_csv(date, "zcfz", stock_zcfz_em_df)
+                self.cache_service.write_to_cache_serialized(date, zcfz_key, stock_zcfz_em_df);
 
             # 利润表
-            lrb_key = f"lrb_{date}"
+            lrb_key = f"lrb"
             stock_lrb_em_df = self.cache_service.read_from_csv(date, "lrb")
             if stock_lrb_em_df is None:
                 stock_lrb_em_df = ak.stock_lrb_em(date=date)
                 self.cache_service.write_to_csv(date, "lrb", stock_lrb_em_df)
+                self.cache_service.write_to_cache_serialized(date, lrb_key, stock_lrb_em_df);
 
             # 现金流量表
-            xjll_key = f"xjll_{date}"
+            xjll_key = f"xjll"
             stock_xjll_em_df = self.cache_service.read_from_csv(date, "xjll")
             if stock_xjll_em_df is None:
                 stock_xjll_em_df = ak.stock_xjll_em(date=date)
                 self.cache_service.write_to_csv(date, "xjll", stock_xjll_em_df)
+                self.cache_service.write_to_cache_serialized(date, xjll_key, stock_xjll_em_df);
             zcfz, lrb, xjll = stock_zcfz_em_df, stock_lrb_em_df, stock_xjll_em_df
             return zcfz, lrb, xjll
         elif market == 'H' or market == 'usa':
@@ -373,11 +376,31 @@ class stockBorderInfo:
     # 获取北向的持仓数据    序号     代码    名称   今日收盘价  今日涨跌幅   今日持股-股数     今日持股-市值  今日持股-占流通股比  今日持股-占总股本比  今日增持估计-股数  今日增持估计-市值  今日增持估计-市值增幅  今日增持估计-占流通股比  今日增持估计-占总股本比   所属板块         日期
     def get_stock_hsgt_hold_stock_em(self):
         """
-        获取北向的数据
-        :return:
+        获取北向的持仓数据并添加缓存机制
+        数据字段: 序号     代码    名称   今日收盘价  今日涨跌幅   今日持股-股数     今日持股-市值  今日持股-占流通股比  今日持股-占总股本比  今日增持估计-股数  今日增持估计-市值  今日增持估计-市值增幅  今日增持估计-占流通股比  今日增持估计-占总股本比   所属板块         日期
+        :return: 北向资金持仓数据DataFrame
         """
-        stock_em_hsgt_hold_stock_df = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
-        print(stock_em_hsgt_hold_stock_df)
+        # 缓存键名，包含市场信息
+        cache_key = f"stock_hsgt_hold_{self.market}"
+
+        # 获取当前日期作为缓存的日期标识（格式：YYYYMMDD）
+        current_date = self.reportUtils.get_current_history_date_st()
+
+        # 尝试从缓存读取数据
+        stock_em_hsgt_hold_stock_df = self.cache_service.read_from_serialized(current_date, cache_key)
+
+        # 如果缓存未命中，则从接口获取数据
+        if stock_em_hsgt_hold_stock_df is None or stock_em_hsgt_hold_stock_df.empty:
+            try:
+                # 调用akshare接口获取北向资金数据
+                stock_em_hsgt_hold_stock_df = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
+                # 写入缓存
+                self.cache_service.write_to_cache_serialized(current_date, cache_key, stock_em_hsgt_hold_stock_df)
+                self.logger.info(f"北向资金数据已缓存，日期: {current_date}")
+            except Exception as e:
+                self.logger.error(f"获取北向资金数据失败: {str(e)}")
+                return pd.DataFrame()  # 出错时返回空DataFrame
+
         return stock_em_hsgt_hold_stock_df
     @staticmethod
     def format_float(x):
@@ -814,7 +837,7 @@ class stockBorderInfo:
          # 分红配送，"名称","代码","送转股份 - 送转总比例","送转股份 - 送转比例","送转股份 - 转股比例","现金分红 - 现金分红比例","预案公告日","股权登记日","除权除息日","方案进度","最新公告日期","每股收益","每股净资产","每股公积金","每股未分配利润","净利润同比增长","总股本","现金分红 - 股息率"
         :return:
         """
-        df_fh = self.get_stock_fhps_yearly_info()
+        df_fh = self.get_stock_fhps_yearly_info(date)
         date_start_str = date
         date_end_str = self.reportUtils.get_report_date_add_str(date_str=date, days=365)
         # date_start = datetime.datetime.strptime(date_start_str, "%Y%m%d").date()
@@ -1001,7 +1024,7 @@ class stockBorderInfo:
             # date = self.reportUtils.get_current_report_year_st()
             #  date = date
             # 分红数据
-            date_array = ['20250331','20241231','20240930','20240630','20240331',
+            date_array = ['20250930','20250630','20250331','20241231','20240930','20240630','20240331',
                           '20231231','20230930','20230630','20230331'
                             ,'20221231','20220930','20220630','20220331'
                             ,'20211231','20210930','20210630','20210331'
