@@ -282,6 +282,7 @@ def stock_analysis():
         system_prompt = request.form.get('system_prompt', system_prompt)
         message_format = request.form.get('message_format', message_format)
 
+
         image_paths, strategies_selected, stock_summary, stock_analysis_result, annual_report_analysis, sentiment_analysis,sentiment_score = analyzer.get_stock_analysis(
             stock_code, market, start_date_str, end_date_str,
             selected_strategies, system_prompt, message_format,
@@ -670,5 +671,6 @@ def check_auth_config():
     return web_auth_config.get('enabled', False), web_auth_config
 
 
+
 if __name__ == '__main__':
-    app.run(debug=True,port = 38080)
+    app.run(debug=True,host="0.0.0.0",port = 38080)

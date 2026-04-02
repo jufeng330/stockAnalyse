@@ -55,6 +55,8 @@ class StockAiAnalyzer:
                 self.base_http_api_url = 'https://api.openai.com/v1/'
             elif ai_platform == 'kimi':
                 self.base_http_api_url = 'https://api.moonshot.cn/v1'
+            elif ai_platform == 'llmProxy':
+                self.base_http_api_url = 'http://192.168.1.12:8000/v1'
         if system_prompt is not None:
             self.instruction = system_prompt
         else:
@@ -473,3 +475,54 @@ class StockAiAnalyzer:
 
         text = self.stock_indicator_analyse(market='SH', symbol='000681',start_date='20250101',end_date='20250501')
         print(text)
+
+
+def main():
+    """
+    主函数：测试阿里云大模型的aliyun_chat_api_call方法
+    """
+    print("===== 开始测试阿里云StockAiAnalyzer.aliyun_chat_api_call =====")
+
+    # 1. 初始化分析器实例
+    try:
+        # 自定义配置（可根据需要调整）
+        analyzer = StockAiAnalyzer(
+            model="qwen-turbo",  # 可选：qwen-turbo/qwen-plus/qwen-max
+            ai_platform="qwen",
+            # 自定义系统提示词（可选）
+            system_prompt="你是专业的A股分析师，回答简洁明了，重点突出"
+        )
+        debug_log("StockAiAnalyzer 初始化成功")
+
+    except Exception as e:
+        print(f"初始化失败: {e}")
+        return
+
+    # 2. 构造测试消息（模拟股票分析请求）
+    test_symbol = "600036"  # 招商银行股票代码（测试用）
+    test_message = """
+    请分析招商银行（600036）的投资价值：
+    1. 行业地位和竞争优势
+    2. 近期财务表现
+    3. 未来发展趋势
+    4. 投资风险提示
+    """
+
+    # 3. 调用阿里云API方法
+    print(f"\n正在调用阿里云API分析股票: {test_symbol}")
+    print(f"请求消息: {test_message.strip()}")
+    print("\n" + "-" * 50)
+
+    result = analyzer.aliyun_chat_api_call(
+        symbol=test_symbol,
+        message=test_message
+    )
+
+    # 4. 输出结果
+    print(f"\n分析结果:\n{result}")
+    print("\n===== 测试完成 =====")
+
+
+# 程序入口
+if __name__ == "__main__":
+    main()
