@@ -23,53 +23,109 @@ def _get_history(market: str, symbol: str, start_date: str | None, end_date: str
 
 def _build_ma(symbol: str, latest, service: TechnicalIndicatorService) -> dict:
     signal = service.signal_from_value(latest.get("mac_signal"))
-    return {
-        "symbol": symbol,
-        "indicator": "ma",
-        "ma_10": latest.get("MA_10"),
-        "ma_30": latest.get("MA_30"),
-        "signal": signal,
-        "last_price": latest.get("收盘"),
-    }
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="ma",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        ma_10=latest.get("MA_10"),
+        ma_30=latest.get("MA_30"),
+    )
 
 
 def _build_macd(symbol: str, latest, service: TechnicalIndicatorService) -> dict:
     signal = service.signal_from_value(latest.get("macd_signal_index"))
-    return {
-        "symbol": symbol,
-        "indicator": "macd",
-        "macd_dif": latest.get("macd_dif"),
-        "macd_signal": latest.get("macd_signal"),
-        "hist": latest.get("hist"),
-        "signal": signal,
-        "last_price": latest.get("收盘"),
-    }
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="macd",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        macd_dif=latest.get("macd_dif"),
+        macd_signal=latest.get("macd_signal"),
+        hist=latest.get("hist"),
+    )
 
 
 def _build_rsi(symbol: str, latest, period: int, service: TechnicalIndicatorService) -> dict:
     rsi_value = latest.get("RSI")
     signal = service.rsi_signal(rsi_value)
-    return {
-        "symbol": symbol,
-        "indicator": "rsi",
-        "rsi": rsi_value,
-        "period": period,
-        "signal": signal,
-        "last_price": latest.get("收盘"),
-    }
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="rsi",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        rsi=rsi_value,
+        period=period,
+    )
 
 
 def _build_bollinger(symbol: str, latest, service: TechnicalIndicatorService) -> dict:
     signal = service.signal_from_value(latest.get("bb_signal"))
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="bollinger",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        upper=latest.get("Upper_Band"),
+        middle=latest.get("Middle_Band"),
+        lower=latest.get("Lower_Band"),
+    )
+
+
+def _build_all_data(symbol: str, results: dict, service: TechnicalIndicatorService) -> dict:
+    summary = service.summarize(results)
     return {
         "symbol": symbol,
-        "indicator": "bollinger",
-        "upper": latest.get("Upper_Band"),
-        "middle": latest.get("Middle_Band"),
-        "lower": latest.get("Lower_Band"),
-        "signal": signal,
-        "last_price": latest.get("收盘"),
+        "indicator_values": {name: result.get("indicator_values", {}) for name, result in results.items()},
+        "signal": summary["signal"],
+        "indicators": results,
+        "summary": summary,
     }
+
+
+def _all_message(summary: dict) -> str:
+    return (
+        f"买入信号: {summary['buy_signals']}, 卖出信号: {summary['sell_signals']}, "
+        f"评分: {summary['score']}, 建议: {summary['recommendation']}"
+    )
+
+
+def _single_message(action: str, data: dict) -> str:
+    if action == "ma":
+        return f"MA信号: {data['signal']}"
+    if action == "macd":
+        return f"MACD信号: {data['signal']}"
+    if action == "rsi":
+        return f"RSI({data['period']}): {data['rsi']:.2f}, 信号: {data['signal']}"
+    if action == "bollinger":
+        return f"布林带信号: {data['signal']}"
+    return ""
+
+
+def _execute_calculation(action: str, df, params: dict | None, gateway: TechnicalIndicatorGateway):
+    if action == "ma":
+        return gateway.calculate_ma(df)
+    if action == "macd":
+        return gateway.calculate_macd(df)
+    if action == "rsi":
+        period = params.get("period", 14) if params else 14
+        return gateway.calculate_rsi(df, period=period)
+    if action == "bollinger":
+        return gateway.calculate_bollinger(df)
+    return None
+
+
+def _build_result_data(action: str, symbol: str, latest, params: dict | None, service: TechnicalIndicatorService) -> dict:
+    if action == "ma":
+        return _build_ma(symbol, latest, service)
+    if action == "macd":
+        return _build_macd(symbol, latest, service)
+    if action == "rsi":
+        period = params.get("period", 14) if params else 14
+        return _build_rsi(symbol, latest, period, service)
+    if action == "bollinger":
+        return _build_bollinger(symbol, latest, service)
+    raise ValueError("未知的 action")
 
 
 def _execute_single(action: str, market: str, symbol: str, start_date: str | None, end_date: str | None, params: dict | None, gateway: TechnicalIndicatorGateway, service: TechnicalIndicatorService) -> dict:
@@ -77,37 +133,28 @@ def _execute_single(action: str, market: str, symbol: str, start_date: str | Non
     if df is None or df.empty:
         return {"success": False, "data": {}, "message": "无法获取历史数据"}
 
-    if action == "ma":
-        result_df = gateway.calculate_ma(df)
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-        data = _build_ma(symbol, result_df.iloc[-1], service)
-        return {"success": True, "data": data, "message": f"MA信号: {data['signal']}"}
+    result_df = _execute_calculation(action, df, params, gateway)
+    if result_df is None or result_df.empty:
+        return {"success": False, "data": {}, "message": "计算失败"}
 
-    if action == "macd":
-        result_df = gateway.calculate_macd(df)
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-        data = _build_macd(symbol, result_df.iloc[-1], service)
-        return {"success": True, "data": data, "message": f"MACD信号: {data['signal']}"}
+    data = _build_result_data(action, symbol, result_df.iloc[-1], params, service)
+    return {"success": True, "data": data, "message": _single_message(action, data)}
 
-    if action == "rsi":
-        period = params.get("period", 14) if params else 14
-        result_df = gateway.calculate_rsi(df, period=period)
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-        data = _build_rsi(symbol, result_df.iloc[-1], period, service)
-        rsi_value = data["rsi"]
-        return {"success": True, "data": data, "message": f"RSI({period}): {rsi_value:.2f}, 信号: {data['signal']}"}
 
-    if action == "bollinger":
-        result_df = gateway.calculate_bollinger(df)
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-        data = _build_bollinger(symbol, result_df.iloc[-1], service)
-        return {"success": True, "data": data, "message": f"布林带信号: {data['signal']}"}
+def _execute_all(market: str, symbol: str, start_date: str | None, end_date: str | None, params: dict | None, gateway: TechnicalIndicatorGateway, service: TechnicalIndicatorService) -> dict:
+    results = {}
+    for name in ("ma", "macd", "rsi", "bollinger"):
+        result = _execute_single(name, market, symbol, start_date, end_date, params, gateway, service)
+        if result["success"]:
+            results[name] = result["data"]
 
-    return {"success": False, "data": {}, "message": "未知的 action"}
+    data = _build_all_data(symbol, results, service)
+    return {
+        "success": True,
+        "data": data,
+        "message": _all_message(data["summary"]),
+    }
+
 
 
 def execute(action: str, market: str, symbol: str, start_date: str | None = None, end_date: str | None = None, params: dict | None = None, gateway: TechnicalIndicatorGateway | None = None, service: TechnicalIndicatorService | None = None) -> dict:
@@ -121,20 +168,6 @@ def execute(action: str, market: str, symbol: str, start_date: str | None = None
         if action != "all":
             return _execute_single(action, market, symbol, start_date, end_date, params, gateway, service)
 
-        results = {}
-        for name in ("ma", "macd", "rsi", "bollinger"):
-            result = _execute_single(name, market, symbol, start_date, end_date, params, gateway, service)
-            if result["success"]:
-                results[name] = result["data"]
-
-        return {
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "indicators": results,
-                "summary": service.summarize(results),
-            },
-            "message": f"买入信号: {service.summarize(results)['buy_signals']}, 卖出信号: {service.summarize(results)['sell_signals']}",
-        }
+        return _execute_all(market, symbol, start_date, end_date, params, gateway, service)
     except Exception as exc:
         return {"success": False, "data": {}, "message": f"计算失败: {exc}"}
