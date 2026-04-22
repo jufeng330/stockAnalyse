@@ -6,129 +6,47 @@ Stock Data Skill - 股票基础数据获取
 import sys
 import json
 import argparse
+from pathlib import Path
 from datetime import datetime
 
 # 添加项目根目录到路径
-sys.path.insert(0, '/home/inspur/codes/stockAnalyse')
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'src'))
 
+from stock_analyse.application.use_cases import (
+    get_market_spot as get_market_spot_use_case,
+    get_stock_history as get_stock_history_use_case,
+    get_stock_info as get_stock_info_use_case,
+    get_stock_report as get_stock_report_use_case,
+)
 from stocklib.stock_company import stockCompanyInfo
 from stocklib.stock_border import stockBorderInfo
-from stocklib.stock_annual_report import stockAnnualReport
 
 
 def get_stock_info(market: str, symbol: str) -> dict:
     """获取个股基本信息"""
-    try:
-        stock = stockCompanyInfo(marker=market, symbol=symbol)
-
-        # 获取基本信息
-        info_df = stock.get_stock_individual_info()
-        name = stock.get_stock_name()
-
-        # 获取行业和上市日期
-        _, list_date, industry = stock.get_stock_individual_info_em()
-
-        # 获取所属板块
-        concept = stock.get_stock_concept_by_code(symbol)
-        border = stock.get_stock_industry_by_code(symbol)
-
-        result = {
-            "symbol": symbol,
-            "name": name,
-            "market": market,
-            "industry": industry,
-            "concept": concept,
-            "sector": border,
-            "list_date": list_date,
-            "detail": info_df.to_dict() if info_df is not None else {}
-        }
-
-        return {"success": True, "data": result, "message": "获取成功"}
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"获取失败: {str(e)}"}
+    return get_stock_info_use_case.execute(market=market, symbol=symbol)
 
 
 def get_stock_history(market: str, symbol: str, start_date: str = None, end_date: str = None) -> dict:
     """获取历史行情数据"""
-    try:
-        stock = stockCompanyInfo(marker=market, symbol=symbol)
-
-        # 默认获取最近一年
-        if not end_date:
-            end_date = datetime.now().strftime("%Y%m%d")
-        if not start_date:
-            start = datetime.strptime(end_date, "%Y%m%d") - __import__('datetime').timedelta(days=120)
-            start_date = start.strftime("%Y%m%d")
-
-        df = stock.get_stock_history_data(start_date_str=start_date, end_date_str=end_date)
-
-        if df is None or df.empty:
-            return {"success": False, "data": {}, "message": "无历史数据"}
-
-        # 转换 DataFrame 为字典列表
-        records = df.to_dict(orient='records')
-
-        return {
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "market": market,
-                "records": records,
-                "count": len(records)
-            },
-            "message": f"获取 {len(records)} 条记录"
-        }
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"获取失败: {str(e)}"}
+    return get_stock_history_use_case.execute(
+        market=market,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 def get_market_spot(market: str) -> dict:
     """获取市场实时行情"""
-    try:
-        border = stockBorderInfo(market=market)
-        df = border.get_stock_spot()
-
-        if df is None or df.empty:
-            return {"success": False, "data": {}, "message": "无市场数据"}
-
-        # 只返回前100条，避免数据过大
-        records = df.head(100).to_dict(orient='records')
-
-        return {
-            "success": True,
-            "data": {
-                "market": market,
-                "records": records,
-                "total": len(df),
-                "returned": len(records)
-            },
-            "message": f"共 {len(df)} 只股票，返回前 {len(records)} 只"
-        }
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"获取失败: {str(e)}"}
+    return get_market_spot_use_case.execute(market=market)
 
 
 def get_stock_report(market: str, symbol: str, years: int = 5) -> dict:
     """获取三大财务报表"""
-    try:
-        report = stockAnnualReport()
-        zcfz, lrb, xjll = report.get_stock_report(
-            stock_code=symbol,
-            market=market,
-            years=years
-        )
-
-        result = {
-            "symbol": symbol,
-            "market": market,
-            "balance_sheet": zcfz.to_dict(orient='records') if zcfz is not None else [],
-            "income_statement": lrb.to_dict(orient='records') if lrb is not None else [],
-            "cash_flow": xjll.to_dict(orient='records') if xjll is not None else []
-        }
-
-        return {"success": True, "data": result, "message": "获取成功"}
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"获取失败: {str(e)}"}
+    return get_stock_report_use_case.execute(market=market, symbol=symbol, years=years)
 
 
 def get_financial_indicator(market: str, symbol: str, start_year: str = None) -> dict:
