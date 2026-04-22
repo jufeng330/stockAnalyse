@@ -14,7 +14,24 @@ bin-release/
 *.apk
 *.zip
 cache
-stockAI/stockAgent/result
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.eggs/
+*.egg-info/
+.venv/
+venv/
+venv_*/
+stockAI/stockAgent/result/
 stockLib/cache
 
 # Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
