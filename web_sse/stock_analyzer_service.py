@@ -29,6 +29,7 @@ from stocklib.stock_sentiment_analysis import StockSentimentAnalysis
 from stocklib.stock_indicator_quantitative import stockIndicatorQuantitative
 from scanner.top_stock_scanner import TopStockScanner
 from scanner.stock_result_utils import  StockFileUtils
+from stock_analyse.application.use_cases import analyze_single_stock as analyze_single_stock_use_case
 from stock_analyse.infrastructure.config.settings import get_settings, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SYSTEM_PROMPT
 
 # 忽略警告
@@ -254,62 +255,46 @@ class StockAnalyzerService:
     def stock_analysis_process(self,stock_code, market, start_date_str, end_date_str):
 
         selected_strategies = self.stock_strategies
-
         system_prompt = self.system_prompt
         message_format = self.message_format
-
         ai_platform = self.ai_platform
         ai_model = self.ai_model
         api_code = self.api_code
 
-
-        try:
-
-            self.streaming.send_log(f"🚀 开始技术指标分析: {stock_code}", 'header')
-            score, df_summary_data = self.get_stock_technical_analysis(stock_code, market)
-            if isinstance(df_summary_data, dict):
-                df_summary_data = pd.DataFrame.from_dict(df_summary_data, orient='index')
-
-            tec_data_markdown = df_summary_data.to_markdown(index=True)
-
-            self.streaming.send_log(f"🚀 完成技术指标分析: {stock_code}", 'header')
-            self.streaming.send_progress('singleProgress', 20, "完成技术指标分析...")
-
-            image_paths, strategies_selected, stock_summary, stock_analysis_result, annual_report_analysis, sentiment_analysis,sentiment_score = self.get_stock_analysis(
-                stock_code, market, start_date_str, end_date_str,
-                selected_strategies, system_prompt, message_format,
-                ai_platform, ai_model, api_code)
-
-
-
-            self.streaming.send_scores({
-                'technical': score,
-                'fundamental': 50,
-                'sentiment': sentiment_score,
-                'comprehensive': (score + sentiment_score) / 2
-            })
-            json_result = {
-                'success':True,
-                'tec_score':score,
-                'sentiment_score':sentiment_score,
-                'image_paths': image_paths,
-                'stock_summary': stock_summary,
-                'stock_analysis_result': stock_analysis_result,
-                'annual_report_analysis': annual_report_analysis,
-                'sentiment_analysis': sentiment_analysis,
-                'tec_data_analysis': tec_data_markdown,
+        callbacks = {}
+        if self.streaming is not None:
+            callbacks = {
+                'send_log': self.streaming.send_log,
+                'send_progress': self.streaming.send_progress,
             }
+
+        json_result = analyze_single_stock_use_case.execute(
+            stock_code=stock_code,
+            market=market,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
+            selected_strategies=selected_strategies,
+            system_prompt=system_prompt,
+            message_format=message_format,
+            ai_platform=ai_platform,
+            ai_model=ai_model,
+            api_code=api_code,
+            callbacks=callbacks,
+        )
+
+        if json_result.get('success'):
+            self.streaming.send_scores({
+                'technical': json_result['tec_score'],
+                'fundamental': 50,
+                'sentiment': json_result['sentiment_score'],
+                'comprehensive': (json_result['tec_score'] + json_result['sentiment_score']) / 2
+            })
             self.streaming.send_final_result(json_result)
             return json_result
-        except Exception as e:
-            self.logger.error(f"分析股票 {stock_code} 时出错: {e}")
-            json_result = {
-                "success": False,
-                "error": f"{str(e)}",
-                "message": "服务器内部错误"
-            }
-            self.streaming.send_error(str(e))
-            return json_result
+
+        self.logger.error(f"分析股票 {stock_code} 时出错: {json_result.get('error')}")
+        self.streaming.send_error(json_result.get('error'))
+        return json_result
 
     def get_stock_analysis(self,stock_code, market, start_date_str, end_date_str,
                            selected_strategies, system_prompt, message_format,
