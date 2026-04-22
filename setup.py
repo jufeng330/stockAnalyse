@@ -28,8 +28,9 @@ setup(
         # 若要自动读取 requirements.txt，可替换为：
         # open("requirements.txt").read().splitlines()
     ],
-    # 自动发现包（对应 stockanalyse 目录）
-    packages=find_packages(),
+    # 自动发现 src 下的新分层包
+    package_dir={"": "src"},
+    packages=find_packages(where="src"),
     # 包内数据文件（若有静态文件/配置需包含）
     include_package_data=True,
     # 包的分类（可选，上传 PyPI 时用）
