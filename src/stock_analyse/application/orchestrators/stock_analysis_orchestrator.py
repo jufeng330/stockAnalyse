@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
 from scanner.stock_analyzer import StockAnalyzer
-from stockAI.stockAgent.stock_ai_analyzer import StockAiAnalyzer
 from stock_analyse.application.use_cases import analyze_sentiment
+from stock_analyse.infrastructure.llm.adapter import StockAiAdapter
 from stocklib.stock_border import stockBorderInfo
 from stocklib.stock_indicator_quantitative import stockIndicatorQuantitative
 
@@ -92,19 +91,23 @@ class StockAnalysisOrchestrator:
         if send_progress:
             send_progress('singleProgress', 40, '股票情绪据获取完成...')
 
-        stock_analysis = StockAiAnalyzer(system_prompt=system_prompt, prompt_template=message_format, ai_platform=ai_platform, model=ai_model, api_token=api_code)
-        stock_report_analysis = StockAiAnalyzer(system_prompt=system_prompt, prompt_template=message_format, ai_platform=ai_platform, model=ai_model, api_token=api_code)
+        ai_adapter = StockAiAdapter(
+            system_prompt=system_prompt,
+            prompt_template=message_format,
+            ai_platform=ai_platform,
+            ai_model=ai_model,
+            api_code=api_code,
+        )
 
         if send_log:
             send_log(f"🚀 股票AI分析开始 : {stock_code}", 'header')
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            future_analysis = executor.submit(stock_analysis.stock_indicator_analyse, market=market, symbol=stock_code, start_date=start_compact, end_date=end_compact)
-            future_report = executor.submit(stock_report_analysis.stock_report_analyse, market=market, symbol=stock_code)
-            future_summary = executor.submit(stock_analysis.get_stock_summary, market=market, symbol=stock_code)
-            stock_analysis_result = future_analysis.result()
-            annual_report_analysis = future_report.result()
-            stock_summary = future_summary.result()
+        stock_summary, stock_analysis_result, annual_report_analysis = ai_adapter.analyze(
+            market=market,
+            symbol=stock_code,
+            start_date=start_compact,
+            end_date=end_compact,
+        )
 
         if send_log:
             send_log(f"🚀 股票AI分析完成 : {stock_code}", 'header')
