@@ -96,7 +96,14 @@ class ReportDateUtils:
         else:
             new_date = current_date - datetime.timedelta(days=days)
         # 获取减去指定天数后的年份
-        target_year = new_date.year
+        # 提取偏移后日期的月日（转为4位字符串，如3月5日转为'0305'）
+        new_date_md = new_date.strftime('%m%d')
+
+        # 核心逻辑：比较月日，确定目标年份
+        if new_date_md <= postfix_str:
+            target_year = new_date.year - 1  # 月日<=阈值，年份减1
+        else:
+            target_year = new_date.year  # 月日>阈值，使用当前年份
         # 拼接年份和 '0331'
         target_date_str = str(target_year) + postfix_str
         if format == '%Y%m%d':
@@ -109,6 +116,7 @@ class ReportDateUtils:
             target_date_str = str(target_year)
         else:
             target_date_str = str(target_year) + postfix_str
+
         return target_date_str
     def get_report_hk_year_str(self, days=0,postfix_str = '1231'):
         # 获取当前日期

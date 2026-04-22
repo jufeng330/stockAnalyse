@@ -1,0 +1,56 @@
+{
+  "name": "stock-technical",
+  "version": "1.0.0",
+  "description": "技术指标分析 Skill，提供 MA/MACD/RSI/KDJ/布林带等 12+ 种经典指标与趋势识别功能",
+  "author": "stock-analyse",
+  "license": "MIT",
+  "runtime": "uv",
+  "entry": "scripts/main.py",
+  "environment": {
+    "PYTHONPATH": "/mnt/github/stockAnalyse/",
+    "VIRTUAL_ENV": "/mnt/github/stockAnalyse/.venv"
+  },
+  "inputs": {
+    "action": {
+      "type": "string",
+      "required": true,
+      "enum": ["ma", "macd", "rsi", "kdj", "bollinger", "breakout", "sar", "mean_reversion", "williams", "adx", "obv", "all"],
+      "description": "操作类型"
+    },
+    "market": {
+      "type": "string",
+      "required": true,
+      "enum": ["SH", "SZ", "H", "usa", "zq"],
+      "description": "市场代码"
+    },
+    "symbol": {
+      "type": "string",
+      "required": true,
+      "description": "股票代码"
+    },
+    "start_date": {
+      "type": "string",
+      "required": false,
+      "description": "开始日期，格式 YYMMDD"
+    },
+    "end_date": {
+      "type": "string",
+      "required": false,
+      "description": "结束日期，格式 YYMMDD"
+    }
+  },
+  "outputs": {
+    "success": {
+      "type": "boolean",
+      "description": "操作是否成功"
+    },
+    "data": {
+      "type": "object",
+      "description": "返回数据"
+    },
+    "message": {
+      "type": "string",
+      "description": "提示信息"
+    }
+  }
+}

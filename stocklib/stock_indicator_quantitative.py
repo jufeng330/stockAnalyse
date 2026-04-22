@@ -50,38 +50,49 @@ class stockIndicatorQuantitative:
         df = None
         stock_service = stockBorderInfo(market = market)
         stock_company = stockCompanyInfo(marker = market,symbol = stock_code)
+
         if market == 'usa':
             try:
                 # 1. 获取美股实时行情数据
-
+                usa_code = stock_code
                 stock_us_spot_df = stock_service.get_stock_spot()
                 print("美股实时行情数据：")
                 # 查找阿里巴巴的代码
                 baba_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
                 if not baba_filtered.empty:
-                    baba_code = baba_filtered["代码"].values[0]
-                    print(f"美股股票的代码: {baba_code}")
+                    usa_code = baba_filtered["代码"].values[0]
+                    print(f"美股股票的代码: {usa_code}")
                     # 3. 获取阿里巴巴（BABA）的每日行情数据
-                    stock_us_hist_df = ak.stock_us_hist(symbol=baba_code, start_date=start_date_str, end_date=end_date_str)
+                    stock_us_hist_df = ak.stock_us_hist(symbol=usa_code, start_date=start_date_str, end_date=end_date_str)
 
                     df = stock_us_hist_df
                     # print(stock_us_hist_df)
                 else:
                     stock_us_hist_df =stock_company.get_stock_history_data(start_date_str=start_date_str, end_date_str=end_date_str)
                     # stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str, end_date=end_date_str)
-                    df = stock_us_hist_df
+
                     # print(stock_us_hist_df)
             except Exception as e:
+                # stock_us_hist_df = ak.stock_us_daily(symbol=baba_code, adjust="")
+                stock_us_hist_df = self.get_stock_sina_daily(stock_code=usa_code, market="usa",
+                                                             start_date=start_date_str,
+                                                             end_date=end_date_str,
+                                                             adjust="qfq")
+
                 print(f"获取美股数据时出现错误: {e} ")
+            df = stock_us_hist_df
         elif market == 'H':  # 港股数据获取
             try:
                 # 获取港股历史数据
                 stock_hk_hist_df = ak.stock_hk_hist(symbol=stock_code, period="daily", start_date=start_date_str,
                                                     end_date=end_date_str)
                 # print(stock_hk_hist_df)
-                df = stock_hk_hist_df
             except Exception as e:
+                stock_hk_hist_df = self.get_stock_sina_daily(stock_code=stock_code, market = "H", start_date=start_date_str,
+                                                        end_date=end_date_str,
+                                                        adjust="qfq")
                 print(f"获取债券/ETF基金数据时出现错误: {e}")
+            df = stock_hk_hist_df
         elif market == 'zq':  # 新增债券/ETF基金条件
             try:
                 # 获取债券或ETF基金的历史数据
@@ -127,8 +138,11 @@ class stockIndicatorQuantitative:
                 print(stock_zh_a_hist_df)
                 df = stock_zh_a_hist_df
             except Exception as e:
+                df = self.get_stock_zh_a_daily(stock_code=code,  start_date=start_date_str,
+                                                        end_date=end_date_str,
+                                                        adjust="qfq")
                 print(f"获取 A 股数据时出现错误: {e}")
-        if df is not None:
+        if df is not None and not df.empty:
             df = df.reset_index(drop=True)
             if '开盘' not  in df.columns and '开盘价' in df.columns:
                 df = df.rename(columns={'开盘价': '开盘'})
@@ -138,11 +152,173 @@ class stockIndicatorQuantitative:
                 df['开盘'] = pd.to_numeric(df['开盘'], errors="coerce")
             if '收盘' in df.columns:
                 df['收盘'] = pd.to_numeric(df['收盘'], errors="coerce")
-        if '股票代码' not in df.columns:
-            df['股票代码'] = stock_code
+            if '股票代码' not in df.columns:
+                df['股票代码'] = stock_code
+            if '名称' not in df.columns:
+                df['名称'] = stock_code
 
         return df
 
+    def get_stock_zh_a_daily(self,stock_code, start_date, end_date, adjust=''):
+        if stock_code.startswith('6'):
+            stock_code = "sh" + stock_code
+        else:
+            stock_code = "sz" + stock_code
+        df = ak.stock_zh_a_daily(
+            symbol=stock_code,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=adjust
+        )
+        column_mapping = {
+            'date': '日期',
+            'open': '开盘',
+            'close': '收盘',
+            'high': '最高',
+            'low': '最低',
+            'volume': '成交量',
+            'amount': '成交额',
+            'change_rate': '涨跌幅',
+            'turnover': '换手率',
+            'outstanding_share': '流通股本'
+        }
+        # 选择你需要的列并重命名
+        df.rename(columns=column_mapping, inplace=True)
+        # 转换日期格式为 datetime 类型
+        df['日期'] = pd.to_datetime(df['日期'])
+        df['涨跌幅'] = df['收盘'].pct_change() * 100
+        return df
+
+    import pandas as pd
+    import akshare as ak
+
+    def get_stock_sina_daily(self, stock_code, market, start_date, end_date, adjust=''):
+        # ===================== A 股 =====================
+        if market.lower() == "sh" or market.lower() == "sz":
+            if stock_code.startswith('6'):
+                stock_code = "sh" + stock_code
+            else:
+                stock_code = "sz" + stock_code
+            df = ak.stock_zh_a_daily(
+                symbol=stock_code,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust
+            )
+
+        # ===================== 港股 =====================
+        elif market.lower() == "hk":
+            # 港股接口：新浪 source
+            df = ak.stock_hk_daily(
+                symbol=stock_code,
+                adjust="hfq",  # 你指定的后复权
+                start_date=start_date,
+                end_date=end_date
+            )
+
+        # ===================== 美股 =====================
+        elif market.lower() == "usa":
+            # 美股接口：新浪 source
+            df = ak.stock_us_daily(
+                symbol=stock_code,
+                adjust=""
+            )
+            # 美股默认返回全部数据，手动过滤日期
+            df["date"] = pd.to_datetime(df["date"])
+            df = df[(df["date"] >= pd.to_datetime(start_date)) &
+                    (df["date"] <= pd.to_datetime(end_date))]
+
+        # ===================== 统一列名映射 =====================
+        column_mapping = {
+            'date': '日期',
+            'open': '开盘',
+            'close': '收盘',
+            'high': '最高',
+            'low': '最低',
+            'volume': '成交量',
+            'amount': '成交额',
+            'change_rate': '涨跌幅',
+            'turnover': '换手率',
+            'outstanding_share': '流通股本'
+        }
+
+        # 重命名（只重命名存在的列，避免报错）
+        rename_cols = {k: v for k, v in column_mapping.items() if k in df.columns}
+        df.rename(columns=rename_cols, inplace=True)
+
+        # 日期格式统一
+        df['日期'] = pd.to_datetime(df['日期'])
+
+        # 统一计算涨跌幅
+        if '收盘' in df.columns:
+            df['涨跌幅'] = df['收盘'].pct_change() * 100
+
+        return df
+
+    import pandas as pd
+    import akshare as ak
+
+    def get_stock_sina_daily(self, stock_code, market, start_date, end_date, adjust=''):
+        # ===================== A 股 =====================
+        if market.lower() == "sh":
+            if stock_code.startswith('6'):
+                stock_code = "sh" + stock_code
+            else:
+                stock_code = "sz" + stock_code
+            df = ak.stock_zh_a_daily(
+                symbol=stock_code,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust
+            )
+
+        # ===================== 港股 =====================
+        elif market.lower() == "h":
+            # 港股接口：新浪 source
+            df = ak.stock_hk_daily(
+                symbol=stock_code,
+                adjust=adjust
+            )
+
+        # ===================== 美股 =====================
+        elif market.lower() == "usa":
+            # 美股接口：新浪 source
+            df = ak.stock_us_daily(
+                symbol=stock_code,
+                adjust=adjust
+            )
+            # 美股默认返回全部数据，手动过滤日期
+            df["date"] = pd.to_datetime(df["date"])
+            df = df[(df["date"] >= pd.to_datetime(start_date)) &
+                    (df["date"] <= pd.to_datetime(end_date))]
+
+        # ===================== 统一列名映射 =====================
+        column_mapping = {
+            'date': '日期',
+            'open': '开盘',
+            'close': '收盘',
+            'high': '最高',
+            'low': '最低',
+            'volume': '成交量',
+            'amount': '成交额',
+            'change_rate': '涨跌幅',
+            'turnover': '换手率',
+            'outstanding_share': '流通股本'
+        }
+        if df is None or df.empty:
+            return pd.DataFrame()
+        # 重命名（只重命名存在的列，避免报错）
+        rename_cols = {k: v for k, v in column_mapping.items() if k in df.columns}
+        df.rename(columns=rename_cols, inplace=True)
+
+        # 日期格式统一
+        df['日期'] = pd.to_datetime(df['日期'])
+
+        # 统一计算涨跌幅
+        if '收盘' in df.columns:
+            df['涨跌幅'] = df['收盘'].pct_change() * 100
+
+        return df
 
     # 移动平均线算法
     """

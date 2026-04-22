@@ -1,6 +1,5 @@
 import sys
 import os
-
 # 获取项目根目录
 root_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(root_dir)
@@ -26,15 +25,12 @@ warnings.filterwarnings("ignore", message="Valid config keys have changed in V2"
 
 
 def print_stock_wave():
-
     stock_sen = StockSentimentAnalysis()
     sentiment_score,sentiment_analysis = stock_sen.get_sentiment_analysis()
     print(sentiment_score)
     print(f"公司情绪分析内容: {sentiment_analysis}")
     # 确保安装最新版本
     print(f"当前AKShare版本: {ak.__version__}")
-
-
 
     stock = StockWaveAnalyzer()
     # 调用函数获取数据
@@ -440,8 +436,6 @@ if __name__ == '__main__':
     stock = stockDataInit(market='usa')
     stock.init_stock_by_day();
     stock.init_stock_by_year(report_date = '20250930');
-
-
 
     print_stock_concept()
     print_report_stock()

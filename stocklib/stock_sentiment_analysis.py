@@ -34,12 +34,12 @@ class StockSentimentAnalysis:
 
 
     def get_sentiment_analysis(self):
-        self.logger.info("正在获取新闻数据和分析市场情绪...", 'info')
+        self.logger.info("正在获取新闻数据和分析市场情绪...")
         try:
             comprehensive_news_data = self.get_comprehensive_news_data(self.symbol, days=30)
             sentiment_analysis = self.calculate_advanced_sentiment_analysis(comprehensive_news_data)
             sentiment_score = self.calculate_sentiment_score(sentiment_analysis)
-            self.logger.info(f"✓ 情绪分析完成，得分: {sentiment_score:.1f}", 'success')
+            self.logger.info(f"✓ 情绪分析完成，得分: {sentiment_score:.1f}")
             return sentiment_score, sentiment_analysis
         except Exception as e:
             self.logger.warning(f"获取行业新闻失败: {e}")

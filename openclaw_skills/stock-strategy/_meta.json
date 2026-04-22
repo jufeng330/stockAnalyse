@@ -1,0 +1,62 @@
+{
+  "name": "stock-strategy",
+  "version": "1.0.0",
+  "description": "量化策略分析 Skill，提供综合评分、信号触发和投资标的推荐",
+  "author": "stock-analyse",
+  "license": "MIT",
+  "runtime": "uv",
+  "entry": "scripts/main.py",
+  "environment": {
+   "PYTHONPATH": "/mnt/github/stockAnalyse/",
+    "VIRTUAL_ENV": "/mnt/github/stockAnalyse/.venv"
+  },
+  "inputs": {
+    "action": {
+      "type": "string",
+      "required": true,
+      "enum": ["score", "signals", "profitable", "recommend", "batch"],
+      "description": "操作类型"
+    },
+    "market": {
+      "type": "string",
+      "required": true,
+      "enum": ["SH", "SZ", "H", "usa", "zq"],
+      "description": "市场代码"
+    },
+    "symbol": {
+      "type": "string",
+      "required": false,
+      "description": "股票代码"
+    },
+    "start_date": {
+      "type": "string",
+      "required": false,
+      "description": "开始日期，格式 YYMMDD"
+    },
+    "end_date": {
+      "type": "string",
+      "required": false,
+      "description": "结束日期，格式 YYMMDD"
+    },
+    "limit": {
+      "type": "integer",
+      "required": false,
+      "default": 10,
+      "description": "返回数量限制"
+    }
+  },
+  "outputs": {
+    "success": {
+      "type": "boolean",
+      "description": "操作是否成功"
+    },
+    "data": {
+      "type": "object",
+      "description": "返回数据"
+    },
+    "message": {
+      "type": "string",
+      "description": "提示信息"
+    }
+  }
+}

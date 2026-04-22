@@ -471,7 +471,7 @@ class stockCompanyInfo:
         cache_switch = True
         if cache_switch:
             df_history_data = self.cache_service.read_from_serialized(date, report_type=report_type)
-        if df_history_data is not None:
+        if df_history_data is not None and not df_history_data.empty:
             return df_history_data
 
 

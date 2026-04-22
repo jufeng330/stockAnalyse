@@ -17,7 +17,7 @@ import time
 import re
 from concurrent.futures import ThreadPoolExecutor
 import matplotlib.pyplot as plt
-from stock_analyse.scanner.stock_analyzer import  StockAnalyzer
+from scanner.stock_analyzer import  StockAnalyzer
 from .streaminganalyzer import StreamingAnalyzer
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))

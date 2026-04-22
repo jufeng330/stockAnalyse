@@ -850,7 +850,7 @@ class stockBorderInfo:
         return df_fh;
 
     # 股息率的平均值
-    def get_stock_fhps_group_info(self):
+    def get_stock_fhps_group_info(self, date = '20251231'):
         """
 
         分红数据
@@ -858,7 +858,7 @@ class stockBorderInfo:
         "名称","代码", "现金分红 - 股息率"
         :return:
         """
-        date = '20241231'
+       
         cache_key = f"stock_fhps"
         if self.market  == 'usa' or self.market == 'H':
             cache_key = f"stock_fhps_{self.market}"
