@@ -12,13 +12,13 @@ import pandas as pd
 import datetime
 import os
 import dashscope
-from dotenv import load_dotenv
 import gradio as gr
 import akshare as ak
 import sys
 import os
 from stocklib.stock_company import stockCompanyInfo
 from stocklib.stock_annual_report import stockAnnualReport
+from stock_analyse.infrastructure.config.settings import get_settings
 
 # 添加调试日志函数
 def debug_log(message):
@@ -26,43 +26,40 @@ def debug_log(message):
 
 class StockAiAnalyzer:
     def __init__(self,system_prompt=None,prompt_template=None,model=None,ai_platform=None,api_token = None):
-        load_dotenv()
-        # 加载环境变量中的 OpenAI API 密钥
-        OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-        DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY')
-        dashscope.api_key = DASHSCOPE_API_KEY
-
-        debug_log(f"OpenAI API Key: {OPENAI_API_KEY}")
-        debug_log(f"DashScope API Key: {DASHSCOPE_API_KEY}")
-
+        settings = get_settings()
         self.model="qwen-plus"
-        if(api_token is not None):
-            dashscope.api_key = api_token
-            self.api_key = api_token
+        resolved_platform = ai_platform or settings.ai.platform
+        resolved_api_key = api_token or settings.ai.api_key or settings.ai.provider_keys.get(resolved_platform, '')
+        dashscope.api_key = resolved_api_key
+        self.api_key = resolved_api_key
+
+        debug_log(f"AI platform configured: {resolved_platform}")
+        debug_log(f"API key configured: {'yes' if resolved_api_key else 'no'}")
+
 
         if(model is not None):
             self.model = model
         else:
             self.model = "qwen-turbo"
-        if ai_platform is not None:
-            if ai_platform == 'qwen':
-                self.base_http_api_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/'
-            elif ai_platform == 'byte':
-                self.base_http_api_url = 'https://ark.cn-beijing.volces.com/api/v3/'
-            elif ai_platform == 'deepseek':
-                self.base_http_api_url = 'https://api.deepseek.com/'
-            elif ai_platform == 'openai':
-                self.base_http_api_url = 'https://api.openai.com/v1/'
-            elif ai_platform == 'kimi':
-                self.base_http_api_url = 'https://api.moonshot.cn/v1'
+        self.base_http_api_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/'
+        if resolved_platform == 'qwen':
+            self.base_http_api_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/'
+        elif resolved_platform == 'byte':
+            self.base_http_api_url = 'https://ark.cn-beijing.volces.com/api/v3/'
+        elif resolved_platform == 'deepseek':
+            self.base_http_api_url = 'https://api.deepseek.com/'
+        elif resolved_platform == 'openai':
+            self.base_http_api_url = 'https://api.openai.com/v1/'
+        elif resolved_platform == 'kimi':
+            self.base_http_api_url = 'https://api.moonshot.cn/v1'
         if system_prompt is not None:
             self.instruction = system_prompt
         else:
-            self.instruction = "你作为A股分析专家,请详细分析市场趋势、行业前景，揭示潜在投资机会,请确保提供充分的数据支持和专业见解。"
+            self.instruction = settings.ai.system_prompt
         if(prompt_template is not None):
             self.prompt_template = prompt_template
         else:
-            self.prompt_template ="""当前股票主营业务介绍:
+            self.prompt_template = settings.ai.prompt_template or """当前股票主营业务介绍:
                 {stock_zyjs_ths_df}
                 
                 当前股票所在的行业资金流数据:

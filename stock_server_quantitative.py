@@ -9,6 +9,7 @@ import stocklib.stock_indicator_html as stockIndicatorHtml
 from stockAI.stockAgent.stock_ai_analyzer import  StockAiAnalyzer
 from stocklib.stock_sentiment_analysis import StockSentimentAnalysis
 from stock_analyse.web_sse.stock_analyzer_service import StockAnalyzerService
+from stock_analyse.infrastructure.config.settings import get_settings
 import logging
 
 
@@ -24,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 matplotlib.use('Agg')
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # 添加 secret_key 以支持 flash 功能
+settings = get_settings()
+app.secret_key = settings.web.flask_secret_key
 
 
 analyzer = StockAnalyzerService()
@@ -171,13 +173,12 @@ def get_stock_analysis(stock_code, market,start_date_str, end_date_str,
 def index():
 
 
-    qwen_token =  'sk-969bede797ca4aa2b436835882efcd6c'
     # 设置默认值
-    ai_platform = request.form.get('ai_platform', 'qwen')
-    ai_model = request.form.get('ai_model', 'qwen3-8b')
-    api_code = request.form.get('api_code',qwen_token)  # 默认值：'default_token'
-    system_prompt = request.form.get('system_prompt', '你作为A股分析专家,请详细分析市场趋势、行业前景，揭示潜在投资机会,请确保提供充分的数据支持和专业见解。')  # 默认值：系统提示语
-    message_format = request.form.get('message_format', None)  # 默认值：Message格式
+    ai_platform = request.form.get('ai_platform', settings.ai.platform)
+    ai_model = request.form.get('ai_model', settings.ai.model_name)
+    api_code = request.form.get('api_code', settings.ai.api_key)
+    system_prompt = request.form.get('system_prompt', settings.ai.system_prompt)
+    message_format = request.form.get('message_format', None) or settings.ai.prompt_template
 
     if request.method == 'POST':
         # 处理表单提交的逻辑
@@ -360,7 +361,7 @@ def check_auth_config():
     if not analyzer:
         return False, {}
 
-    web_auth_config = analyzer.config.get('web_auth', {})
+    web_auth_config = settings.as_service_config().get('web_auth', {})
     return web_auth_config.get('enabled', False), web_auth_config
 
 

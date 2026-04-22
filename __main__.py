@@ -308,7 +308,9 @@ def print_stock_border(stockSelectService=None):
         print('北向的持仓数据')
         print(df_stock_hsgt.to_string(index=False))
 
-        stockAIAnalysis = StockAiAnalyzer(model='qwen3', ai_platform='qwen', api_token='8d852738bdd847669e105bbfa2c756')
+        from stock_analyse.infrastructure.config.settings import get_settings
+        settings = get_settings()
+        stockAIAnalysis = StockAiAnalyzer(model='qwen3', ai_platform='qwen', api_token=settings.ai.api_key)
         report = stockAIAnalysis.stock_report_analyse(market='SH', symbol='600028')
         print(report)
         report = stockAIAnalysis.stock_report_analyse(market='H', symbol='09868')

@@ -571,34 +571,13 @@ class stockSelectService:
         return market, stock_code
 
     def get_ai_token(self):
-        import json
-        from dotenv import load_dotenv
+        from stock_analyse.infrastructure.config.settings import get_settings
 
-        load_dotenv()
-        # 加载环境变量中的 OpenAI API 密钥
-        CURRENT_AI = os.getenv('CURRENT_AI')
-        DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY')
-
-        DASHSCOPE_MODEL_LIST = os.getenv('DASHSCOPE_MODEL_LIST', '')
-        DASHSCOPE_MODEL_LIST = json.loads(DASHSCOPE_MODEL_LIST)
-
-
-        print(DASHSCOPE_MODEL_LIST)  # 输出: ['qwen3-30b-a3b', 'qwen3-14b', ...]
-
-        KIMI_API_KEY = os.getenv('KIMI_API_KEY')
-        KIMI_MODEL_LIST = os.getenv('KIMI_MODEL_LIST')
-        KIMI_MODEL_LIST = json.loads(KIMI_MODEL_LIST)
-
-
-        print(KIMI_MODEL_LIST)
-
-        print(f'{CURRENT_AI}_ {DASHSCOPE_API_KEY} _ {DASHSCOPE_MODEL_LIST}')
-        if CURRENT_AI == 'qwen':
-            return CURRENT_AI,DASHSCOPE_API_KEY,DASHSCOPE_MODEL_LIST
-        elif CURRENT_AI == 'kimi':
-            return CURRENT_AI,KIMI_API_KEY,KIMI_MODEL_LIST
-        else:
-            return  CURRENT_AI,DASHSCOPE_API_KEY,DASHSCOPE_MODEL_LIST
+        settings = get_settings()
+        current_ai = settings.ai.current_ai
+        if current_ai == 'kimi':
+            return current_ai, settings.ai.provider_keys.get('kimi', ''), settings.ai.kimi_model_list
+        return current_ai, settings.ai.provider_keys.get('qwen', settings.ai.api_key), settings.ai.dashscope_model_list
 
 
 

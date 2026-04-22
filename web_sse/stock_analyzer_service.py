@@ -29,6 +29,7 @@ from stocklib.stock_sentiment_analysis import StockSentimentAnalysis
 from stocklib.stock_indicator_quantitative import stockIndicatorQuantitative
 from scanner.top_stock_scanner import TopStockScanner
 from scanner.stock_result_utils import  StockFileUtils
+from stock_analyse.infrastructure.config.settings import get_settings, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SYSTEM_PROMPT
 
 # 忽略警告
 warnings.filterwarnings('ignore')
@@ -50,57 +51,44 @@ class StockAnalyzerService:
         """初始化分析器"""
         self.logger = logging.getLogger(__name__)
         self.config_file = config_file
+        self.settings = get_settings(config_file)
+        self.config = self.settings.as_service_config()
 
-        # 加载配置文件
-        self.config = self._load_config()
-
-        stock_prompt_template = """
-                           '请基于以上收集到的实时的真实数据，发挥你的A股分析专业知识，对未来3天该股票的价格走势做出深度预测。\n在预测中请全面考虑主营业务、基本数据、所在行业数据、所在概念板块数据、历史行情、最近新闻以及资金流动等多方面因素。\n给出具体的涨跌百分比数据分析总结。'
-                                       当前股票主营业务介绍:
-
-                                       {stock_zyjs_ths_df}
-
-                                       当前股票所在的行业资金流数据:
-                                       {single_industry_df}
-
-                                       当前股票所在的概念板块的数据:
-                                       {concept_info_df}
-
-                                       当前股票基本数据:
-                                       {stock_individual_info_em_df}
-
-                                       当前股票历史行情数据和K线技术指标::
-                                       {stock_zh_a_hist_df}
-
-                                       当前股票最近的新闻:
-                                       {stock_news_em_df}
-
-                                       当前股票历史的资金流动:
-                                       {stock_individual_fund_flow_df}
-
-                                       当前股票的财务指标数据:
-                                       {stock_financial_analysis_indicator_df}
-
-                                       """
-
-        system_prompt_template = '你作为A股分析专家,请详细分析市场趋势、行业前景，揭示潜在投资机会,请确保提供充分的数据支持和专业见解。'
-        # AI配置
         ai_config = self.config.get('ai', {})
         self.ai_config = {
             'max_tokens': ai_config.get('max_tokens', 4000),
             'temperature': ai_config.get('temperature', 0.7),
             'model_preference': ai_config.get('model_preference', 'openai'),
             'model_plat': ai_config.get("model_plat", "qwen"),
-            'model_name':ai_config.get("model_name", "qwen-turbo-2025-07-15"),
-            'api_key': ai_config.get("api_key", "sk-")
+            'model_name': ai_config.get("model_name", "qwen-turbo-2025-07-15"),
+            'api_key': ai_config.get("api_key", "")
         }
-        self.message_format = self.ai_config.get("prompt_template", stock_prompt_template)
-        self.system_prompt = self.ai_config.get("prompt_template", system_prompt_template)
+        self.message_format = ai_config.get("prompt_template", DEFAULT_PROMPT_TEMPLATE)
+        self.system_prompt = ai_config.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
         self.ai_platform = self.ai_config.get("model_plat", "qwen")
         self.ai_model = self.ai_config.get("model_name", "qwen-turbo-2025-07-15")
-        self.api_code = self.ai_config.get("api_key", "sk-")
-        # API密钥配置
+        self.api_code = self.ai_config.get("api_key", "")
         self.api_keys = self.config.get('api_keys', {})
+
+        if self.api_code and self.ai_platform and not self.api_keys.get(self.ai_platform):
+            self.api_keys[self.ai_platform] = self.api_code
+
+        if not any(value for key, value in self.api_keys.items() if key != 'notes') and self.api_code:
+            self.api_keys['active'] = self.api_code
+
+        self.config['ai']['prompt_template'] = self.message_format
+        self.config['ai']['system_prompt'] = self.system_prompt
+        self.config['ai']['api_key'] = self.api_code
+        self.config['web_auth'] = {
+            'enabled': self.settings.web.auth_enabled,
+            'password': self.settings.web.auth_password,
+            'session_timeout': self.settings.web.session_timeout,
+            'notes': self.config.get('web_auth', {}).get('notes', 'Web界面密码鉴权配置')
+        }
+        self.config['api_keys'] = self.api_keys
+
+        self.logger.info(f"✅ 成功加载配置文件: {self.config_file}")
+        self.logger.info("📝 当前配置已通过统一 settings 解析")
 
         self.stock_strategies = ['均线策略', '布林带策略', '动量MACD策略', '突破策略', 'SAR策略', '均值回归策略', 'RSI策略', 'KDJ策略', '威廉指标策略', 'ADX策略', '线性回归策略', 'K线形态策略', '神经网络多层感知回归策略']
 
@@ -108,108 +96,21 @@ class StockAnalyzerService:
         self.streaming = None
         self._log_config_status()
 
-        current_dir = os.path.dirname(__file__)  # 得到 stockLib 目录路径
+        current_dir = os.path.dirname(__file__)
         parent_dir = os.path.dirname(current_dir)
         self.analyzer_path = os.path.join(parent_dir, 'cache/analyzer_result')
-        self.select_path = os.path.join(parent_dir, 'cache/selector_result')# 得到 stock_analyse 目录路径
+        self.select_path = os.path.join(parent_dir, 'cache/selector_result')
 
 
     def _load_config(self):
-        """加载JSON配置文件"""
-        try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                self.logger.info(f"✅ 成功加载配置文件: {self.config_file}")
-                return config
-            else:
-                self.logger.warning(f"⚠️ 配置文件 {self.config_file} 不存在，使用默认配置")
-                default_config = self._get_default_config()
-                self._save_config(default_config)
-                return default_config
-
-        except json.JSONDecodeError as e:
-            self.logger.error(f"❌ 配置文件格式错误: {e}")
-            self.logger.info("使用默认配置并备份错误文件")
-
-            if os.path.exists(self.config_file):
-                backup_name = f"{self.config_file}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                os.rename(self.config_file, backup_name)
-                self.logger.info(f"错误配置文件已备份为: {backup_name}")
-
-            default_config = self._get_default_config()
-            self._save_config(default_config)
-            return default_config
-
-        except Exception as e:
-            self.logger.error(f"❌ 加载配置文件失败: {e}")
-            return self._get_default_config()
+        return self.settings.as_service_config()
 
     def _get_default_config(self):
-        """获取Web版默认配置"""
-        return {
-            "api_keys": {
-                "openai": "",
-                "anthropic": "",
-                "zhipu": "",
-                "notes": "请填入您的API密钥"
-            },
-            "ai": {
-                "model_preference": "openai",
-                "models": {
-                    "openai": "gpt-4o-mini",
-                    "anthropic": "claude-3-haiku-20240307",
-                    "zhipu": "chatglm_turbo"
-                },
-                "max_tokens": 4000,
-                "temperature": 0.7,
-                "api_base_urls": {
-                    "openai": "https://api.openai.com/v1",
-                    "notes": "如使用中转API，修改上述URL"
-                }
-            },
-            "analysis_weights": {
-                "technical": 0.4,
-                "fundamental": 0.4,
-                "sentiment": 0.2,
-                "notes": "权重总和应为1.0"
-            },
-            "cache": {
-                "price_hours": 1,
-                "fundamental_hours": 6,
-                "news_hours": 2
-            },
-            "streaming": {
-                "enabled": True,
-                "show_thinking": False,
-                "delay": 0.05
-            },
-            "analysis_params": {
-                "max_news_count": 100,
-                "technical_period_days": 180,
-                "financial_indicators_count": 25
-            },
-            "web_auth": {
-                "enabled": False,
-                "password": "",
-                "session_timeout": 3600,
-                "notes": "Web界面密码鉴权配置"
-            },
-            "_metadata": {
-                "version": "3.0.0-web-streaming",
-                "created": datetime.now().isoformat(),
-                "description": "Web版AI股票分析系统配置文件（支持AI流式输出）"
-            }
-        }
+        return self.settings.as_service_config()
 
     def _save_config(self, config):
-        """保存配置到文件"""
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=4)
-            self.logger.info(f"✅ 配置文件已保存: {self.config_file}")
-        except Exception as e:
-            self.logger.error(f"❌ 保存配置文件失败: {e}")
+        self.logger.info("跳过自动写入配置文件，使用统一 settings 配置")
+        return None
 
     def _log_config_status(self):
         """记录配置状态"""
