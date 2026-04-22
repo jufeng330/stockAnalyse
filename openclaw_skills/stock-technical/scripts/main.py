@@ -6,10 +6,14 @@ Stock Technical Skill - 股票技术指标计算
 import sys
 import json
 import argparse
+from pathlib import Path
 from datetime import datetime, timedelta
 
-sys.path.insert(0, '/home/inspur/codes/stockAnalyse')
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / 'src'))
 
+from stock_analyse.application.use_cases import analyze_technical_indicators as analyze_technical_indicators_use_case
 from stocklib.stock_ak_indicator import stockAKIndicator
 from stocklib.stock_company import stockCompanyInfo
 
@@ -29,97 +33,32 @@ def get_history_data(market: str, symbol: str, start_date: str = None, end_date:
 
 def calculate_ma(market: str, symbol: str, df, params: dict = None) -> dict:
     """计算移动平均线"""
-    try:
-        indicator = stockAKIndicator()
-        result_df = indicator.strategy_mac(df)
-
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-
-        # 获取最新信号
-        latest = result_df.iloc[-1]
-        signal = "buy" if latest.get('mac_signal') == 1 else "sell" if latest.get('mac_signal') == -1 else "neutral"
-
-        return {
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "indicator": "ma",
-                "ma_10": latest.get('MA_10'),
-                "ma_30": latest.get('MA_30'),
-                "signal": signal,
-                "last_price": latest.get('收盘')
-            },
-            "message": f"MA信号: {signal}"
-        }
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"计算失败: {str(e)}"}
+    return analyze_technical_indicators_use_case.execute(
+        action='ma',
+        market=market,
+        symbol=symbol,
+        params=params,
+    )
 
 
 def calculate_macd(market: str, symbol: str, df, params: dict = None) -> dict:
     """计算 MACD"""
-    try:
-        indicator = stockAKIndicator()
-        result_df = indicator.strategy_macd(df)
-
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-
-        latest = result_df.iloc[-1]
-        signal = "buy" if latest.get('macd_signal_index') == 1 else "sell" if latest.get('macd_signal_index') == -1 else "neutral"
-
-        return {
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "indicator": "macd",
-                "macd_dif": latest.get('macd_dif'),
-                "macd_signal": latest.get('macd_signal'),
-                "hist": latest.get('hist'),
-                "signal": signal,
-                "last_price": latest.get('收盘')
-            },
-            "message": f"MACD信号: {signal}"
-        }
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"计算失败: {str(e)}"}
+    return analyze_technical_indicators_use_case.execute(
+        action='macd',
+        market=market,
+        symbol=symbol,
+        params=params,
+    )
 
 
 def calculate_rsi(market: str, symbol: str, df, params: dict = None) -> dict:
     """计算 RSI"""
-    try:
-        period = params.get('period', 14) if params else 14
-        indicator = stockAKIndicator()
-        result_df = indicator.strategy_rsi(df, period=period)
-
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-
-        latest = result_df.iloc[-1]
-        rsi_value = latest.get('RSI')
-
-        # RSI 解读
-        if rsi_value > 70:
-            signal = "overbought"
-        elif rsi_value < 30:
-            signal = "oversold"
-        else:
-            signal = "neutral"
-
-        return {
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "indicator": "rsi",
-                "rsi": rsi_value,
-                "period": period,
-                "signal": signal,
-                "last_price": latest.get('收盘')
-            },
-            "message": f"RSI({period}): {rsi_value:.2f}, 信号: {signal}"
-        }
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"计算失败: {str(e)}"}
+    return analyze_technical_indicators_use_case.execute(
+        action='rsi',
+        market=market,
+        symbol=symbol,
+        params=params,
+    )
 
 
 def calculate_kdj(market: str, symbol: str, df, params: dict = None) -> dict:
@@ -153,31 +92,12 @@ def calculate_kdj(market: str, symbol: str, df, params: dict = None) -> dict:
 
 def calculate_bollinger(market: str, symbol: str, df, params: dict = None) -> dict:
     """计算布林带"""
-    try:
-        indicator = stockAKIndicator()
-        result_df = indicator.strategy_bollinger(df)
-
-        if result_df is None or result_df.empty:
-            return {"success": False, "data": {}, "message": "计算失败"}
-
-        latest = result_df.iloc[-1]
-        signal = "buy" if latest.get('bb_signal') == 1 else "sell" if latest.get('bb_signal') == -1 else "neutral"
-
-        return {
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "indicator": "bollinger",
-                "upper": latest.get('Upper_Band'),
-                "middle": latest.get('Middle_Band'),
-                "lower": latest.get('Lower_Band'),
-                "signal": signal,
-                "last_price": latest.get('收盘')
-            },
-            "message": f"布林带信号: {signal}"
-        }
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"计算失败: {str(e)}"}
+    return analyze_technical_indicators_use_case.execute(
+        action='bollinger',
+        market=market,
+        symbol=symbol,
+        params=params,
+    )
 
 
 def calculate_breakout(market: str, symbol: str, df, params: dict = None) -> dict:
@@ -301,46 +221,12 @@ def calculate_adx(market: str, symbol: str, df, params: dict = None) -> dict:
 
 def calculate_all(market: str, symbol: str, df, params: dict = None) -> dict:
     """计算所有指标"""
-    try:
-        results = {}
-
-        # 计算各个指标
-        ma_result = calculate_ma(market, symbol, df, params)
-        macd_result = calculate_macd(market, symbol, df, params)
-        rsi_result = calculate_rsi(market, symbol, df, params)
-        kdj_result = calculate_kdj(market, symbol, df, params)
-        bollinger_result = calculate_bollinger(market, symbol, df, params)
-
-        if ma_result['success']:
-            results['ma'] = ma_result['data']
-        if macd_result['success']:
-            results['macd'] = macd_result['data']
-        if rsi_result['success']:
-            results['rsi'] = rsi_result['data']
-        if kdj_result['success']:
-            results['kdj'] = kdj_result['data']
-        if bollinger_result['success']:
-            results['bollinger'] = bollinger_result['data']
-
-        # 统计信号
-        buy_signals = sum(1 for r in results.values() if r.get('signal') in ['buy', 'oversold'])
-        sell_signals = sum(1 for r in results.values() if r.get('signal') in ['sell', 'overbought'])
-
-        return {
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "indicators": results,
-                "summary": {
-                    "buy_signals": buy_signals,
-                    "sell_signals": sell_signals,
-                    "neutral_signals": len(results) - buy_signals - sell_signals
-                }
-            },
-            "message": f"买入信号: {buy_signals}, 卖出信号: {sell_signals}"
-        }
-    except Exception as e:
-        return {"success": False, "data": {}, "message": f"计算失败: {str(e)}"}
+    return analyze_technical_indicators_use_case.execute(
+        action='all',
+        market=market,
+        symbol=symbol,
+        params=params,
+    )
 
 
 def main():
