@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单股分析 - 交易决策中心</title>
+    <link rel="stylesheet" href="/static/ui/nav.css">
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #1f2937;
+            min-height: 100vh;
+        }
+
+        .app-shell {
+            max-width: 1520px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 20px;
+        }
+
+        .sidebar,
+        .header,
+        .panel {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 16px;
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
+            backdrop-filter: blur(8px);
+        }
+
+        .sidebar {
+            padding: 20px 16px;
+            position: sticky;
+            top: 20px;
+            align-self: start;
+            min-height: calc(100vh - 48px);
+        }
+
+        .header {
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .header h1 {
+            margin: 0 0 8px;
+            font-size: 30px;
+            color: #111827;
+        }
+
+        .header p {
+            margin: 0;
+            color: #6b7280;
+            line-height: 1.6;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: #374151;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .score-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+
+        .score-card {
+            border-radius: 14px;
+            padding: 16px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: #fff;
+        }
+
+        .score-card h3 {
+            margin: 0 0 10px;
+            font-size: 13px;
+            font-weight: 600;
+            opacity: 0.92;
+        }
+
+        .score-value {
+            font-size: 28px;
+            font-weight: 800;
+        }
+
+        .score-meta {
+            margin-top: 4px;
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 20px;
+        }
+
+        .panel {
+            padding: 20px;
+        }
+
+        .panel h2 {
+            margin: 0 0 16px;
+            font-size: 20px;
+            color: #111827;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            font-size: 14px;
+            background: #fff;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .btn {
+            width: 100%;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            color: #fff;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        }
+
+        .btn:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #eef2ff;
+            color: #4338ca;
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .dot.connected {
+            background: #22c55e;
+        }
+
+        .progress-wrapper {
+            display: none;
+            margin-top: 16px;
+        }
+
+        .progress-text {
+            font-size: 13px;
+            color: #6b7280;
+            margin-bottom: 8px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #e5e7eb;
+        }
+
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            transition: width 0.3s ease;
+        }
+
+        .result-block {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 18px;
+            margin-bottom: 16px;
+        }
+
+        .result-block h3 {
+            margin: 0 0 12px;
+            font-size: 18px;
+            color: #111827;
+        }
+
+        .decision-grid,
+        .snapshot-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .kv {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 12px 14px;
+        }
+
+        .kv .label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+
+        .kv .value {
+            font-size: 15px;
+            font-weight: 700;
+            color: #111827;
+            word-break: break-word;
+        }
+
+        .list {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .list li {
+            margin-bottom: 6px;
+            line-height: 1.5;
+        }
+
+        .role-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .role-card {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .role-card h4 {
+            margin: 0 0 10px;
+            font-size: 15px;
+            color: #1f2937;
+        }
+
+        .role-card p {
+            margin: 0 0 10px;
+            line-height: 1.6;
+            color: #374151;
+        }
+
+        details {
+            margin-top: 14px;
+        }
+
+        details summary {
+            cursor: pointer;
+            font-weight: 700;
+            color: #374151;
+            margin-bottom: 10px;
+        }
+
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #111827;
+            color: #f9fafb;
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-x: auto;
+        }
+
+        .empty-state,
+        .error-state {
+            min-height: 320px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            color: #6b7280;
+            text-align: center;
+            gap: 10px;
+        }
+
+        .log-panel {
+            margin-top: 16px;
+        }
+
+        .log-box {
+            background: #111827;
+            color: #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+            height: 260px;
+            overflow: auto;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .log-entry {
+            margin-bottom: 6px;
+        }
+
+        .log-info { color: #93c5fd; }
+        .log-success { color: #86efac; }
+        .log-warning { color: #fde68a; }
+        .log-error { color: #fca5a5; }
+        .log-progress { color: #c4b5fd; }
+        .log-header { color: #f9fafb; font-weight: 700; }
+
+        @media (max-width: 1280px) {
+            .app-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: static;
+                min-height: auto;
+            }
+        }
+
+        @media (max-width: 1080px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .score-grid,
+            .role-section {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .app-shell,
+            .container {
+                padding: 16px;
+            }
+
+            .grid-2,
+            .score-grid,
+            .role-section {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" data-page="single-stock-analysis"></aside>
+        <main>
+            <div class="header">
+                <div class="header-top">
+                    <div>
+                        <h1>单股分析</h1>
+                        <p>兼容页沿用交易决策中心布局，但实际输入项、分析链路与结果结构全部以 stock_ai 为准。</p>
+                    </div>
+                    <div class="nav-links">
+                        <a href="/stock_ai">原 AI 单股分析</a>
+                        <a href="/stock">经典单股分析</a>
+                        <a href="/history">历史记录</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="score-grid">
+                <div class="score-card"><h3>能力来源</h3><div class="score-value">stock_ai</div><div class="score-meta">真实分析链路</div></div>
+                <div class="score-card"><h3>返回方式</h3><div class="score-value">SSE</div><div class="score-meta">流式日志与最终结果</div></div>
+                <div class="score-card"><h3>结果结构</h3><div class="score-value">AI</div><div class="score-meta">agentic 输出</div></div>
+                <div class="score-card"><h3>兼容策略</h3><div class="score-value">新壳旧核</div><div class="score-meta">保留原入口</div></div>
+            </div>
+
+            <div class="layout">
+                <div>
+                    <div class="panel">
+                        <h2>分析参数</h2>
+
+                        <div class="form-group">
+                            <label for="stockCode">股票代码</label>
+                            <input id="stockCode" class="form-control" type="text" placeholder="如 600519 / 000001 / AAPL">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="market">股票市场</label>
+                            <select id="market" class="form-control">
+                                <option value="SH">上海</option>
+                                <option value="SZ">深圳</option>
+                                <option value="usa">美国</option>
+                                <option value="H">香港</option>
+                                <option value="zq">债券</option>
+                                <option value="cy">创业板</option>
+                            </select>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="startDate">开始日期</label>
+                                <input id="startDate" class="form-control" type="date">
+                            </div>
+                            <div class="form-group">
+                                <label for="endDate">结束日期</label>
+                                <input id="endDate" class="form-control" type="date">
+                            </div>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="tradeDate">交易日期</label>
+                                <input id="tradeDate" class="form-control" type="date">
+                            </div>
+                            <div class="form-group">
+                                <label for="analysisDepth">分析深度</label>
+                                <select id="analysisDepth" class="form-control">
+                                    <option value="standard">standard</option>
+                                    <option value="deep">deep</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button id="analyzeBtn" class="btn" onclick="analyzeStockAI()">开始 AI 分析</button>
+
+                        <div class="status-row">
+                            <div class="status-pill">
+                                <span id="sseDot" class="dot"></span>
+                                <span id="sseStatus">SSE 未连接</span>
+                            </div>
+                            <div class="status-pill" id="systemStatus">系统就绪</div>
+                        </div>
+
+                        <div id="progressWrapper" class="progress-wrapper">
+                            <div id="progressText" class="progress-text">准备开始...</div>
+                            <div class="progress-bar">
+                                <div id="progressFill" class="progress-fill"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel log-panel">
+                        <h2>分析日志</h2>
+                        <div id="logBox" class="log-box">
+                            <div class="log-entry log-info">[系统] 等待发起 AI 个股分析任务...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>分析结果</h2>
+                    <div id="resultsContent">
+                        <div class="empty-state">
+                            <div style="font-size: 48px;">📈</div>
+                            <div>请输入股票参数后发起 AI 个股分析。</div>
+                            <div style="font-size: 13px; color: #9ca3af;">该兼容页直接复用 /api/analyze_stock_ai 与 /api/sse。</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/ui/nav.js"></script>
+    <script>
+        let sseConnection = null;
+        let currentClientId = null;
+        let isAnalyzing = false;
+        let currentResult = null;
+        const API_BASE = '';
+
+        function generateClientId() {
+            return 'single_stock_analysis_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+        }
+
+        function setDefaultDates() {
+            const end = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - 100);
+            document.getElementById('endDate').value = formatDate(end);
+            document.getElementById('startDate').value = formatDate(start);
+            document.getElementById('tradeDate').value = formatDate(end);
+        }
+
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function addLog(message, type = 'info') {
+            const logBox = document.getElementById('logBox');
+            const line = document.createElement('div');
+            const time = new Date().toLocaleTimeString();
+            line.className = `log-entry log-${type}`;
+            line.textContent = `[${time}] ${message}`;
+            logBox.appendChild(line);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function setSSEStatus(connected) {
+            const dot = document.getElementById('sseDot');
+            const text = document.getElementById('sseStatus');
+            if (connected) {
+                dot.classList.add('connected');
+                text.textContent = 'SSE 已连接';
+            } else {
+                dot.classList.remove('connected');
+                text.textContent = 'SSE 未连接';
+            }
+        }
+
+        function setSystemStatus(text) {
+            document.getElementById('systemStatus').textContent = text;
+        }
+
+        function initSSE() {
+            if (sseConnection) {
+                sseConnection.close();
+            }
+
+            currentClientId = generateClientId();
+            sseConnection = new EventSource(`${API_BASE}/api/sse?client_id=${currentClientId}`);
+            addLog('正在建立 SSE 连接', 'info');
+
+            sseConnection.onopen = function() {
+                setSSEStatus(true);
+                addLog('SSE 连接已建立', 'success');
+            };
+
+            sseConnection.onmessage = function(event) {
+                try {
+                    const payload = JSON.parse(event.data);
+                    handleSSEMessage(payload);
+                } catch (error) {
+                    addLog(`SSE 消息解析失败: ${error.message}`, 'warning');
+                }
+            };
+
+            sseConnection.onerror = function() {
+                setSSEStatus(false);
+                addLog('SSE 连接异常，准备重连', 'warning');
+                setTimeout(() => {
+                    if (!sseConnection || sseConnection.readyState === EventSource.CLOSED) {
+                        initSSE();
+                    }
+                }, 3000);
+            };
+        }
+
+        function handleSSEMessage(message) {
+            const eventType = message.event;
+            const data = message.data || {};
+
+            switch (eventType) {
+                case 'connected':
+                    addLog(`已绑定客户端 ${data.client_id}`, 'success');
+                    break;
+                case 'log':
+                    addLog(data.message || '', data.type || 'info');
+                    break;
+                case 'progress':
+                    updateProgress(data.percent || 0, data.message || '处理中...');
+                    break;
+                case 'scores_update':
+                    updateScores(data.scores || {});
+                    break;
+                case 'final_result':
+                    currentResult = data;
+                    renderResult(data);
+                    break;
+                case 'analysis_complete':
+                    finishAnalysis('分析完成');
+                    break;
+                case 'analysis_error':
+                case 'error':
+                    renderError(data.error || '未知错误');
+                    finishAnalysis('分析失败');
+                    break;
+                case 'heartbeat':
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        function updateProgress(percent, message) {
+            document.getElementById('progressWrapper').style.display = 'block';
+            document.getElementById('progressFill').style.width = `${percent}%`;
+            document.getElementById('progressText').textContent = message;
+        }
+
+        function resetProgress() {
+            document.getElementById('progressWrapper').style.display = 'none';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = '准备开始...';
+        }
+
+        function finishAnalysis(statusText) {
+            isAnalyzing = false;
+            document.getElementById('analyzeBtn').disabled = false;
+            setSystemStatus(statusText);
+            setTimeout(() => {
+                if (!isAnalyzing) {
+                    resetProgress();
+                    if (statusText !== '分析失败') {
+                        setSystemStatus('系统就绪');
+                    }
+                }
+            }, 1200);
+        }
+
+        async function analyzeStockAI() {
+            const stockCode = document.getElementById('stockCode').value.trim();
+            const market = document.getElementById('market').value;
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const tradeDate = document.getElementById('tradeDate').value;
+            const analysisDepth = document.getElementById('analysisDepth').value;
+
+            if (!stockCode) {
+                addLog('请输入股票代码', 'warning');
+                return;
+            }
+            if (isAnalyzing) {
+                addLog('已有任务在执行，请稍候', 'warning');
+                return;
+            }
+
+            isAnalyzing = true;
+            currentResult = null;
+            document.getElementById('analyzeBtn').disabled = true;
+            setSystemStatus('分析中');
+            updateProgress(5, '准备发起 AI 个股分析...');
+            renderLoading(stockCode, market);
+            addLog(`开始 AI 个股分析: ${market} ${stockCode}`, 'header');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/analyze_stock_ai`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        stock_code: stockCode,
+                        market: market,
+                        start_date: startDate,
+                        end_date: endDate,
+                        trade_date: tradeDate,
+                        analysis_depth: analysisDepth,
+                        client_id: currentClientId
+                    })
+                });
+
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || result.message || `HTTP ${response.status}`);
+                }
+                addLog(result.message || 'AI 个股分析任务已启动', 'success');
+            } catch (error) {
+                renderError(error.message);
+                finishAnalysis('分析失败');
+                addLog(`启动失败: ${error.message}`, 'error');
+            }
+        }
+
+        function renderLoading(stockCode, market) {
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="empty-state">
+                    <div style="font-size: 48px;">⏳</div>
+                    <div>正在分析 ${market} ${stockCode}</div>
+                    <div style="font-size: 13px; color: #9ca3af;">等待 SSE 推送阶段日志与最终结果...</div>
+                </div>
+            `;
+        }
+
+        function updateScores(scores) {
+            const resultsContent = document.getElementById('resultsContent');
+            let scoreGrid = document.getElementById('scoreGrid');
+            if (!scoreGrid) {
+                resultsContent.innerHTML = '<div id="scoreMount"></div><div id="resultMount"></div>';
+                document.getElementById('scoreMount').outerHTML = `
+                    <div id="scoreGrid" class="score-grid">
+                        <div class="score-card"><h3>综合评分</h3><div class="score-value" id="scoreComposite">--</div><div class="score-meta">composite</div></div>
+                        <div class="score-card"><h3>技术面</h3><div class="score-value" id="scoreTechnical">--</div><div class="score-meta">technical</div></div>
+                        <div class="score-card"><h3>基本面</h3><div class="score-value" id="scoreFundamental">--</div><div class="score-meta">fundamental</div></div>
+                        <div class="score-card"><h3>情绪面</h3><div class="score-value" id="scoreSentiment">--</div><div class="score-meta">sentiment</div></div>
+                    </div>
+                `;
+                scoreGrid = document.getElementById('scoreGrid');
+            }
+
+            setScoreValue('scoreComposite', scores.comprehensive ?? scores.composite ?? 0);
+            setScoreValue('scoreTechnical', scores.technical ?? 0);
+            setScoreValue('scoreFundamental', scores.fundamental ?? 0);
+            setScoreValue('scoreSentiment', scores.sentiment ?? 0);
+        }
+
+        function setScoreValue(elementId, value) {
+            const el = document.getElementById(elementId);
+            if (el) {
+                const number = Number(value || 0);
+                el.textContent = number.toFixed(1);
+            }
+        }
+
+        function renderResult(result) {
+            if (!result || result.success !== true) {
+                renderError('返回结果格式不正确');
+                return;
+            }
+
+            const data = result.data || {};
+            const decision = data.decision || {};
+            const scores = data.scores || {};
+            const finalState = data.final_state || {};
+            const snapshot = data.snapshot || {};
+            const analystOutputs = finalState.analyst_outputs || {};
+            const researchOutputs = finalState.research_outputs || {};
+            const managerOutputs = finalState.manager_outputs || {};
+            const traderOutput = finalState.trader_output || {};
+            const meta = data.meta || {};
+
+            const resultsContent = document.getElementById('resultsContent');
+            resultsContent.innerHTML = `
+                <div class="score-grid">
+                    ${renderScoreCard('综合评分', scores.composite ?? 0, 'composite')}
+                    ${renderScoreCard('技术面', scores.technical ?? 0, 'technical')}
+                    ${renderScoreCard('基本面', scores.fundamental ?? 0, 'fundamental')}
+                    ${renderScoreCard('情绪面', scores.sentiment ?? 0, 'sentiment')}
+                </div>
+
+                <div class="result-block">
+                    <h3>最终决策</h3>
+                    <div class="decision-grid">
+                        ${renderKV('动作', decision.action || '-')}
+                        ${renderKV('置信度', formatConfidence(decision.confidence))}
+                        ${renderKV('风险等级', decision.risk_level || '-')}
+                        ${renderKV('仓位建议', decision.position_suggestion || '-')}
+                        ${renderKV('时间周期', decision.time_horizon || '-')}
+                        ${renderKV('分析模式', data.analysis_mode || 'agentic')}
+                    </div>
+                    <div class="kv" style="margin-top: 12px;">
+                        <div class="label">结论摘要</div>
+                        <div class="value" style="font-weight: 600; line-height: 1.6;">${escapeHtml(decision.summary || '-')}</div>
+                    </div>
+                </div>
+
+                <div class="result-block">
+                    <h3>多角色输出</h3>
+                    <div class="role-section">
+                        ${renderRoleGroup('分析师', analystOutputs)}
+                        ${renderRoleGroup('研究员', researchOutputs)}
+                        ${renderRoleGroup('管理层', managerOutputs)}
+                        ${renderRoleGroup('交易员', traderOutput && Object.keys(traderOutput).length ? { trader_agent: traderOutput } : {})}
+                    </div>
+                </div>
+
+                <div class="result-block">
+                    <h3>数据快照摘要</h3>
+                    <div class="snapshot-grid">
+                        ${renderKV('股票代码', data.stock_code || snapshot.stock_code || '-')}
+                        ${renderKV('市场', data.market || snapshot.market || '-')}
+                        ${renderKV('交易日期', data.trade_date || snapshot.trade_date || '-')}
+                        ${renderKV('公司名称', snapshot.company_name || '-')}
+                        ${renderKV('行业', snapshot.industry || '-')}
+                        ${renderKV('概念板块', normalizeConcepts(snapshot.concepts))}
+                        ${renderKV('新闻条数', String((snapshot.news || []).length))}
+                        ${renderKV('技术分', String(scores.technical ?? '-'))}
+                    </div>
+                </div>
+
+                <div class="result-block">
+                    <h3>执行元信息</h3>
+                    <div class="snapshot-grid">
+                        ${renderKV('耗时(ms)', String(meta.duration_ms ?? '-'))}
+                        ${renderKV('阶段数', String((meta.stages || []).length))}
+                        ${renderKV('错误数', String((meta.errors || []).length))}
+                    </div>
+                    ${renderListBlock('阶段列表', meta.stages || [])}
+                    ${renderListBlock('错误列表', meta.errors || [])}
+                </div>
+
+                <details>
+                    <summary>查看完整 final_state</summary>
+                    <pre>${escapeHtml(JSON.stringify(finalState, null, 2))}</pre>
+                </details>
+
+                <details>
+                    <summary>查看完整 snapshot</summary>
+                    <pre>${escapeHtml(JSON.stringify(snapshot, null, 2))}</pre>
+                </details>
+            `;
+
+            addLog(`AI 个股分析结果已返回: ${data.stock_code || '-'}`, 'success');
+            setSystemStatus('分析完成');
+        }
+
+        function renderScoreCard(title, value, meta) {
+            return `
+                <div class="score-card">
+                    <h3>${escapeHtml(title)}</h3>
+                    <div class="score-value">${Number(value || 0).toFixed(1)}</div>
+                    <div class="score-meta">${escapeHtml(meta)}</div>
+                </div>
+            `;
+        }
+
+        function renderKV(label, value) {
+            return `
+                <div class="kv">
+                    <div class="label">${escapeHtml(label)}</div>
+                    <div class="value">${escapeHtml(value == null ? '-' : String(value))}</div>
+                </div>
+            `;
+        }
+
+        function renderRoleGroup(groupName, outputs) {
+            const entries = Object.entries(outputs || {});
+            if (!entries.length) {
+                return `
+                    <div class="role-card">
+                        <h4>${escapeHtml(groupName)}</h4>
+                        <p>暂无输出</p>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="role-card">
+                    <h4>${escapeHtml(groupName)}</h4>
+                    ${entries.map(([name, payload]) => renderRoleCard(name, payload)).join('')}
+                </div>
+            `;
+        }
+
+        function renderRoleCard(name, payload) {
+            const summary = payload?.summary || '-';
+            const confidence = payload?.confidence;
+            const signals = Array.isArray(payload?.signals) ? payload.signals : [];
+            const risks = Array.isArray(payload?.risks) ? payload.risks : [];
+            const evidence = Array.isArray(payload?.evidence) ? payload.evidence : [];
+
+            return `
+                <div style="border-top: 1px solid #e5e7eb; padding-top: 12px; margin-top: 12px;">
+                    <div style="font-weight: 700; color: #4338ca; margin-bottom: 8px;">${escapeHtml(name)}</div>
+                    <p>${escapeHtml(summary)}</p>
+                    <div style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">置信度: ${formatConfidence(confidence)}</div>
+                    ${renderInlineList('signals', signals)}
+                    ${renderInlineList('risks', risks)}
+                    ${renderInlineList('evidence', evidence)}
+                </div>
+            `;
+        }
+
+        function renderInlineList(title, items) {
+            if (!items || !items.length) {
+                return '';
+            }
+            return `
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size: 13px; font-weight: 700; color: #374151; margin-bottom: 6px;">${escapeHtml(title)}</div>
+                    <ul class="list">${items.map(item => `<li>${escapeHtml(String(item))}</li>`).join('')}</ul>
+                </div>
+            `;
+        }
+
+        function renderListBlock(title, items) {
+            if (!items || !items.length) {
+                return '';
+            }
+            return `
+                <div class="kv" style="margin-top: 12px;">
+                    <div class="label">${escapeHtml(title)}</div>
+                    <ul class="list">${items.map(item => `<li>${escapeHtml(typeof item === 'string' ? item : JSON.stringify(item, null, 0))}</li>`).join('')}</ul>
+                </div>
+            `;
+        }
+
+        function normalizeConcepts(value) {
+            if (Array.isArray(value)) {
+                return value.join(' / ');
+            }
+            return value || '-';
+        }
+
+        function formatConfidence(value) {
+            const number = Number(value);
+            if (Number.isNaN(number)) {
+                return '-';
+            }
+            return `${(number * 100).toFixed(1)}%`;
+        }
+
+        function renderError(message) {
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="error-state">
+                    <div style="font-size: 48px;">❌</div>
+                    <div>分析失败</div>
+                    <div style="max-width: 520px; line-height: 1.6;">${escapeHtml(message || '未知错误')}</div>
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            setDefaultDates();
+            initSSE();
+            addLog('单股分析兼容页已加载', 'success');
+            addLog('该页面复用 /api/analyze_stock_ai', 'info');
+        });
+
+        window.addEventListener('beforeunload', function() {
+            if (sseConnection) {
+                sseConnection.close();
+            }
+        });
+    </script>
+</body>
+</html>

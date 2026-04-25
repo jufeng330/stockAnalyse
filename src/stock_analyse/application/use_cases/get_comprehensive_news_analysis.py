@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from stock_analyse.application.use_cases import analyze_sentiment, get_stock_news
-from stock_analyse.infrastructure.data_sources.stocklib.news_gateway import NewsGateway
+from stock_analyse.domain.services.sentiment_analysis import StockSentimentAnalysis
 
 
 
-def execute(market: str, symbol: str, days: int = 15, gateway: NewsGateway | None = None) -> dict:
+def execute(market: str, symbol: str, days: int = 15, gateway: StockSentimentAnalysis | None = None) -> dict:
     try:
-        gateway = gateway or NewsGateway()
+        gateway = gateway or StockSentimentAnalysis(market=market, symbol=symbol)
         news_result = get_stock_news.execute(market=market, symbol=symbol, days=days, gateway=gateway)
         sentiment_result = analyze_sentiment.execute(market=market, symbol=symbol, days=days, gateway=gateway)
 

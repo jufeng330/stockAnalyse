@@ -1,7 +1,0 @@
-{
-  "author": "StockLib Team",
-  "description": "提供股票新闻数据获取、市场情绪分析、情绪评分计算等情绪分析功能",
-  "name": "stock-sentiment",
-  "tags": ["股票", "情绪分析", "新闻", "舆情", "情绪评分"],
-  "version": "1.0.0"
-}

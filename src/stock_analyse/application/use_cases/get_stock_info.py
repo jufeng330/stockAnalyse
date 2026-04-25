@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from stock_analyse.infrastructure.data_sources.stocklib.company_info_gateway import CompanyInfoGateway
+from stock_analyse.infrastructure.services.company_data_service import stockCompanyInfo
 
 
-def execute(market: str, symbol: str, gateway: CompanyInfoGateway | None = None) -> dict:
+def execute(market: str, symbol: str, gateway: stockCompanyInfo | None = None) -> dict:
     try:
-        gateway = gateway or CompanyInfoGateway()
-        info_df, name, list_date, industry, concept, sector = gateway.get_stock_info_parts(market, symbol)
+        gateway = gateway or stockCompanyInfo(marker=market, symbol=symbol)
+        info_df = gateway.get_stock_individual_info()
+        name = gateway.get_stock_name()
+        _, list_date, industry = gateway.get_stock_individual_info_em()
+        concept = gateway.get_stock_concept_by_code(symbol)
+        sector = gateway.get_stock_industry_by_code(symbol)
         result = {
             "symbol": symbol,
             "name": name,

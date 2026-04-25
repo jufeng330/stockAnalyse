@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>整体分析和复盘 - 交易决策中心</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #1f2937; min-height: 100vh; }
+        .app-shell { max-width: 1520px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+        .sidebar, .header, .panel, .record-card, .summary-card, .score-card { background: rgba(255, 255, 255, 0.96); border-radius: 16px; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12); backdrop-filter: blur(8px); }
+        .sidebar { padding: 20px 16px; position: sticky; top: 20px; align-self: start; min-height: calc(100vh - 48px); }
+        .brand { padding: 8px 10px 18px; border-bottom: 1px solid #e5e7eb; margin-bottom: 18px; }
+        .brand h1 { margin: 0 0 6px; font-size: 20px; color: #111827; }
+        .brand p { margin: 0; font-size: 12px; color: #6b7280; line-height: 1.6; }
+        .tree-title { font-size: 12px; font-weight: 800; color: #6b7280; margin: 18px 10px 10px; text-transform: uppercase; letter-spacing: .08em; }
+        .tree, .tree .children { list-style: none; margin: 0; padding: 0; }
+        .tree > li { margin-bottom: 8px; }
+        .tree a { display: block; text-decoration: none; color: #374151; padding: 10px 12px; border-radius: 12px; font-size: 14px; font-weight: 700; }
+        .tree a:hover { background: #f3f4f6; }
+        .tree a.active { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #fff; }
+        .tree .children { margin: 6px 0 0 18px; padding: 0 0 0 12px; border-left: 2px solid #e5e7eb; }
+        .tree .children a { font-size: 13px; font-weight: 600; color: #6b7280; padding: 8px 10px; }
+        .tree .children a.current { background: #eef2ff; color: #4338ca; }
+        .main { min-width: 0; }
+        .header { padding: 24px; margin-bottom: 20px; }
+        .header h2 { margin: 0 0 8px; font-size: 30px; color: #111827; }
+        .header p { margin: 0; color: #6b7280; line-height: 1.6; }
+        .score-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+        .score-card { padding: 16px; color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .score-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; opacity: .92; }
+        .score-value { font-size: 28px; font-weight: 800; }
+        .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+        .layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+        .panel { padding: 20px; position: sticky; top: 20px; }
+        .panel h3, .content-section h3 { margin: 0 0 16px; font-size: 20px; color: #111827; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; }
+        .form-control { width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; background: #fff; }
+        .btn, .btn-light { border: none; border-radius: 12px; padding: 12px 14px; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .btn { width: 100%; color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .btn-light { width: 100%; color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; margin-top: 10px; }
+        .content-section { margin-bottom: 20px; }
+        .cards-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 14px; }
+        .cards-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        .summary-card, .record-card { padding: 18px; }
+        .summary-card h3, .record-card h4 { margin: 0 0 10px; font-size: 16px; color: #111827; }
+        .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+        .metric { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }
+        .metric .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+        .metric .value { font-size: 18px; font-weight: 800; color: #111827; }
+        .bar-row { margin-bottom: 12px; }
+        .bar-label { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; color: #374151; }
+        .bar-track { height: 10px; background: #e5e7eb; border-radius: 999px; overflow: hidden; }
+        .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .tag { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; margin: 0 6px 6px 0; }
+        .tag-risk { background: #fff7ed; color: #c2410c; }
+        .tag-good { background: #ecfdf5; color: #047857; }
+        .tag-neutral { background: #eef2ff; color: #4338ca; }
+        ul { margin: 10px 0 0; padding-left: 18px; color: #374151; }
+        li { margin-bottom: 6px; line-height: 1.6; }
+        .tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+        .tab { padding: 10px 14px; border-radius: 10px; background: #f3f4f6; color: #475569; font-size: 13px; font-weight: 700; }
+        .tab.active { background: #eef2ff; color: #4338ca; }
+        .record-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .record-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        .record-meta { color: #6b7280; font-size: 13px; line-height: 1.7; }
+        @media (max-width: 1280px) {
+            .app-shell { grid-template-columns: 1fr; }
+            .sidebar { position: static; min-height: auto; }
+            .layout { grid-template-columns: 1fr; }
+            .panel { position: static; }
+            .score-grid, .cards-2, .cards-3, .metric-grid, .record-grid, .record-filters { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 720px) {
+            .score-grid, .cards-2, .cards-3, .metric-grid, .record-grid, .record-filters { grid-template-columns: 1fr; }
+        }
+    </style>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" data-page="portfolio-review"></aside>
+
+        <main class="main">
+            <div class="header">
+                <h2>整体分析和复盘</h2>
+                <p>面向组合层的总览页面，用于查看整体仓位、行业分布、风险暴露、交易质量和阶段性复盘结论，并沉淀为可回看的组合记录。</p>
+            </div>
+
+            <div class="score-grid">
+                <div class="score-card"><h3>当前总仓位</h3><div class="score-value">72%</div><div class="score-meta">较上周 +4%</div></div>
+                <div class="score-card"><h3>总持仓市值</h3><div class="score-value">¥1.86M</div><div class="score-meta">总资产估值 ¥2.58M</div></div>
+                <div class="score-card"><h3>本月已实现收益</h3><div class="score-value">+¥83K</div><div class="score-meta">含 4 次减仓与 2 次卖出</div></div>
+                <div class="score-card"><h3>纪律执行评分</h3><div class="score-value">86</div><div class="score-meta">高于上月 8 分</div></div>
+            </div>
+
+            <div class="layout">
+                <aside class="panel">
+                    <h3>分析维度</h3>
+                    <div class="form-group"><label>时间区间</label><select class="form-control"><option>本周 / 本月 / 本季度</option></select></div>
+                    <div class="form-group"><label>账户范围</label><select class="form-control"><option>全部账户</option></select></div>
+                    <div class="form-group"><label>复盘类型</label><select class="form-control"><option>整体分析 / 整体复盘</option></select></div>
+                    <div class="form-group"><label>关注标签</label><input class="form-control" value="仓位集中 / 高风险 / 纪律执行" /></div>
+                    <button class="btn">生成组合分析</button>
+                    <button class="btn-light">查看历史记录</button>
+                </aside>
+
+                <main>
+                    <section class="content-section" id="portfolio-summary">
+                        <div class="cards-2">
+                            <div class="summary-card">
+                                <h3>组合指标概览</h3>
+                                <div class="metric-grid">
+                                    <div class="metric"><div class="label">持仓标的数</div><div class="value">12</div></div>
+                                    <div class="metric"><div class="label">高风险标的</div><div class="value">2</div></div>
+                                    <div class="metric"><div class="label">本周新增决策</div><div class="value">7</div></div>
+                                    <div class="metric"><div class="label">本周复盘数</div><div class="value">11</div></div>
+                                </div>
+                            </div>
+                            <div class="summary-card">
+                                <h3>组合结论</h3>
+                                <div class="tag tag-good">整体可控</div><div class="tag tag-risk">半导体仓位偏高</div><div class="tag tag-neutral">红利仓位稳定</div>
+                                <ul><li>当前组合风险主要集中在成长板块波动。</li><li>能源与红利仓位起到稳定作用。</li><li>后续新增仓位建议优先分散到低相关资产。</li></ul>
+                            </div>
+                        </div>
+                        <div class="cards-3">
+                            <div class="summary-card">
+                                <h3>行业分布</h3>
+                                <div class="bar-row"><div class="bar-label"><span>半导体</span><span>28%</span></div><div class="bar-track"><div class="bar-fill" style="width: 28%"></div></div></div>
+                                <div class="bar-row"><div class="bar-label"><span>新能源</span><span>22%</span></div><div class="bar-track"><div class="bar-fill" style="width: 22%"></div></div></div>
+                                <div class="bar-row"><div class="bar-label"><span>红利能源</span><span>18%</span></div><div class="bar-track"><div class="bar-fill" style="width: 18%"></div></div></div>
+                                <div class="bar-row"><div class="bar-label"><span>消费</span><span>12%</span></div><div class="bar-track"><div class="bar-fill" style="width: 12%"></div></div></div>
+                            </div>
+                            <div class="summary-card"><h3>风险暴露</h3><ul><li>成长风格暴露偏高，受市场情绪影响较大。</li><li>两只高波动标的贡献了大部分组合回撤弹性。</li><li>建议将新增仓位优先分配到低相关性资产。</li></ul></div>
+                            <div class="summary-card"><h3>交易质量统计</h3><ul><li>本月进场决策胜率：71%</li><li>补仓决策执行后正收益占比：64%</li><li>卖出决策中纪律性触发占比：83%</li></ul></div>
+                        </div>
+                    </section>
+
+                    <section class="content-section" id="portfolio-records">
+                        <h3>整体分析与复盘记录</h3>
+                        <div class="tabs"><div class="tab active">整体分析记录</div><div class="tab">整体复盘记录</div></div>
+                        <div class="record-filters"><input class="form-control" value="关键字 / 标签" /><select class="form-control"><option>时间区间</option></select><select class="form-control"><option>风险等级</option></select><select class="form-control"><option>纪律评分</option></select></div>
+                        <div class="record-grid">
+                            <div class="record-card"><h4>整体分析 #PR-20260425-002</h4><div class="record-meta">时间：2026-04-25 · 结论：整体可控，但半导体仓位偏高 · 风险等级：中</div></div>
+                            <div class="record-card"><h4>整体复盘 #RV-20260421-001</h4><div class="record-meta">周期：周复盘 · 纪律评分：84 · 重点：卖出执行纪律提升明显</div></div>
+                            <div class="record-card"><h4>整体复盘 #RV-20260401-001</h4><div class="record-meta">周期：月复盘 · 盈亏归因：成长板块贡献主收益，集中度偏高需控制</div></div>
+                        </div>
+                    </section>
+                </main>
+            </div>
+        </main>
+    </div>
+  <script src="/static/ui/nav.js"></script>
+</body>
+</html>

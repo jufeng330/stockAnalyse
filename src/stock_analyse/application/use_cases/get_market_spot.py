@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from stock_analyse.infrastructure.data_sources.stocklib.spot_gateway import SpotGateway
+from stock_analyse.infrastructure.services.market_data_service import stockBorderInfo
 
 
-def execute(market: str, gateway: SpotGateway | None = None) -> dict:
+def execute(market: str, gateway: stockBorderInfo | None = None) -> dict:
     try:
-        gateway = gateway or SpotGateway()
-        df = gateway.get_market_spot(market)
+        gateway = gateway or stockBorderInfo(market=market)
+        df = gateway.get_stock_spot()
         if df is None or df.empty:
             return {"success": False, "data": {}, "message": "无市场数据"}
         records = df.head(100).to_dict(orient="records")

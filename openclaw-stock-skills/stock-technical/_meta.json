@@ -1,7 +1,0 @@
-{
-  "author": "StockLib Team",
-  "description": "提供各类股票技术指标计算和交易信号生成，包括MACD、RSI、KDJ、布林带、威廉指标、ADX等",
-  "name": "stock-technical",
-  "tags": ["股票", "技术指标", "MACD", "RSI", "KDJ", "布林带", "威廉指标"],
-  "version": "1.0.0"
-}

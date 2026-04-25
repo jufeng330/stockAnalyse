@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from scanner.stock_analyzer import StockAnalyzer
 from stock_analyse.application.use_cases import analyze_sentiment
 from stock_analyse.infrastructure.llm.adapter import StockAiAdapter
-from stocklib.stock_border import stockBorderInfo
-from stocklib.stock_indicator_quantitative import stockIndicatorQuantitative
+from stock_analyse.application.services.quantitative_analysis_service import stockIndicatorQuantitative
 
 
 class StockAnalysisOrchestrator:
+    def __init__(self, technical_analysis_workflow: Any | None = None) -> None:
+        self._technical_analysis_workflow = technical_analysis_workflow
+
+    def _get_technical_analysis_workflow(self):
+        if self._technical_analysis_workflow is None:
+            from stock_analyse.application.workflows.technical_analysis_workflow import TechnicalAnalysisWorkflow
+
+            self._technical_analysis_workflow = TechnicalAnalysisWorkflow()
+        return self._technical_analysis_workflow
+
     def run(self, stock_code: str, market: str, start_date_str: str, end_date_str: str, selected_strategies: list[str], system_prompt: str, message_format: str, ai_platform: str, ai_model: str, api_code: str, callbacks=None) -> dict:
         callbacks = callbacks or {}
         send_log = callbacks.get('send_log')
@@ -126,14 +135,5 @@ class StockAnalysisOrchestrator:
             'tec_data_analysis': tec_data_markdown,
         }
 
-    @staticmethod
-    def get_stock_technical_analysis(stock_code, market):
-        stock_border = stockBorderInfo(market=market)
-        df_stock = stock_border.get_stock_spot()
-        df_stock = df_stock[df_stock['股票代码'] == stock_code]
-        df_stock['market'] = market
-
-        stock_analyzer = StockAnalyzer(market=market)
-        df_summary_data = stock_analyzer.analyze_stock(df_stock, market)
-        score = df_summary_data['score']
-        return score, df_summary_data
+    def get_stock_technical_analysis(self, stock_code, market):
+        return self._get_technical_analysis_workflow().run(stock_code=stock_code, market=market)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from stock_analyse.application.use_cases import get_price_range
 from stock_analyse.domain.services.valuation_service import ValuationService
-from stock_analyse.infrastructure.data_sources.stocklib.valuation_gateway import ValuationGateway
+from stock_analyse.infrastructure.services.valuation_gateway import ValuationGateway
 
 
 

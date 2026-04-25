@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>批量分析 - 交易决策中心</title>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #1f2937;
+      min-height: 100vh;
+    }
+    .app-shell {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+    }
+    .sidebar, .header, .panel, .card, .score-card {
+      background: rgba(255, 255, 255, 0.96);
+      border-radius: 16px;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(8px);
+    }
+    .sidebar {
+      padding: 20px 16px;
+      position: sticky;
+      top: 20px;
+      align-self: start;
+      min-height: calc(100vh - 48px);
+    }
+    .header, .panel, .card {
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .header h2 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      color: #111827;
+    }
+    .header p, .panel-desc, .hint, .empty-state p {
+      margin: 0;
+      color: #6b7280;
+      line-height: 1.6;
+    }
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .score-card {
+      padding: 16px;
+      color: #fff;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    }
+    .score-card h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 600;
+      opacity: .92;
+    }
+    .score-value {
+      font-size: 28px;
+      font-weight: 800;
+    }
+    .score-meta {
+      margin-top: 4px;
+      font-size: 12px;
+      opacity: .9;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .panel h3, .card h3 {
+      margin: 0;
+      font-size: 20px;
+      color: #111827;
+    }
+    .panel-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      align-items: end;
+    }
+    .action-row {
+      display: flex;
+      justify-content: flex-start;
+    }
+    .action-row .btn {
+      width: auto;
+      min-width: 180px;
+    }
+    .form-group {
+      width: 100%;
+    }
+    .form-group textarea {
+      width: 100%;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #374151;
+    }
+    .form-control, textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 14px;
+      background: #fff;
+    }
+    textarea {
+      min-height: 140px;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.6;
+    }
+    .btn, .btn-light, .btn-mini {
+      border: none;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
+    .btn, .btn-light {
+      width: 100%;
+      padding: 12px 14px;
+    }
+    .btn {
+      color: #fff;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    }
+    .btn-light {
+      color: #374151;
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+    }
+    .btn-mini {
+      padding: 6px 12px;
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+    }
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #6b7280;
+      white-space: nowrap;
+    }
+    .sse-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #dc2626;
+      transition: background-color 0.3s;
+    }
+    .sse-indicator.connected { background: #16a34a; }
+    .progress-bar {
+      width: 100%;
+      height: 12px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 16px;
+      display: none;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      transition: width 0.3s ease;
+    }
+    .hint {
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    .current-stock {
+      display: none;
+      margin-top: 12px;
+      color: #6b7280;
+      font-size: 13px;
+      font-style: italic;
+    }
+    .result-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      background: #fff;
+      min-height: 320px;
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    .empty-state {
+      display: grid;
+      place-items: center;
+      min-height: 260px;
+      text-align: center;
+    }
+    .empty-state h4 {
+      margin: 0 0 8px;
+      color: #111827;
+      font-size: 22px;
+    }
+    .results-scroll {
+      width: 100%;
+      overflow-x: auto;
+    }
+    .log-display {
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      min-height: 220px;
+      max-height: 420px;
+      overflow-y: auto;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .log-entry { margin-bottom: 6px; }
+    .log-info { color: #93c5fd; }
+    .log-success { color: #86efac; }
+    .log-warning { color: #fde68a; }
+    .log-error { color: #fca5a5; }
+    .log-header { color: #c4b5fd; font-weight: 700; }
+    .log-progress { color: #d8b4fe; }
+    @media (max-width: 1280px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; min-height: auto; }
+      .score-grid { grid-template-columns: 1fr 1fr; }
+      .panel-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .score-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" data-page="batch-analysis"></aside>
+    <main>
+      <div class="header">
+        <h2>批量分析</h2>
+        <p>保留旧版“深度批量分析”的执行能力，并迁移到新的真实模板页中。</p>
+      </div>
+
+      <div class="score-grid">
+        <div class="score-card">
+          <h3>输入方式</h3>
+          <div class="score-value">多股票</div>
+          <div class="score-meta">每行一个代码</div>
+        </div>
+        <div class="score-card">
+          <h3>执行模式</h3>
+          <div class="score-value">深度分析</div>
+          <div class="score-meta">沿用旧批量分析能力</div>
+        </div>
+        <div class="score-card">
+          <h3>结果回传</h3>
+          <div class="score-value">SSE</div>
+          <div class="score-meta">日志 / 进度 / 批量结果</div>
+        </div>
+        <div class="score-card">
+          <h3>旧入口</h3>
+          <div class="score-value">保留</div>
+          <div class="score-meta">不改原一体化页面</div>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>批量分析参数</h3>
+            <p class="panel-desc">输入要分析的股票代码列表，调用原有深度批量分析能力。</p>
+          </div>
+          <div class="status-line">
+            <div id="sseIndicator" class="sse-indicator"></div>
+            <span id="sseStatus">SSE 断开</span>
+          </div>
+        </div>
+        <div class="panel-grid">
+          <div class="form-group">
+            <label for="stockList">股票列表</label>
+            <textarea id="stockList" class="form-control" placeholder="每行一个股票代码，例如：&#10;300750&#10;601088&#10;688981"></textarea>
+          </div>
+          <div class="action-row">
+            <button id="batchAnalyzeBtn" class="btn" type="button" onclick="analyzeBatchStocks()">开始批量分析</button>
+          </div>
+        </div>
+        <div id="batchProgress" class="progress-bar">
+          <div class="progress-bar-fill"></div>
+        </div>
+        <div id="currentStock" class="current-stock"></div>
+        <p class="hint">分析结果区域与本参数区域使用同一主列宽度；如表格列较多，仅表格内部横向滚动。</p>
+      </section>
+
+      <section class="card">
+        <div class="panel-header">
+          <h3>分析结果</h3>
+        </div>
+        <div id="resultsContent" class="result-panel">
+          <div class="empty-state">
+            <div>
+              <h4>等待批量分析</h4>
+              <p>请输入股票列表后点击“开始批量分析”。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="panel-header">
+          <h3>运行日志</h3>
+          <button class="btn-mini" type="button" onclick="clearLog()">清空</button>
+        </div>
+        <div id="logDisplay" class="log-display">
+          <div class="log-entry log-info">📋 系统就绪，等待批量分析。</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/ui/nav.js"></script>
+  <script>
+    let sseConnection = null;
+    let currentClientId = null;
+    let isAnalyzing = false;
+    const API_BASE = '';
+
+    function generateClientId() {
+      return 'client_' + Math.random().toString(36).slice(2, 11) + '_' + Date.now();
+    }
+
+    function addLog(message, type = 'info') {
+      const logDisplay = document.getElementById('logDisplay');
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.textContent = message;
+      logDisplay.appendChild(entry);
+      logDisplay.scrollTop = logDisplay.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('logDisplay').innerHTML = '<div class="log-entry log-info">📋 日志已清空，等待新的批量分析任务。</div>';
+    }
+
+    function updateSSEStatus(connected) {
+      const indicator = document.getElementById('sseIndicator');
+      const status = document.getElementById('sseStatus');
+      indicator.classList.toggle('connected', connected);
+      status.textContent = connected ? 'SSE 已连接' : 'SSE 断开';
+    }
+
+    function showProgress(elementId) {
+      const progress = document.getElementById(elementId);
+      progress.style.display = 'block';
+      progress.querySelector('.progress-bar-fill').style.width = '0%';
+    }
+
+    function hideProgress(elementId) {
+      const progress = document.getElementById(elementId);
+      progress.style.display = 'none';
+      progress.querySelector('.progress-bar-fill').style.width = '0%';
+    }
+
+    function updateProgress(elementId, percent) {
+      const progress = document.getElementById(elementId);
+      progress.style.display = 'block';
+      progress.querySelector('.progress-bar-fill').style.width = `${percent}%`;
+    }
+
+    function showLoading() {
+      document.getElementById('resultsContent').innerHTML = `
+        <div class="empty-state">
+          <div>
+            <h4>正在批量分析</h4>
+            <p>系统正在逐只处理输入的股票，请稍候。</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function initSSE() {
+      if (sseConnection) {
+        sseConnection.close();
+      }
+
+      currentClientId = generateClientId();
+      addLog('🌊 正在建立 SSE 连接...', 'info');
+      sseConnection = new EventSource(`${API_BASE}/api/sse?client_id=${currentClientId}`);
+
+      sseConnection.onopen = function() {
+        addLog('✅ SSE 连接已建立', 'success');
+        updateSSEStatus(true);
+      };
+
+      sseConnection.onmessage = function(event) {
+        try {
+          handleSSEMessage(JSON.parse(event.data));
+        } catch (error) {
+          console.error('SSE 消息解析失败:', error);
+        }
+      };
+
+      sseConnection.onerror = function() {
+        updateSSEStatus(false);
+        addLog('❌ SSE 连接错误，稍后重连', 'error');
+        if (!sseConnection || sseConnection.readyState === EventSource.CLOSED) {
+          setTimeout(initSSE, 3000);
+        }
+      };
+    }
+
+    function handleSSEMessage(data) {
+      const eventType = data.event;
+      const eventData = data.data;
+
+      switch (eventType) {
+        case 'log':
+          addLog(eventData.message, eventData.type || 'info');
+          break;
+        case 'progress':
+          updateProgress(eventData.element_id || 'batchProgress', eventData.percent || 0);
+          if (eventData.message) {
+            addLog(eventData.message, 'progress');
+          }
+          if (eventData.current_stock) {
+            document.getElementById('currentStock').textContent = `正在分析: ${eventData.current_stock}`;
+            document.getElementById('currentStock').style.display = 'block';
+          }
+          break;
+        case 'batch_result':
+          displayBatchResults(eventData);
+          break;
+        case 'analysis_complete':
+          onAnalysisComplete(eventData);
+          break;
+        case 'analysis_error':
+        case 'error':
+          onAnalysisError(eventData);
+          break;
+        case 'heartbeat':
+          break;
+        default:
+          break;
+      }
+    }
+
+    function displayBatchResults(reports) {
+      if (!reports || reports.length === 0) {
+        addLog('批量分析结果为空', 'warning');
+        return;
+      }
+
+      const avgScores = {
+        comprehensive: reports.reduce((sum, report) => sum + report.scores.comprehensive, 0) / reports.length,
+        technical: reports.reduce((sum, report) => sum + report.scores.technical, 0) / reports.length,
+        fundamental: reports.reduce((sum, report) => sum + report.scores.fundamental, 0) / reports.length,
+        sentiment: reports.reduce((sum, report) => sum + report.scores.sentiment, 0) / reports.length,
+      };
+
+      const tableRows = reports
+        .sort((a, b) => b.scores.comprehensive - a.scores.comprehensive)
+        .map((report, index) => `
+          <tr>
+            <td style="padding: 12px; font-weight: 600;">${index + 1}</td>
+            <td style="padding: 12px;">${report.stock_code}</td>
+            <td style="padding: 12px;">${report.stock_name || report.stock_code}</td>
+            <td style="padding: 12px; font-weight: 600; color: ${report.scores.comprehensive >= 70 ? '#27ae60' : report.scores.comprehensive >= 50 ? '#667eea' : '#e74c3c'};">${report.scores.comprehensive.toFixed(1)}</td>
+            <td style="padding: 12px;">${report.scores.technical.toFixed(1)}</td>
+            <td style="padding: 12px;">${report.scores.fundamental.toFixed(1)}</td>
+            <td style="padding: 12px;">${report.scores.sentiment.toFixed(1)}</td>
+            <td style="padding: 12px; font-weight: 600;">${report.recommendation}</td>
+          </tr>
+        `).join('');
+
+      document.getElementById('resultsContent').innerHTML = `
+        <div style="line-height: 1.6; width: 100%; max-width: 100%;">
+          <h2 style="color: #2c3e50; border-bottom: 2px solid #e9ecef; padding-bottom: 12px; margin-bottom: 20px; font-size: 24px;">
+            批量分析报告 (${reports.length} 只股票)
+          </h2>
+          <div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+            <h4 style="color: #495057; margin-bottom: 12px;">分析汇总</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+              <div><strong>分析数量:</strong> ${reports.length} 只</div>
+              <div><strong>平均得分:</strong> ${avgScores.comprehensive.toFixed(1)}</div>
+              <div><strong>优秀股票:</strong> ${reports.filter(report => report.scores.comprehensive >= 80).length} 只</div>
+              <div><strong>良好股票:</strong> ${reports.filter(report => report.scores.comprehensive >= 60).length} 只</div>
+            </div>
+          </div>
+          <div class="results-scroll">
+            <table style="width: 100%; min-width: 860px; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+              <thead>
+                <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                  <th style="padding: 16px; text-align: left;">排名</th>
+                  <th style="padding: 16px; text-align: left;">代码</th>
+                  <th style="padding: 16px; text-align: left;">名称</th>
+                  <th style="padding: 16px; text-align: left;">综合得分</th>
+                  <th style="padding: 16px; text-align: left;">技术面</th>
+                  <th style="padding: 16px; text-align: left;">基本面</th>
+                  <th style="padding: 16px; text-align: left;">情绪面</th>
+                  <th style="padding: 16px; text-align: left;">投资建议</th>
+                </tr>
+              </thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      addLog(`批量分析结果已返回，共 ${reports.length} 只股票`, 'success');
+    }
+
+    function onAnalysisComplete(data) {
+      isAnalyzing = false;
+      document.getElementById('batchAnalyzeBtn').disabled = false;
+      hideProgress('batchProgress');
+      document.getElementById('currentStock').style.display = 'none';
+      addLog(`✅ ${data.message || '批量分析完成'}`, 'success');
+    }
+
+    function onAnalysisError(data) {
+      isAnalyzing = false;
+      document.getElementById('batchAnalyzeBtn').disabled = false;
+      hideProgress('batchProgress');
+      document.getElementById('currentStock').style.display = 'none';
+      document.getElementById('resultsContent').innerHTML = `
+        <div class="empty-state">
+          <div>
+            <h4>分析失败</h4>
+            <p>${data.error || data.message || '未知错误'}</p>
+          </div>
+        </div>
+      `;
+      addLog(`❌ ${data.error || data.message || '批量分析失败'}`, 'error');
+    }
+
+    async function analyzeBatchStocks() {
+      const stockListText = document.getElementById('stockList').value.trim();
+      if (!stockListText) {
+        addLog('请输入股票代码列表', 'warning');
+        return;
+      }
+
+      if (isAnalyzing) {
+        addLog('当前已有任务在执行，请稍候', 'warning');
+        return;
+      }
+
+      const stockList = stockListText.split('\n').map((item) => item.trim()).filter(Boolean);
+      if (stockList.length === 0) {
+        addLog('股票代码列表为空', 'warning');
+        return;
+      }
+
+      if (!currentClientId || !sseConnection || sseConnection.readyState !== EventSource.OPEN) {
+        initSSE();
+        addLog('正在初始化连接，请再次点击开始批量分析', 'warning');
+        return;
+      }
+
+      isAnalyzing = true;
+      document.getElementById('batchAnalyzeBtn').disabled = true;
+      showLoading();
+      showProgress('batchProgress');
+      document.getElementById('currentStock').style.display = 'block';
+      addLog(`📊 开始流式批量分析 ${stockList.length} 只股票`, 'header');
+
+      try {
+        const response = await fetch(`${API_BASE}/api/batch_analyze_stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stock_codes: stockList, client_id: currentClientId })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || '批量分析失败');
+        }
+
+        addLog(result.message || '批量分析任务已提交', 'info');
+      } catch (error) {
+        onAnalysisError({ error: error.message });
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initSSE();
+    });
+  </script>
+</body>
+</html>

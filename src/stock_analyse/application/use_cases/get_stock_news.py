@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from stock_analyse.infrastructure.data_sources.stocklib.news_gateway import NewsGateway
+from stock_analyse.infrastructure.data_sources.news.eastmoney_news_client import stockNewsData
 
 
 DEFAULT_PAGE_SIZE = 20
 
 
-def execute(market: str, symbol: str, days: int = 15, page_size: int = DEFAULT_PAGE_SIZE, gateway: NewsGateway | None = None) -> dict:
+def execute(market: str, symbol: str, days: int = 15, page_size: int = DEFAULT_PAGE_SIZE, gateway: stockNewsData | None = None) -> dict:
     try:
-        gateway = gateway or NewsGateway()
-        df = gateway.get_stock_news(symbol=symbol, page_size=page_size)
+        gateway = gateway or stockNewsData()
+        df = gateway.stock_news_em(symbol=symbol, pageSize=page_size)
         if df is None or df.empty:
             return {"success": False, "data": {}, "message": "无新闻数据"}
 

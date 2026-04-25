@@ -1,25 +1,17 @@
 from __future__ import annotations
 
-from stock_analyse.infrastructure.data_sources.stocklib.news_gateway import NewsGateway
+from stock_analyse.domain.services.sentiment_analysis import StockSentimentAnalysis
 
 
 DEFAULT_SENTIMENT_SCORE = 50.0
 
 
-def execute(market: str, symbol: str, days: int = 15, gateway: NewsGateway | None = None) -> dict:
+def execute(market: str, symbol: str, days: int = 15, gateway: StockSentimentAnalysis | None = None) -> dict:
     try:
-        gateway = gateway or NewsGateway()
-        comprehensive_news_data = gateway.get_comprehensive_news_data(market=market, symbol=symbol, days=days)
-        sentiment_data = gateway.calculate_advanced_sentiment_analysis(
-            market=market,
-            symbol=symbol,
-            comprehensive_news_data=comprehensive_news_data,
-        )
-        sentiment_score = gateway.calculate_sentiment_score(
-            market=market,
-            symbol=symbol,
-            sentiment_analysis=sentiment_data,
-        )
+        gateway = gateway or StockSentimentAnalysis(market=market, symbol=symbol)
+        comprehensive_news_data = gateway.get_comprehensive_news_data(symbol, days=days)
+        sentiment_data = gateway.calculate_advanced_sentiment_analysis(comprehensive_news_data)
+        sentiment_score = gateway.calculate_sentiment_score(sentiment_data)
 
         return {
             "success": True,

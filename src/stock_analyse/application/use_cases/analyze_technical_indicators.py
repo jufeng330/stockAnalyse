@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from stock_analyse.domain.services.technical_indicator_service import TechnicalIndicatorService
-from stock_analyse.infrastructure.data_sources.stocklib.technical_indicator_gateway import TechnicalIndicatorGateway
+from stock_analyse.infrastructure.analysis.technical_indicator_calculator import stockAKIndicator
 
-SUPPORTED_ACTIONS = {"ma", "macd", "rsi", "bollinger", "all"}
+SUPPORTED_ACTIONS = {"ma", "macd", "rsi", "kdj", "bollinger", "breakout", "sar", "williams", "adx", "all"}
 
 
 def _default_dates(start_date: str | None, end_date: str | None) -> tuple[str, str]:
@@ -16,9 +16,9 @@ def _default_dates(start_date: str | None, end_date: str | None) -> tuple[str, s
     return start_date, end_date
 
 
-def _get_history(market: str, symbol: str, start_date: str | None, end_date: str | None, gateway: TechnicalIndicatorGateway):
+def _get_history(market: str, symbol: str, start_date: str | None, end_date: str | None, gateway: stockAKIndicator):
     start_date, end_date = _default_dates(start_date, end_date)
-    return gateway.get_history_data(market=market, symbol=symbol, start_date=start_date, end_date=end_date)
+    return gateway.stock_day_data_code(symbol, market, start_date, end_date)
 
 
 def _build_ma(symbol: str, latest, service: TechnicalIndicatorService) -> dict:
@@ -72,6 +72,70 @@ def _build_bollinger(symbol: str, latest, service: TechnicalIndicatorService) ->
     )
 
 
+def _build_kdj(symbol: str, latest, service: TechnicalIndicatorService) -> dict:
+    signal = service.signal_from_value(latest.get("kdj_signal"))
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="kdj",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        k=latest.get("K"),
+        d=latest.get("D"),
+        j=latest.get("J"),
+    )
+
+
+def _build_breakout(symbol: str, latest, service: TechnicalIndicatorService) -> dict:
+    signal = service.signal_from_value(latest.get("breakout_signal"))
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="breakout",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        resistance=latest.get("residence"),
+        support=latest.get("support"),
+    )
+
+
+def _build_sar(symbol: str, latest, service: TechnicalIndicatorService) -> dict:
+    signal = service.signal_from_value(latest.get("sar_signal"))
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="sar",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        sar=latest.get("SAR"),
+    )
+
+
+def _build_williams(symbol: str, latest, period: int, service: TechnicalIndicatorService) -> dict:
+    williams_value = latest.get("Williams_R")
+    signal = service.williams_signal(williams_value)
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="williams",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        williams_r=williams_value,
+        period=period,
+    )
+
+
+def _build_adx(symbol: str, latest, period: int, threshold: int, service: TechnicalIndicatorService) -> dict:
+    signal = service.signal_from_value(latest.get("adx_signal"))
+    return service.build_indicator_data(
+        symbol=symbol,
+        indicator="adx",
+        signal=signal,
+        last_price=latest.get("收盘"),
+        adx=latest.get("ADX"),
+        di_plus=latest.get("+DI"),
+        di_minus=latest.get("-DI"),
+        period=period,
+        threshold=threshold,
+    )
+
+
 def _build_all_data(symbol: str, results: dict, service: TechnicalIndicatorService) -> dict:
     summary = service.summarize(results)
     return {
@@ -97,21 +161,48 @@ def _single_message(action: str, data: dict) -> str:
         return f"MACD信号: {data['signal']}"
     if action == "rsi":
         return f"RSI({data['period']}): {data['rsi']:.2f}, 信号: {data['signal']}"
+    if action == "kdj":
+        return f"KDJ信号: {data['signal']}"
     if action == "bollinger":
         return f"布林带信号: {data['signal']}"
+    if action == "breakout":
+        return f"突破信号: {data['signal']}"
+    if action == "sar":
+        return f"SAR信号: {data['signal']}"
+    if action == "williams":
+        return f"威廉指标: {data['williams_r']:.2f}, 信号: {data['signal']}"
+    if action == "adx":
+        return f"ADX信号: {data['signal']}"
     return ""
 
 
-def _execute_calculation(action: str, df, params: dict | None, gateway: TechnicalIndicatorGateway):
+def _execute_calculation(action: str, df, params: dict | None, gateway: stockAKIndicator):
     if action == "ma":
-        return gateway.calculate_ma(df)
+        return gateway.strategy_mac(df)
     if action == "macd":
-        return gateway.calculate_macd(df)
+        return gateway.strategy_macd(df)
     if action == "rsi":
         period = params.get("period", 14) if params else 14
-        return gateway.calculate_rsi(df, period=period)
+        return gateway.strategy_rsi(df, period=period)
+    if action == "kdj":
+        fastk_period = params.get("fastk_period", 9) if params else 9
+        slowk_period = params.get("slowk_period", 3) if params else 3
+        slowd_period = params.get("slowd_period", 3) if params else 3
+        return gateway.strategy_kdj(df, fastk_period=fastk_period, slowk_period=slowk_period, slowd_period=slowd_period)
     if action == "bollinger":
-        return gateway.calculate_bollinger(df)
+        return gateway.strategy_bollinger(df)
+    if action == "breakout":
+        window = params.get("window", 20) if params else 20
+        return gateway.strategy_breakout(df, window=window)
+    if action == "sar":
+        return gateway.strategy_sar(df)
+    if action == "williams":
+        period = params.get("period", 14) if params else 14
+        return gateway.strategy_williams_r(df, time_period=period)
+    if action == "adx":
+        period = params.get("period", 14) if params else 14
+        threshold = params.get("adx_threshold", 25) if params else 25
+        return gateway.strategy_adx(df, time_period=period, adx_threshold=threshold)
     return None
 
 
@@ -123,12 +214,28 @@ def _build_result_data(action: str, symbol: str, latest, params: dict | None, se
     if action == "rsi":
         period = params.get("period", 14) if params else 14
         return _build_rsi(symbol, latest, period, service)
+    if action == "kdj":
+        return _build_kdj(symbol, latest, service)
     if action == "bollinger":
         return _build_bollinger(symbol, latest, service)
+    if action == "breakout":
+        return _build_breakout(symbol, latest, service)
+    if action == "sar":
+        return _build_sar(symbol, latest, service)
+    if action == "williams":
+        period = params.get("period", 14) if params else 14
+        return _build_williams(symbol, latest, period, service)
+    if action == "adx":
+        period = params.get("period", 14) if params else 14
+        threshold = params.get("adx_threshold", 25) if params else 25
+        return _build_adx(symbol, latest, period, threshold, service)
     raise ValueError("未知的 action")
 
 
-def _execute_single(action: str, market: str, symbol: str, start_date: str | None, end_date: str | None, params: dict | None, gateway: TechnicalIndicatorGateway, service: TechnicalIndicatorService) -> dict:
+ACTIONS_FOR_ALL = ("ma", "macd", "rsi", "kdj", "bollinger", "breakout", "sar", "williams", "adx")
+
+
+def _execute_single(action: str, market: str, symbol: str, start_date: str | None, end_date: str | None, params: dict | None, gateway: stockAKIndicator, service: TechnicalIndicatorService) -> dict:
     df = _get_history(market, symbol, start_date, end_date, gateway)
     if df is None or df.empty:
         return {"success": False, "data": {}, "message": "无法获取历史数据"}
@@ -141,9 +248,9 @@ def _execute_single(action: str, market: str, symbol: str, start_date: str | Non
     return {"success": True, "data": data, "message": _single_message(action, data)}
 
 
-def _execute_all(market: str, symbol: str, start_date: str | None, end_date: str | None, params: dict | None, gateway: TechnicalIndicatorGateway, service: TechnicalIndicatorService) -> dict:
+def _execute_all(market: str, symbol: str, start_date: str | None, end_date: str | None, params: dict | None, gateway: stockAKIndicator, service: TechnicalIndicatorService) -> dict:
     results = {}
-    for name in ("ma", "macd", "rsi", "bollinger"):
+    for name in ACTIONS_FOR_ALL:
         result = _execute_single(name, market, symbol, start_date, end_date, params, gateway, service)
         if result["success"]:
             results[name] = result["data"]
@@ -157,9 +264,9 @@ def _execute_all(market: str, symbol: str, start_date: str | None, end_date: str
 
 
 
-def execute(action: str, market: str, symbol: str, start_date: str | None = None, end_date: str | None = None, params: dict | None = None, gateway: TechnicalIndicatorGateway | None = None, service: TechnicalIndicatorService | None = None) -> dict:
+def execute(action: str, market: str, symbol: str, start_date: str | None = None, end_date: str | None = None, params: dict | None = None, gateway: stockAKIndicator | None = None, service: TechnicalIndicatorService | None = None) -> dict:
     try:
-        gateway = gateway or TechnicalIndicatorGateway()
+        gateway = gateway or stockAKIndicator()
         service = service or TechnicalIndicatorService()
 
         if action not in SUPPORTED_ACTIONS:

@@ -53,6 +53,16 @@ class TechnicalIndicatorService:
         return "建议观望"
 
     @staticmethod
+    def williams_signal(value) -> str:
+        if value is None:
+            return "neutral"
+        if value < -80:
+            return "oversold"
+        if value > -20:
+            return "overbought"
+        return "neutral"
+
+    @staticmethod
     def overall_signal(results: dict) -> str:
         buy_signals = sum(1 for result in results.values() if result.get("signal") in {"buy", "oversold"})
         sell_signals = sum(1 for result in results.values() if result.get("signal") in {"sell", "overbought"})

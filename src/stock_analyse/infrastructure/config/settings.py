@@ -72,6 +72,7 @@ class AISettings:
     prompt_template: str
     max_tokens: int
     temperature: float
+    api_base_urls: dict[str, str]
     provider_keys: dict[str, str]
     current_ai: str
     dashscope_model_list: list[str]
@@ -81,6 +82,9 @@ class AISettings:
         if self.current_ai == "kimi":
             return self.kimi_model_list
         return self.dashscope_model_list
+
+    def resolve_api_base_url(self) -> str:
+        return self.api_base_urls.get(self.platform) or self.api_base_urls.get("openai", "")
 
 
 @dataclass(frozen=True)
@@ -101,11 +105,15 @@ class Settings:
     @classmethod
     def from_file(cls, path: str | Path = "config.json") -> "Settings":
         settings_path = Path(path)
+        if not settings_path.is_absolute():
+            project_root = Path(__file__).resolve().parents[4]
+            settings_path = project_root / settings_path
         data = _read_json_file(settings_path)
 
         ai_config = data.get("ai", {})
         api_keys = data.get("api_keys", {})
         web_auth = data.get("web_auth", {})
+        api_base_urls = ai_config.get("api_base_urls", {})
 
         provider_keys = {
             "openai": os.getenv("OPENAI_API_KEY", api_keys.get("openai", "")),
@@ -133,6 +141,7 @@ class Settings:
             prompt_template=prompt_template,
             max_tokens=ai_config.get("max_tokens", 4000),
             temperature=ai_config.get("temperature", 0.7),
+            api_base_urls={key: value for key, value in api_base_urls.items() if isinstance(value, str)},
             provider_keys=provider_keys,
             current_ai=current_ai,
             dashscope_model_list=_read_json_env_list("DASHSCOPE_MODEL_LIST"),
@@ -161,6 +170,7 @@ class Settings:
         config["ai"]["prompt_template"] = self.ai.prompt_template
         config["ai"]["max_tokens"] = self.ai.max_tokens
         config["ai"]["temperature"] = self.ai.temperature
+        config["ai"]["api_base_urls"] = self.ai.api_base_urls
 
         for name, value in self.ai.provider_keys.items():
             if value:

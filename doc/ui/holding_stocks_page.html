@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>持仓股票列表 - 交易决策中心</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #1f2937; min-height: 100vh; }
+        .app-shell { max-width: 1560px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+        .sidebar, .header, .filter-bar, .table-wrap, .record-card, .summary-card, .score-card { background: rgba(255, 255, 255, 0.96); border-radius: 16px; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12); backdrop-filter: blur(8px); }
+        .sidebar { padding: 20px 16px; position: sticky; top: 20px; align-self: start; min-height: calc(100vh - 48px); }
+        .brand { padding: 8px 10px 18px; border-bottom: 1px solid #e5e7eb; margin-bottom: 18px; }
+        .brand h1 { margin: 0 0 6px; font-size: 20px; color: #111827; }
+        .brand p { margin: 0; font-size: 12px; color: #6b7280; line-height: 1.6; }
+        .tree-title { font-size: 12px; font-weight: 800; color: #6b7280; margin: 18px 10px 10px; text-transform: uppercase; letter-spacing: .08em; }
+        .tree, .tree .children { list-style: none; margin: 0; padding: 0; }
+        .tree > li { margin-bottom: 8px; }
+        .tree a { display: block; text-decoration: none; color: #374151; padding: 10px 12px; border-radius: 12px; font-size: 14px; font-weight: 700; }
+        .tree a:hover { background: #f3f4f6; }
+        .tree a.active { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #fff; }
+        .tree .children { margin: 6px 0 0 18px; padding: 0 0 0 12px; border-left: 2px solid #e5e7eb; }
+        .tree .children a { font-size: 13px; font-weight: 600; color: #6b7280; padding: 8px 10px; }
+        .tree .children a.current { background: #eef2ff; color: #4338ca; }
+        .main { min-width: 0; }
+        .header { padding: 24px; margin-bottom: 20px; }
+        .header h2 { margin: 0 0 8px; font-size: 30px; color: #111827; }
+        .header p { margin: 0; color: #6b7280; line-height: 1.6; }
+        .score-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+        .score-card { padding: 16px; color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .score-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; opacity: .92; }
+        .score-value { font-size: 28px; font-weight: 800; }
+        .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+        .summary-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; margin-bottom: 20px; }
+        .summary-card { padding: 18px; }
+        .summary-card h3 { margin: 0 0 8px; font-size: 16px; }
+        ul { margin: 10px 0 0; padding-left: 18px; color: #374151; }
+        li { margin-bottom: 6px; line-height: 1.6; }
+        .content-section { margin-bottom: 20px; }
+        .content-section h3 { margin: 0 0 16px; font-size: 20px; color: #111827; }
+        .filter-bar { padding: 18px; margin-bottom: 14px; }
+        .filter-grid { display: grid; grid-template-columns: 1.5fr repeat(5, minmax(0, 1fr)) auto auto; gap: 12px; align-items: end; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 13px; }
+        .form-control { width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; background: #fff; }
+        .btn, .btn-light, .row-link { border: none; border-radius: 12px; padding: 12px 14px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+        .btn { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .btn-light { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+        .table-wrap { overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; min-width: 1480px; }
+        th, td { padding: 16px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; text-align: left; }
+        th { background: #f8fafc; color: #475569; font-size: 13px; font-weight: 700; }
+        td { font-size: 14px; color: #111827; }
+        tr:hover { background: #fafbff; }
+        .stock-name { font-weight: 800; margin-bottom: 4px; }
+        .sub-text { font-size: 12px; color: #6b7280; line-height: 1.5; }
+        .tag { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; margin: 0 6px 6px 0; }
+        .tag-risk-normal { background: #ecfdf5; color: #047857; }
+        .tag-risk-warning { background: #fff7ed; color: #c2410c; }
+        .tag-stage { background: #eef2ff; color: #4338ca; }
+        .tag-zone { background: #ecfeff; color: #0f766e; }
+        .tag-action { background: #fef2f2; color: #b91c1c; }
+        .action-group { display: flex; flex-wrap: wrap; gap: 8px; }
+        .row-link.primary { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .row-link.secondary { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+        .tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+        .tab { padding: 10px 14px; border-radius: 10px; background: #f3f4f6; color: #475569; font-size: 13px; font-weight: 700; }
+        .tab.active { background: #eef2ff; color: #4338ca; }
+        .record-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .record-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        .record-card { padding: 18px; }
+        .record-card h4 { margin: 0 0 8px; font-size: 16px; }
+        .record-meta { color: #6b7280; font-size: 13px; line-height: 1.7; }
+        @media (max-width: 1360px) {
+            .app-shell { grid-template-columns: 1fr; }
+            .sidebar { position: static; min-height: auto; }
+            .score-grid, .record-grid, .record-filters, .summary-grid { grid-template-columns: 1fr 1fr; }
+            .filter-grid { grid-template-columns: 1fr 1fr 1fr; }
+        }
+        @media (max-width: 720px) {
+            .score-grid, .record-grid, .record-filters, .summary-grid, .filter-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" data-page="holding-stocks"></aside>
+
+        <main class="main">
+            <div class="header">
+                <h2>持仓股票列表</h2>
+                <p>面向“已经买入、正在持有和管理”的标的。页面强调状态刷新、二次分析、补仓/减仓/卖出决策，以及不同周期复盘入口。</p>
+            </div>
+
+            <div class="score-grid">
+                <div class="score-card"><h3>持仓标的数</h3><div class="score-value">12</div><div class="score-meta">其中 3 只需要本周复核</div></div>
+                <div class="score-card"><h3>当前总持仓市值</h3><div class="score-value">¥1.86M</div><div class="score-meta">仓位 72%</div></div>
+                <div class="score-card"><h3>待动作标的</h3><div class="score-value">4</div><div class="score-meta">含补仓/减仓/卖出候选</div></div>
+                <div class="score-card"><h3>本周复盘数</h3><div class="score-value">9</div><div class="score-meta">周/月/季度复盘合计</div></div>
+            </div>
+
+            <div class="summary-grid">
+                <div class="summary-card"><h3>本日持仓摘要</h3><ul><li>宁德时代接近第二笔补仓区间，但尚未触发价格确认条件。</li><li>中国神华进入高股息稳定区，适合继续持有，暂无减仓必要。</li><li>中际旭创短线涨幅较大，已接近第一减仓观察位。</li></ul></div>
+                <div class="summary-card"><h3>风险提醒</h3><ul><li>2 只标的需要周复盘</li><li>1 只标的建议发起卖出决策</li><li>半导体仓位集中度偏高</li></ul></div>
+            </div>
+
+            <section class="content-section" id="holding-table">
+                <h3>当前持仓标的</h3>
+                <div class="filter-bar">
+                    <div class="filter-grid">
+                        <div class="form-group"><label>关键字</label><input class="form-control" value="盈利 / 风险预警 / 季度复盘" /></div>
+                        <div class="form-group"><label>风险状态</label><select class="form-control"><option>全部状态</option></select></div>
+                        <div class="form-group"><label>当前建议动作</label><select class="form-control"><option>全部动作</option></select></div>
+                        <div class="form-group"><label>当前阶段</label><select class="form-control"><option>全部阶段</option></select></div>
+                        <div class="form-group"><label>价格区间</label><select class="form-control"><option>全部区间</option></select></div>
+                        <div class="form-group"><label>复盘周期</label><select class="form-control"><option>周 / 月 / 季度 / 最终</option></select></div>
+                        <a class="btn" href="#holding-table">应用筛选</a>
+                        <a class="btn-light" href="#holding-table">导出持仓摘要</a>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>标的</th><th>持仓与成本</th><th>盈亏与仓位</th><th>阶段 / 区间</th><th>风险状态</th><th>当前建议</th><th>操作按钮</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><div class="stock-name">宁德时代 300750</div><div class="sub-text">建仓时间：2026-03-18 · 最近复核：2026-04-25 09:30</div></td>
+                                <td><div>成本价：¥176.80</div><div class="sub-text">当前价：¥182.40 · 数量：2,000 股</div></td>
+                                <td><div>收益率：+3.17%</div><div class="sub-text">持仓市值：¥364,800 · 仓位：9.6%</div></td>
+                                <td><span class="tag tag-stage">B 阶段</span><span class="tag tag-zone">合理偏低区</span></td>
+                                <td><span class="tag tag-risk-normal">正常</span><div class="sub-text">计划仍有效</div></td>
+                                <td><span class="tag tag-action">观察第二笔补仓条件</span><div class="sub-text">建议先做再评估</div></td>
+                                <td><div class="action-group"><a class="row-link primary" href="/holding-review">复盘</a><a class="row-link secondary" href="/holding-status-refresh">持仓状态刷新</a><a class="row-link secondary" href="/holding-reanalysis">二次分析 / 再评估</a><a class="row-link secondary" href="/add-position-decision">补仓决策</a><a class="row-link secondary" href="/reduce-position-decision">减仓决策</a><a class="row-link secondary" href="/sell-decision">卖出决策</a><a class="row-link secondary" href="/weekly-holding-review">周复盘</a><a class="row-link secondary" href="/monthly-holding-review">月复盘</a><a class="row-link secondary" href="/quarterly-holding-review">季度复盘</a></div></td>
+                            </tr>
+                            <tr>
+                                <td><div class="stock-name">中国神华 601088</div><div class="sub-text">建仓时间：2025-12-09 · 最近复核：2026-04-24 20:10</div></td>
+                                <td><div>成本价：¥36.20</div><div class="sub-text">当前价：¥41.62 · 数量：5,000 股</div></td>
+                                <td><div>收益率：+14.97%</div><div class="sub-text">持仓市值：¥208,100 · 仓位：5.8%</div></td>
+                                <td><span class="tag tag-stage">C 阶段</span><span class="tag tag-zone">合理区</span></td>
+                                <td><span class="tag tag-risk-normal">正常</span><div class="sub-text">高股息稳定</div></td>
+                                <td><span class="tag tag-action">继续持有</span><div class="sub-text">月复盘已到期</div></td>
+                                <td><div class="action-group"><a class="row-link primary" href="/holding-review">复盘</a><a class="row-link secondary" href="/holding-status-refresh">持仓状态刷新</a><a class="row-link secondary" href="/holding-reanalysis">二次分析 / 再评估</a><a class="row-link secondary" href="/add-position-decision">补仓决策</a><a class="row-link secondary" href="/reduce-position-decision">减仓决策</a><a class="row-link secondary" href="/sell-decision">卖出决策</a><a class="row-link secondary" href="/weekly-holding-review">周复盘</a><a class="row-link secondary" href="/monthly-holding-review">月复盘</a><a class="row-link secondary" href="/quarterly-holding-review">季度复盘</a></div></td>
+                            </tr>
+                            <tr>
+                                <td><div class="stock-name">中际旭创 300308</div><div class="sub-text">建仓时间：2026-02-15 · 最近复核：2026-04-25 10:06</div></td>
+                                <td><div>成本价：¥132.50</div><div class="sub-text">当前价：¥157.30 · 数量：1,500 股</div></td>
+                                <td><div>收益率：+18.72%</div><div class="sub-text">持仓市值：¥235,950 · 仓位：6.7%</div></td>
+                                <td><span class="tag tag-stage">D 阶段</span><span class="tag tag-zone">高估区</span></td>
+                                <td><span class="tag tag-risk-warning">卖出候选</span><div class="sub-text">接近第一减仓点</div></td>
+                                <td><span class="tag tag-action">建议发起减仓 / 卖出决策</span><div class="sub-text">需要补充原因记录</div></td>
+                                <td><div class="action-group"><a class="row-link primary" href="/holding-review">复盘</a><a class="row-link secondary" href="/holding-status-refresh">持仓状态刷新</a><a class="row-link secondary" href="/holding-reanalysis">二次分析 / 再评估</a><a class="row-link secondary" href="/add-position-decision">补仓决策</a><a class="row-link secondary" href="/reduce-position-decision">减仓决策</a><a class="row-link secondary" href="/sell-decision">卖出决策</a><a class="row-link secondary" href="/weekly-holding-review">周复盘</a><a class="row-link secondary" href="/monthly-holding-review">月复盘</a><a class="row-link secondary" href="/quarterly-holding-review">季度复盘</a></div></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="content-section" id="holding-records">
+                <h3>同级历史记录列表</h3>
+                <div class="tabs"><div class="tab active">复盘记录</div><div class="tab">补仓决策记录</div><div class="tab">减仓决策记录</div><div class="tab">卖出决策记录</div><div class="tab">二次分析 / 再评估记录</div></div>
+                <div class="record-filters"><input class="form-control" value="股票代码 / 名称" /><select class="form-control"><option>复盘类型（周 / 月 / 季度 / 最终）</option></select><select class="form-control"><option>结论标签</option></select><select class="form-control"><option>创建时间</option></select></div>
+                <div class="record-grid">
+                    <div class="record-card"><h4>宁德时代 - 周复盘 #RR-20260425-012</h4><div class="record-meta">结论：逻辑仍成立 · 动作：继续持有并跟踪第二笔条件 · 创建时间：2026-04-25 09:36</div></div>
+                    <div class="record-card"><h4>中际旭创 - 减仓决策 #RD-20260425-003</h4><div class="record-meta">原因：进入高估区且短期涨幅过快 · 建议：先减 20% · 创建时间：2026-04-25 10:12</div></div>
+                    <div class="record-card"><h4>中国神华 - 月复盘 #RR-20260424-009</h4><div class="record-meta">结论：执行纪律良好 · 标签：逻辑对 · 创建时间：2026-04-24 20:26</div></div>
+                </div>
+            </section>
+        </main>
+    </div>
+  <script src="/static/ui/nav.js"></script>
+</body>
+</html>

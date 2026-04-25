@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import logging
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import matplotlib
+from flask import Flask
+
+from stock_analyse.infrastructure.config.settings import get_settings
+from stock_analyse.interfaces.web.routes import (
+    register_analysis_routes,
+    register_auth_routes,
+    register_history_routes,
+    register_misc_routes,
+)
+from stock_analyse.interfaces.web.services.stock_analyzer_service import StockAnalyzerService
+from stock_analyse.interfaces.web.streaming.sse_manager import SSEManager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()],
+)
+logger = logging.getLogger(__name__)
+
+matplotlib.use('Agg')
+
+
+class WebAppContext:
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self.sse_manager = SSEManager()
+        self.analyzer = StockAnalyzerService()
+        self.analysis_tasks: dict = {}
+        self.task_results: dict = {}
+        self.task_lock = threading.Lock()
+        self.sse_clients: dict = {}
+        self.sse_lock = threading.Lock()
+        self.executor = ThreadPoolExecutor(max_workers=4)
+
+    def check_auth_config(self) -> tuple[bool, dict]:
+        if not self.analyzer:
+            return False, {}
+        web_auth_config = self.settings.as_service_config().get('web_auth', {})
+        return web_auth_config.get('enabled', False), web_auth_config
+
+
+web_app_context = WebAppContext()
+
+
+def create_app() -> Flask:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..'))
+    app = Flask(
+        __name__,
+        template_folder=os.path.join(project_root, 'templates'),
+        static_folder=os.path.join(project_root, 'static'),
+    )
+    app.secret_key = web_app_context.settings.web.flask_secret_key
+    app.extensions['stock_analyse.context'] = web_app_context
+    register_misc_routes(app)
+    register_auth_routes(app)
+    register_history_routes(app)
+    register_analysis_routes(app)
+    return app

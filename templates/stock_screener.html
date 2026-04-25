@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>选股策略 - 交易决策中心</title>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #1f2937;
+      min-height: 100vh;
+    }
+    .app-shell {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+    }
+    .sidebar, .header, .panel, .card, .record-card, .score-card {
+      background: rgba(255, 255, 255, 0.96);
+      border-radius: 16px;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(8px);
+    }
+    .sidebar {
+      padding: 20px 16px;
+      position: sticky;
+      top: 20px;
+      align-self: start;
+      min-height: calc(100vh - 48px);
+    }
+    .header, .panel, .card {
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .header h2 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      color: #111827;
+    }
+    .header p, .panel-desc, .record-meta, .empty-state p {
+      margin: 0;
+      color: #6b7280;
+      line-height: 1.6;
+    }
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .score-card {
+      padding: 16px;
+      color: #fff;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    }
+    .score-card h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 600;
+      opacity: .92;
+    }
+    .score-value {
+      font-size: 28px;
+      font-weight: 800;
+    }
+    .score-meta {
+      margin-top: 4px;
+      font-size: 12px;
+      opacity: .9;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .panel h3, .card h3 {
+      margin: 0;
+      font-size: 20px;
+      color: #111827;
+    }
+    .panel-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) auto auto;
+      gap: 12px;
+      align-items: end;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #374151;
+    }
+    .form-control {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 14px;
+      background: #fff;
+    }
+    .btn, .btn-light, .btn-mini {
+      border: none;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
+    .btn, .btn-light {
+      width: 100%;
+      padding: 12px 14px;
+    }
+    .btn {
+      color: #fff;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    }
+    .btn-light {
+      color: #374151;
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+    }
+    .btn-mini {
+      padding: 6px 12px;
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+    }
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #6b7280;
+      white-space: nowrap;
+    }
+    .sse-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #dc2626;
+      transition: background-color 0.3s;
+    }
+    .sse-indicator.connected {
+      background: #16a34a;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 12px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 16px;
+      display: none;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      transition: width 0.3s ease;
+    }
+    .content-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+    }
+    .log-display {
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      min-height: 360px;
+      max-height: 560px;
+      overflow-y: auto;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .log-entry { margin-bottom: 6px; }
+    .log-info { color: #93c5fd; }
+    .log-success { color: #86efac; }
+    .log-warning { color: #fde68a; }
+    .log-error { color: #fca5a5; }
+    .log-header-type { color: #c4b5fd; font-weight: 700; }
+    .log-progress { color: #d8b4fe; }
+    .result-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .tab-btn {
+      border: 1px solid #d1d5db;
+      background: #f9fafb;
+      color: #374151;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: #fff;
+      border-color: transparent;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .result-panel {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      background: #fff;
+      min-height: 420px;
+    }
+    .empty-state {
+      display: grid;
+      place-items: center;
+      min-height: 360px;
+      text-align: center;
+    }
+    .empty-state h4 {
+      margin: 0 0 8px;
+      color: #111827;
+      font-size: 22px;
+    }
+    .md-content {
+      color: #1f2937;
+      line-height: 1.75;
+      word-break: break-word;
+    }
+    .md-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      min-width: 720px;
+    }
+    .md-content th, .md-content td {
+      border: 1px solid #d1d5db;
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .md-content th {
+      background: #f3f4f6;
+    }
+    .table-container {
+      overflow-x: auto;
+      margin-top: 12px;
+    }
+    @media (max-width: 1280px) {
+      .app-shell, .content-grid { grid-template-columns: 1fr; }
+      .sidebar { position: static; min-height: auto; }
+      .score-grid, .panel-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 720px) {
+      .score-grid, .panel-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" data-page="stock-screener"></aside>
+    <main>
+      <div class="header">
+        <h2>选股策略</h2>
+        <p>这是迁移到真实模板页的首个功能页面，保留原有“股票筛选 → 开始筛选”的后端能力与结果结构，并对齐当前交易决策中心的页面风格。</p>
+      </div>
+
+      <div class="score-grid">
+        <div class="score-card">
+          <h3>策略数量</h3>
+          <div class="score-value">{{ strategies|length }}</div>
+          <div class="score-meta">使用后端权威策略列表</div>
+        </div>
+        <div class="score-card">
+          <h3>执行入口</h3>
+          <div class="score-value">开始筛选</div>
+          <div class="score-meta">沿用原 `/api/select_stock`</div>
+        </div>
+        <div class="score-card">
+          <h3>实时反馈</h3>
+          <div class="score-value">SSE</div>
+          <div class="score-meta">日志 / 进度 / 结果推送</div>
+        </div>
+        <div class="score-card">
+          <h3>兼容旧页</h3>
+          <div class="score-value">保留</div>
+          <div class="score-meta">`/` 与 `/stockSelector`</div>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>筛选参数</h3>
+            <p class="panel-desc">选择市场与策略后发起筛选，运行反馈和结果展示与旧功能保持一致。</p>
+          </div>
+          <div class="status-line">
+            <div id="sseIndicator" class="sse-indicator"></div>
+            <span id="sseStatus">SSE 断开</span>
+          </div>
+        </div>
+        <div class="panel-grid">
+          <div class="form-group">
+            <label for="market">市场范围</label>
+            <select id="market" class="form-control">
+              <option value="SH" {% if default_market == 'SH' %}selected{% endif %}>上海</option>
+              <option value="SZ" {% if default_market == 'SZ' %}selected{% endif %}>深圳</option>
+              <option value="usa" {% if default_market == 'usa' %}selected{% endif %}>美国</option>
+              <option value="H" {% if default_market == 'H' %}selected{% endif %}>香港</option>
+              <option value="zq" {% if default_market == 'zq' %}selected{% endif %}>债券</option>
+              <option value="cy" {% if default_market == 'cy' %}selected{% endif %}>创业板</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="strategy">筛选策略</label>
+            <select id="strategy" class="form-control">
+              {% for strategy in strategies %}
+              <option value="{{ strategy.value }}" {% if strategy.value == default_strategy %}selected{% endif %}>{{ strategy.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>执行模式</label>
+            <input class="form-control" value="实时筛选 + 流式反馈" disabled>
+          </div>
+          <div class="form-group">
+            <label>结果输出</label>
+            <input class="form-control" value="推荐股票 / 摘要 / 全量计算" disabled>
+          </div>
+          <button id="selectBtn" class="btn" type="button" onclick="analyzeSelectStock()">开始筛选</button>
+          <a class="btn-light" href="/stockSelector">打开旧筛选页</a>
+        </div>
+        <div id="selectProgress" class="progress-bar">
+          <div class="progress-bar-fill"></div>
+        </div>
+      </section>
+
+      <div class="content-grid">
+        <section class="card">
+          <div class="panel-header">
+            <h3>筛选结果</h3>
+          </div>
+          <div id="resultsContent" class="result-panel">
+            <div class="empty-state">
+              <div>
+                <h4>等待筛选</h4>
+                <p>请选择市场和策略后点击“开始筛选”。</p>
+                <p>结果会通过 SSE 实时推送到当前页面。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="panel-header">
+          <h3>运行日志</h3>
+          <button class="btn-mini" type="button" onclick="clearLog()">清空</button>
+        </div>
+        <div id="logDisplay" class="log-display">
+          <div class="log-entry log-info">📋 系统就绪，等待开始筛选。</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/ui/nav.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <script>
+    let sseConnection = null;
+    let currentClientId = null;
+    let isAnalyzing = false;
+    const API_BASE = '';
+
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({ breaks: true, gfm: true, sanitize: false, smartLists: true, smartypants: true });
+    }
+
+    function generateClientId() {
+      return 'client_' + Math.random().toString(36).slice(2, 11) + '_' + Date.now();
+    }
+
+    function addLog(message, type = 'info') {
+      const logDisplay = document.getElementById('logDisplay');
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.textContent = message;
+      logDisplay.appendChild(entry);
+      logDisplay.scrollTop = logDisplay.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('logDisplay').innerHTML = '<div class="log-entry log-info">📋 日志已清空，等待新的筛选任务。</div>';
+    }
+
+    function updateSSEStatus(connected) {
+      const indicator = document.getElementById('sseIndicator');
+      const status = document.getElementById('sseStatus');
+      indicator.classList.toggle('connected', connected);
+      status.textContent = connected ? 'SSE 已连接' : 'SSE 断开';
+    }
+
+    function showProgress(elementId) {
+      const progress = document.getElementById(elementId);
+      progress.style.display = 'block';
+      progress.querySelector('.progress-bar-fill').style.width = '0%';
+    }
+
+    function hideProgress(elementId) {
+      const progress = document.getElementById(elementId);
+      progress.style.display = 'none';
+      progress.querySelector('.progress-bar-fill').style.width = '0%';
+    }
+
+    function updateProgress(elementId, percent) {
+      const progress = document.getElementById(elementId);
+      progress.style.display = 'block';
+      progress.querySelector('.progress-bar-fill').style.width = `${percent}%`;
+    }
+
+    function showLoading() {
+      document.getElementById('resultsContent').innerHTML = `
+        <div class="empty-state">
+          <div>
+            <h4>正在筛选</h4>
+            <p>系统正在执行策略计算，请稍候。</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function initSSE() {
+      if (sseConnection) {
+        sseConnection.close();
+      }
+
+      currentClientId = generateClientId();
+      addLog('🌊 正在建立 SSE 连接...', 'info');
+      sseConnection = new EventSource(`${API_BASE}/api/sse?client_id=${currentClientId}`);
+
+      sseConnection.onopen = function() {
+        addLog('✅ SSE 连接已建立', 'success');
+        updateSSEStatus(true);
+      };
+
+      sseConnection.onmessage = function(event) {
+        try {
+          handleSSEMessage(JSON.parse(event.data));
+        } catch (error) {
+          console.error('SSE 消息解析失败:', error);
+        }
+      };
+
+      sseConnection.onerror = function() {
+        updateSSEStatus(false);
+        addLog('❌ SSE 连接错误，稍后重连', 'error');
+        if (!sseConnection || sseConnection.readyState === EventSource.CLOSED) {
+          setTimeout(initSSE, 3000);
+        }
+      };
+    }
+
+    function handleSSEMessage(data) {
+      const eventType = data.event;
+      const eventData = data.data;
+
+      switch (eventType) {
+        case 'log':
+          addLog(eventData.message, eventData.type || 'info');
+          break;
+        case 'progress':
+          updateProgress(eventData.element_id || 'selectProgress', eventData.percent || 0);
+          if (eventData.message) {
+            addLog(eventData.message, 'progress');
+          }
+          break;
+        case 'select_result':
+          displaySelectResults(eventData);
+          break;
+        case 'analysis_complete':
+          onAnalysisComplete(eventData);
+          break;
+        case 'analysis_error':
+        case 'error':
+          onAnalysisError(eventData);
+          break;
+        case 'heartbeat':
+          break;
+        default:
+          break;
+      }
+    }
+
+    function displaySelectResults(data) {
+      const resultsContent = document.getElementById('resultsContent');
+      if (data.success !== true) {
+        resultsContent.innerHTML = '<div class="empty-state"><div><h4>筛选失败</h4><p>返回结果异常，请查看日志。</p></div></div>';
+        addLog('分析结果返回错误', 'warning');
+        return;
+      }
+
+      const highScoreText = marked.parse(data.high_score_text || '');
+      const summaryText = marked.parse(data.summary_text || '');
+      const allResults = marked.parse(data.all_results || '');
+
+      resultsContent.innerHTML = `
+        <div class="result-tabs">
+          <button class="tab-btn active" data-tab="recommend-info">推荐股票结果</button>
+          <button class="tab-btn" data-tab="recommend-analysis">推荐股票信息</button>
+          <button class="tab-btn" data-tab="basic-analysis">股票计算信息</button>
+        </div>
+        <div class="tab-content active" id="recommend-info"><div class="md-content table-container">${highScoreText}</div></div>
+        <div class="tab-content" id="recommend-analysis"><div class="md-content table-container">${summaryText}</div></div>
+        <div class="tab-content" id="basic-analysis"><div class="md-content table-container">${allResults}</div></div>
+      `;
+
+      document.querySelectorAll('.tab-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach((item) => item.classList.remove('active'));
+          document.querySelectorAll('#resultsContent .tab-content').forEach((item) => item.classList.remove('active'));
+          button.classList.add('active');
+          document.getElementById(button.dataset.tab).classList.add('active');
+        });
+      });
+
+      addLog('筛选分析结果解析完成', 'success');
+    }
+
+    function onAnalysisComplete(data) {
+      isAnalyzing = false;
+      document.getElementById('selectBtn').disabled = false;
+      hideProgress('selectProgress');
+      addLog(`✅ ${data.message || '筛选完成'}`, 'success');
+    }
+
+    function onAnalysisError(data) {
+      isAnalyzing = false;
+      document.getElementById('selectBtn').disabled = false;
+      hideProgress('selectProgress');
+      addLog(`❌ ${data.error || data.message || '筛选失败'}`, 'error');
+    }
+
+    async function analyzeSelectStock() {
+      const market = document.getElementById('market').value.trim();
+      const strategy = document.getElementById('strategy').value.trim();
+
+      if (!market || !strategy) {
+        addLog('请选择市场和策略', 'warning');
+        return;
+      }
+
+      if (isAnalyzing) {
+        addLog('当前已有任务在执行，请稍候', 'warning');
+        return;
+      }
+
+      if (!currentClientId || !sseConnection || sseConnection.readyState !== EventSource.OPEN) {
+        initSSE();
+        addLog('正在初始化连接，请再次点击开始筛选', 'warning');
+        return;
+      }
+
+      isAnalyzing = true;
+      document.getElementById('selectBtn').disabled = true;
+      showLoading();
+      showProgress('selectProgress');
+      addLog(`🚀 开始筛选，市场=${market}，策略=${strategy}`, 'header-type');
+
+      try {
+        const response = await fetch(`${API_BASE}/api/select_stock`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strategy, market, client_id: currentClientId })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || '筛选失败');
+        }
+
+        addLog(result.message || '筛选任务已提交', 'info');
+      } catch (error) {
+        onAnalysisError({ error: error.message });
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initSSE();
+    });
+  </script>
+</body>
+</html>

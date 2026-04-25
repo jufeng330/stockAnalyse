@@ -1,38 +1,59 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from stock_analyse.application.orchestrators.stock_selection_orchestrator import StockSelectionOrchestrator
-from stocklib.stock_ak_indicator import stockAKIndicator
-from stocklib.stock_company import stockCompanyInfo
-from stocklib.stock_strategy import StockStrategy
+from stock_analyse.application.use_cases import analyze_technical_indicators as analyze_technical_indicators_use_case
 
 
+def _analyze_technical_summary(market: str, symbol: str) -> tuple[dict | None, dict | None]:
+    result = analyze_technical_indicators_use_case.execute(action='all', market=market, symbol=symbol)
+    if not result.get('success'):
+        return None, {'success': False, 'data': {}, 'message': result.get('message', '无法获取历史数据')}
+    return result.get('data', {}), None
 
-def _get_history_data(market: str, symbol: str):
-    stock = stockCompanyInfo(marker=market, symbol=symbol)
-    end_date = datetime.now().strftime('%Y%m%d')
-    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
-    return stock.get_stock_history_data(start_date_str=start_date, end_date_str=end_date)
 
+def _signal_items(technical_data: dict) -> list[dict]:
+    indicators = technical_data.get('indicators', {})
+    signal_items = []
+    for name, result in indicators.items():
+        signal = result.get('signal')
+        if signal not in {'buy', 'oversold'}:
+            continue
+        indicator_values = result.get('indicator_values', {})
+        value = next(iter(indicator_values.values()), result.get('last_price'))
+        signal_items.append({'indicator': name.upper(), 'signal': signal, 'value': value})
+    return signal_items
+
+
+def _suggestions(score: int, signal_count: int) -> list[str]:
+    suggestions = []
+    if score >= 50:
+        suggestions.append('技术指标强劲，建议积极关注')
+    elif score >= 30:
+        suggestions.append('技术指标向好，可考虑分批建仓')
+    elif score >= 10:
+        suggestions.append('技术指标中性，建议观望')
+    else:
+        suggestions.append('技术指标偏弱，建议谨慎')
+
+    if signal_count >= 3:
+        suggestions.append(f'多个指标发出买入信号({signal_count}个)，值得关注')
+    elif signal_count >= 1:
+        suggestions.append(f'部分指标显示买入机会({signal_count}个)')
+    return suggestions
 
 
 def calculate_score(market: str, symbol: str) -> dict:
     try:
-        df = _get_history_data(market, symbol)
-        if df is None or df.empty:
-            return {'success': False, 'data': {}, 'message': '无法获取历史数据'}
+        technical_data, error = _analyze_technical_summary(market, symbol)
+        if error:
+            return error
 
-        indicator = stockAKIndicator()
-        df = indicator.strategy_macd(df)
-        df = indicator.strategy_rsi(df)
-        df = indicator.strategy_kdj(df)
-        df = indicator.strategy_bollinger(df)
-        df = indicator.strategy_breakout(df)
-
-        strategy = StockStrategy(market=market)
-        score, signals = strategy.calculate_score_indicate(df)
-        recommendation = strategy.get_recommendation(score)
+        summary = technical_data.get('summary', {})
+        signals = _signal_items(technical_data)
+        score = summary.get('score', 0)
+        recommendation = summary.get('recommendation', '建议观望')
 
         return {
             'success': True,
@@ -50,47 +71,13 @@ def calculate_score(market: str, symbol: str) -> dict:
         return {'success': False, 'data': {}, 'message': f'计算失败: {exc}'}
 
 
-
 def get_signals(market: str, symbol: str) -> dict:
     try:
-        df = _get_history_data(market, symbol)
-        if df is None or df.empty:
-            return {'success': False, 'data': {}, 'message': '无法获取历史数据'}
+        technical_data, error = _analyze_technical_summary(market, symbol)
+        if error:
+            return error
 
-        indicator = stockAKIndicator()
-        signals = []
-
-        df_macd = indicator.strategy_macd(df.copy())
-        if df_macd is not None and not df_macd.empty:
-            latest = df_macd.iloc[-1]
-            if latest.get('macd_signal_index') == 1:
-                signals.append({'indicator': 'MACD', 'signal': 'buy', 'value': latest.get('macd_dif')})
-
-        df_rsi = indicator.strategy_rsi(df.copy())
-        if df_rsi is not None and not df_rsi.empty:
-            latest = df_rsi.iloc[-1]
-            rsi = latest.get('RSI')
-            if rsi < 30:
-                signals.append({'indicator': 'RSI', 'signal': 'oversold', 'value': rsi})
-
-        df_kdj = indicator.strategy_kdj(df.copy())
-        if df_kdj is not None and not df_kdj.empty:
-            latest = df_kdj.iloc[-1]
-            if latest.get('kdj_signal') == 1:
-                signals.append({'indicator': 'KDJ', 'signal': 'buy', 'value': latest.get('K')})
-
-        df_bb = indicator.strategy_bollinger(df.copy())
-        if df_bb is not None and not df_bb.empty:
-            latest = df_bb.iloc[-1]
-            if latest.get('bb_signal') == 1:
-                signals.append({'indicator': 'Bollinger', 'signal': 'buy', 'value': latest.get('收盘')})
-
-        df_break = indicator.strategy_breakout(df.copy())
-        if df_break is not None and not df_break.empty:
-            latest = df_break.iloc[-1]
-            if latest.get('breakout_signal') == 1:
-                signals.append({'indicator': 'Breakout', 'signal': 'buy', 'value': latest.get('收盘')})
-
+        signals = _signal_items(technical_data)
         return {
             'success': True,
             'data': {
@@ -106,39 +93,18 @@ def get_signals(market: str, symbol: str) -> dict:
         return {'success': False, 'data': {}, 'message': f'获取失败: {exc}'}
 
 
-
 def get_recommendation(market: str, symbol: str) -> dict:
     try:
         score_result = calculate_score(market, symbol)
         if not score_result['success']:
             return score_result
 
-        signals_result = get_signals(market, symbol)
+        signals = score_result['data'].get('signals', [])
         data = score_result['data']
-        data['signals'] = signals_result.get('data', {}).get('signals', [])
-
-        suggestions = []
-        score = data['score']
-        if score >= 50:
-            suggestions.append('技术指标强劲，建议积极关注')
-        elif score >= 30:
-            suggestions.append('技术指标向好，可考虑分批建仓')
-        elif score >= 10:
-            suggestions.append('技术指标中性，建议观望')
-        else:
-            suggestions.append('技术指标偏弱，建议谨慎')
-
-        signal_count = len(data['signals'])
-        if signal_count >= 3:
-            suggestions.append(f'多个指标发出买入信号({signal_count}个)，值得关注')
-        elif signal_count >= 1:
-            suggestions.append(f'部分指标显示买入机会({signal_count}个)')
-
-        data['suggestions'] = suggestions
+        data['suggestions'] = _suggestions(data['score'], len(signals))
         return {'success': True, 'data': data, 'message': f"建议: {data['recommendation']}"}
     except Exception as exc:
         return {'success': False, 'data': {}, 'message': f'获取失败: {exc}'}
-
 
 
 def batch_analyze(market: str, min_score: int = 30, strategy_type: int = 1, orchestrator: StockSelectionOrchestrator | None = None) -> dict:

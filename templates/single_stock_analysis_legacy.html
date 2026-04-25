@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单股分析_老版本 - 交易决策中心</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/ui/nav.css">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #1f2937;
+            min-height: 100vh;
+        }
+        .app-shell {
+            max-width: 1520px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 20px;
+        }
+        .sidebar, .header, .panel, .score-card, .result-shell {
+            background: rgba(255,255,255,.96);
+            border-radius: 16px;
+            box-shadow: 0 10px 32px rgba(0,0,0,.12);
+            backdrop-filter: blur(8px);
+        }
+        .sidebar {
+            padding: 20px 16px;
+            position: sticky;
+            top: 20px;
+            align-self: start;
+            min-height: calc(100vh - 48px);
+        }
+        .header {
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header h1 {
+            margin: 0 0 8px;
+            font-size: 30px;
+            color: #111827;
+        }
+        .header p {
+            margin: 0;
+            color: #6b7280;
+            line-height: 1.6;
+        }
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .nav-links a {
+            text-decoration: none;
+            color: #374151;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .score-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .score-card {
+            padding: 16px;
+            color: #fff;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        }
+        .score-card h3 {
+            margin: 0 0 10px;
+            font-size: 13px;
+            font-weight: 600;
+            opacity: .92;
+        }
+        .score-value {
+            font-size: 28px;
+            font-weight: 800;
+        }
+        .score-meta {
+            margin-top: 4px;
+            font-size: 12px;
+            opacity: .9;
+        }
+        .panel {
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .panel h2 {
+            margin: 0 0 16px;
+            font-size: 20px;
+            color: #111827;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+        }
+        .form-control, textarea, select {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            font-size: 14px;
+            background: #fff;
+        }
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        .full-span {
+            grid-column: 1 / -1;
+        }
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .strategy-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+        }
+        .btn-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+        .btn, .btn-light {
+            border: none;
+            border-radius: 12px;
+            padding: 12px 18px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn {
+            color: #fff;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        }
+        .btn-light {
+            color: #374151;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+        }
+        .result-shell {
+            padding: 24px;
+        }
+        .empty-state {
+            min-height: 220px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #6b7280;
+            gap: 10px;
+        }
+        @media (max-width: 1280px) {
+            .app-shell { grid-template-columns: 1fr; }
+            .sidebar { position: static; min-height: auto; }
+        }
+        @media (max-width: 900px) {
+            .score-grid, .form-grid, .strategy-grid { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 720px) {
+            .app-shell { padding: 16px; }
+            .score-grid, .form-grid, .strategy-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="app-shell">
+    <aside class="sidebar" data-page="single-stock-analysis-legacy"></aside>
+    <main>
+        <div class="header">
+            <div class="header-top">
+                <div>
+                    <h1>单股分析_老版本</h1>
+                    <p>兼容页保留交易决策中心布局，但真实输入项、默认值与分析结果全部复用经典 <code>/stock</code> 流程；结果展示固定在本页底部 tabs。</p>
+                </div>
+                <div class="nav-links">
+                    <a href="/stock">打开经典单股分析</a>
+                    <a href="/single-stock-analysis">切到 AI 单股分析</a>
+                    <a href="/history">历史记录</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="score-grid">
+            <div class="score-card"><h3>能力来源</h3><div class="score-value">/stock</div><div class="score-meta">经典分析链路</div></div>
+            <div class="score-card"><h3>表单语义</h3><div class="score-value">stock</div><div class="score-meta">输入项以旧页为准</div></div>
+            <div class="score-card"><h3>结果展示</h3><div class="score-value">Tabs</div><div class="score-meta">嵌入本页底部</div></div>
+            <div class="score-card"><h3>兼容策略</h3><div class="score-value">新壳旧核</div><div class="score-meta">保留原入口</div></div>
+        </div>
+
+        <div class="panel">
+            <h2>分析参数</h2>
+            <form method="post">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="stock_code">股票编号</label>
+                        <input class="form-control" type="text" id="stock_code" name="stock_code" value="{{ stock_code or '' }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="market">市场类型</label>
+                        <select class="form-control" id="market" name="market">
+                            <option value="SH" {% if market == 'SH' %}selected{% endif %}>上海</option>
+                            <option value="SZ" {% if market == 'SZ' %}selected{% endif %}>深圳</option>
+                            <option value="usa" {% if market == 'usa' %}selected{% endif %}>美国</option>
+                            <option value="H" {% if market == 'H' %}selected{% endif %}>香港</option>
+                            <option value="zq" {% if market == 'zq' %}selected{% endif %}>债券</option>
+                            <option value="cy" {% if market == 'cy' %}selected{% endif %}>创业板</option>
+                            <option value="CN" {% if market == 'CN' %}selected{% endif %}>中国A股</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="start_date">开始时间</label>
+                        <input class="form-control" type="date" id="start_date" name="start_date" value="{{ start_date }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="end_date">结束时间</label>
+                        <input class="form-control" type="date" id="end_date" name="end_date" value="{{ end_date }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_platform">AI平台</label>
+                        <input class="form-control" type="text" id="ai_platform" name="ai_platform" value="{{ ai_platform }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_model">AI模型</label>
+                        <input class="form-control" type="text" id="ai_model" name="ai_model" value="{{ ai_model }}">
+                    </div>
+                    <div class="form-group full-span">
+                        <label for="api_code">Token</label>
+                        <input class="form-control" type="text" id="api_code" name="api_code" value="{{ api_code }}" required>
+                    </div>
+                    <div class="form-group full-span">
+                        <label for="system_prompt">系统提示语</label>
+                        <textarea id="system_prompt" name="system_prompt" rows="5">{{ system_prompt }}</textarea>
+                    </div>
+                    <div class="form-group full-span">
+                        <label for="message_format">Message的格式</label>
+                        <textarea id="message_format" name="message_format" rows="5">{{ message_format }}</textarea>
+                    </div>
+                    <div class="form-group full-span">
+                        <label>选择交易策略</label>
+                        <div class="strategy-grid">
+                            {% for strategy in strategies %}
+                            <label class="strategy-item">
+                                <input type="checkbox" name="strategies" value="{{ strategy }}" {% if selected_strategies is defined and strategy in selected_strategies %}checked{% elif not selected_strategies %}checked{% endif %}>
+                                <span>{{ strategy }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                <div class="btn-row">
+                    <button class="btn" type="submit">开始经典单股分析</button>
+                    <a class="btn-light" href="/stock">打开原页面</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="result-shell">
+            {% if result_context %}
+            <header class="mb-10 text-center">
+                <h2 class="text-[clamp(1.8rem,4vw,2.4rem)] font-bold text-dark mb-2">分析结果</h2>
+                <div class="w-24 h-1 bg-primary mx-auto rounded-full"></div>
+            </header>
+
+            <div class="bg-white rounded-xl p-6 mb-8 shadow-lg">
+                <h3 class="text-xl font-semibold mb-4 flex items-center">
+                    <i class="fa fa-building-o text-primary mr-2"></i>公司基本情况
+                </h3>
+                <div class="md-content" id="stock-summary">{{ result_context.stock_summary }}</div>
+            </div>
+
+            <div class="border-b border-gray-200 mb-6">
+                <ul class="flex flex-wrap -mb-px" id="tabList" role="tablist">
+                    <li class="mr-2" role="presentation">
+                        <button class="inline-block p-4 border-b-2 border-transparent rounded-t-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 tab-active" id="fundamental-tab" data-tab="fundamental-analysis" type="button" role="tab">
+                            <i class="fa fa-line-chart mr-1"></i>基本面分析
+                        </button>
+                    </li>
+                    <li class="mr-2" role="presentation">
+                        <button class="inline-block p-4 border-b-2 border-transparent rounded-t-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" id="annual-tab" data-tab="annual-report-analysis" type="button" role="tab">
+                            <i class="fa fa-file-text-o mr-1"></i>年报分析
+                        </button>
+                    </li>
+                    <li class="mr-2" role="presentation">
+                        <button class="inline-block p-4 border-b-2 border-transparent rounded-t-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" id="sentiment-tab" data-tab="sentiment-analysis" type="button" role="tab">
+                            <i class="fa fa-smile-o mr-1"></i>情绪分析
+                        </button>
+                    </li>
+                    <li role="presentation">
+                        <button class="inline-block p-4 border-b-2 border-transparent rounded-t-lg text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" id="technical-tab" data-tab="technical-analysis" type="button" role="tab">
+                            <i class="fa fa-bar-chart mr-1"></i>技术指标分析
+                        </button>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="tab-content">
+                <div id="fundamental-analysis" class="tab-pane tab-content-active bg-white rounded-xl p-6 mb-8 shadow-lg">
+                    <div class="md-content">{{ result_context.fundamental_analysis }}</div>
+                </div>
+                <div id="annual-report-analysis" class="tab-pane hidden bg-white rounded-xl p-6 mb-8 shadow-lg">
+                    <div class="md-content">{{ result_context.annual_report_analysis }}</div>
+                </div>
+                <div id="sentiment-analysis" class="tab-pane hidden bg-white rounded-xl p-6 mb-8 shadow-lg">
+                    <div class="md-content">{{ result_context.sentiment_analysis }}</div>
+                </div>
+                <div id="technical-analysis" class="tab-pane hidden bg-white rounded-xl p-6 mb-8 shadow-lg overflow-x-auto">
+                    <table class="w-full border-collapse">
+                        <tr>
+                            {% for i in range(0, result_context.image_paths|length, 2) %}
+                                <td class="p-4 text-center border border-gray-200 rounded-lg m-2 align-top">
+                                    <div class="font-medium text-gray-700 mb-2">{{ result_context.strategies[i] }}</div>
+                                    <img src="{{ result_context.image_paths[i] }}" alt="{{ result_context.strategies[i] }} 策略图片" class="rounded shadow-md mx-auto">
+                                </td>
+                                {% if i + 1 < result_context.image_paths|length %}
+                                <td class="p-4 text-center border border-gray-200 rounded-lg m-2 align-top">
+                                    <div class="font-medium text-gray-700 mb-2">{{ result_context.strategies[i+1] }}</div>
+                                    <img src="{{ result_context.image_paths[i+1] }}" alt="{{ result_context.strategies[i+1] }} 策略图片" class="rounded shadow-md mx-auto">
+                                </td>
+                                {% endif %}
+                            </tr><tr>
+                            {% endfor %}
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <div style="font-size: 48px;">📊</div>
+                <div>提交参数后，经典单股分析结果会显示在这里的 tabs 区域。</div>
+                <div style="font-size: 13px; color: #9ca3af;">兼容页保留当前布局，但结果内容以 /stock 为准。</div>
+            </div>
+            {% endif %}
+        </div>
+    </main>
+</div>
+
+<script src="/static/ui/nav.js"></script>
+<script>
+    marked.setOptions({ breaks: true, gfm: true, smartypants: true });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const tabButtons = document.querySelectorAll('#tabList button');
+        const tabPanes = document.querySelectorAll('.tab-pane');
+
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                tabButtons.forEach(btn => btn.classList.remove('tab-active'));
+                tabPanes.forEach(pane => {
+                    pane.classList.add('hidden');
+                    pane.classList.remove('tab-content-active');
+                });
+
+                button.classList.add('tab-active');
+                const targetTab = document.getElementById(button.dataset.tab);
+                if (targetTab) {
+                    targetTab.classList.remove('hidden');
+                    targetTab.classList.add('tab-content-active');
+                    targetTab.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+
+        function renderMarkdown() {
+            const stockSummaryElement = document.getElementById('stock-summary');
+            if (stockSummaryElement && stockSummaryElement.textContent.trim()) {
+                stockSummaryElement.innerHTML = marked.parse(stockSummaryElement.textContent);
+            }
+
+            document.querySelectorAll('.md-content').forEach((element) => {
+                if (element.id === 'stock-summary') {
+                    return;
+                }
+                if (element.textContent.trim()) {
+                    element.innerHTML = marked.parse(element.textContent);
+                }
+            });
+        }
+
+        renderMarkdown();
+
+        document.querySelectorAll('.md-content a').forEach(link => {
+            link.classList.add('text-primary', 'hover:underline');
+        });
+
+        document.querySelectorAll('.md-content h1, .md-content h2, .md-content h3').forEach(title => {
+            title.classList.add('text-gray-800', 'mt-6', 'mb-3');
+        });
+
+        document.querySelectorAll('.md-content ul, .md-content ol').forEach(list => {
+            list.classList.add('ml-6', 'mb-4');
+        });
+
+        document.querySelectorAll('.md-content ul').forEach(ul => {
+            ul.classList.add('list-disc');
+        });
+
+        document.querySelectorAll('.md-content ol').forEach(ol => {
+            ol.classList.add('list-decimal');
+        });
+    });
+</script>
+</body>
+</html>

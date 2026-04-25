@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from stock_analyse.infrastructure.data_sources.stocklib.report_gateway import ReportGateway
+from stock_analyse.infrastructure.data_sources.reports.annual_report_client import stockAnnualReport
 
 
-def execute(market: str, symbol: str, years: int = 5, gateway: ReportGateway | None = None) -> dict:
+def execute(market: str, symbol: str, years: int = 5, gateway: stockAnnualReport | None = None) -> dict:
     try:
-        gateway = gateway or ReportGateway()
-        zcfz, lrb, xjll = gateway.get_stock_report(market=market, symbol=symbol, years=years)
+        gateway = gateway or stockAnnualReport()
+        zcfz, lrb, xjll = gateway.get_stock_report(stock_code=symbol, market=market, years=years)
         result = {
             "symbol": symbol,
             "market": market,

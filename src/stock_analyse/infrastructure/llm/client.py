@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stockAI.stockAgent.stock_ai_analyzer import StockAiAnalyzer
+from stock_analyse.infrastructure.llm.stock_ai_analyzer import StockAiAnalyzer
 
 
 class StockAiClient:

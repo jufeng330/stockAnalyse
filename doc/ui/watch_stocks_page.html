@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>关注股票列表 - 交易决策中心</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #1f2937; min-height: 100vh; }
+        .app-shell { max-width: 1520px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+        .sidebar, .header, .filter-bar, .table-wrap, .record-card, .score-card { background: rgba(255,255,255,.96); border-radius: 16px; box-shadow: 0 10px 32px rgba(0,0,0,.12); backdrop-filter: blur(8px); }
+        .sidebar { padding: 20px 16px; position: sticky; top: 20px; align-self: start; min-height: calc(100vh - 48px); }
+        .brand { padding: 8px 10px 18px; border-bottom: 1px solid #e5e7eb; margin-bottom: 18px; }
+        .brand h1 { margin: 0 0 6px; font-size: 20px; color: #111827; }
+        .brand p { margin: 0; font-size: 12px; color: #6b7280; line-height: 1.6; }
+        .tree-title { font-size: 12px; font-weight: 800; color: #6b7280; margin: 18px 10px 10px; text-transform: uppercase; letter-spacing: .08em; }
+        .tree,.tree .children { list-style: none; margin: 0; padding: 0; }
+        .tree > li { margin-bottom: 8px; }
+        .tree a { display: block; text-decoration: none; color: #374151; padding: 10px 12px; border-radius: 12px; font-size: 14px; font-weight: 700; }
+        .tree a:hover { background: #f3f4f6; }
+        .tree a.active { background: linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%); color: #fff; }
+        .tree .children { margin: 6px 0 0 18px; padding: 0 0 0 12px; border-left: 2px solid #e5e7eb; }
+        .tree .children a { font-size: 13px; font-weight: 600; color: #6b7280; padding: 8px 10px; }
+        .tree .children a.current { background: #eef2ff; color: #4338ca; }
+        .main { min-width: 0; }
+        .header { padding: 24px; margin-bottom: 20px; }
+        .header h2 { margin: 0 0 8px; font-size: 30px; color: #111827; }
+        .header p { margin: 0; color: #6b7280; line-height: 1.6; }
+        .score-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 18px; }
+        .score-card { padding: 16px; color: #fff; background: linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%); }
+        .score-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; opacity: .92; }
+        .score-value { font-size: 28px; font-weight: 800; }
+        .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+        .content-section { margin-bottom: 20px; }
+        .content-section h3 { margin: 0 0 16px; font-size: 20px; color: #111827; }
+        .filter-bar { padding: 18px; margin-bottom: 14px; }
+        .filter-grid { display: grid; grid-template-columns: 1.4fr repeat(4, minmax(0,1fr)) auto auto; gap: 12px; align-items: end; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 13px; }
+        .form-control { width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; background: #fff; }
+        .btn, .btn-light, .row-link { border: none; border-radius: 12px; padding: 12px 14px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+        .btn { color: #fff; background: linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%); }
+        .btn-light { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+        .table-wrap { overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; min-width: 1160px; }
+        th, td { padding: 16px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; text-align: left; }
+        th { background: #f8fafc; color: #475569; font-size: 13px; font-weight: 700; }
+        td { font-size: 14px; color: #111827; } tr:hover { background: #fafbff; }
+        .stock-name { font-weight: 800; margin-bottom: 4px; } .sub-text { font-size: 12px; color: #6b7280; line-height: 1.5; }
+        .tag { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; margin: 0 6px 6px 0; }
+        .tag-stage { background: #eef2ff; color: #4338ca; } .tag-zone { background: #ecfeff; color: #0f766e; } .tag-watch { background: #fff7ed; color: #c2410c; } .tag-action { background: #ecfdf5; color: #047857; }
+        .action-group { display: flex; flex-wrap: wrap; gap: 8px; }
+        .row-link.primary { color: #fff; background: linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%); }
+        .row-link.secondary { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+        .tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+        .tab { padding: 10px 14px; border-radius: 10px; background: #f3f4f6; color: #475569; font-size: 13px; font-weight: 700; }
+        .tab.active { background: #eef2ff; color: #4338ca; }
+        .record-filters { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 16px; }
+        .record-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; }
+        .record-card { padding: 18px; } .record-card h4 { margin: 0 0 8px; font-size: 16px; } .record-meta { color: #6b7280; font-size: 13px; line-height: 1.7; }
+        @media (max-width: 1360px) { .app-shell { grid-template-columns: 1fr; } .sidebar { position: static; min-height: auto; } .score-grid,.record-grid,.record-filters{grid-template-columns:1fr 1fr} .filter-grid{grid-template-columns:1fr 1fr 1fr} }
+        @media (max-width: 720px) { .score-grid,.record-grid,.record-filters,.filter-grid{grid-template-columns:1fr} }
+    </style>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" data-page="watch-stocks"></aside>
+
+        <main class="main">
+            <div class="header">
+                <h2>关注股票列表</h2>
+                <p>面向“还没买，但正在研究”的标的池。三个按钮已经映射到独立 UI 页面：进场决策、股票分析、持仓计划分析，可直接点击进入使用。</p>
+            </div>
+
+            <div class="score-grid">
+                <div class="score-card"><h3>关注股票总数</h3><div class="score-value">28</div><div class="score-meta">今日新增 3 只</div></div>
+                <div class="score-card"><h3>待进场决策</h3><div class="score-value">9</div><div class="score-meta">建议本周优先处理</div></div>
+                <div class="score-card"><h3>已完成股票分析</h3><div class="score-value">17</div><div class="score-meta">近 7 天完成</div></div>
+                <div class="score-card"><h3>已生成计划草案</h3><div class="score-value">6</div><div class="score-meta">待转执行计划</div></div>
+            </div>
+
+            <section class="content-section" id="watch-table">
+                <h3>当前关注标的</h3>
+                <div class="filter-bar">
+                    <div class="filter-grid">
+                        <div class="form-group"><label>关键字</label><input class="form-control" value="新能源 / 红利 / 半导体" /></div>
+                        <div class="form-group"><label>市场</label><select class="form-control"><option>全部市场</option></select></div>
+                        <div class="form-group"><label>资产类型</label><select class="form-control"><option>全部类型</option></select></div>
+                        <div class="form-group"><label>当前阶段</label><select class="form-control"><option>全部阶段</option></select></div>
+                        <div class="form-group"><label>价格区间</label><select class="form-control"><option>全部区间</option></select></div>
+                        <div class="form-group"><label>关注状态</label><select class="form-control"><option>待研究 / 研究中 / 待决策</option></select></div>
+                        <a class="btn" href="#watch-table">应用筛选</a>
+                        <a class="btn-light" href="#watch-table">新增关注股票</a>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>标的</th><th>价格 / 估值</th><th>行业 / 类型</th><th>阶段 / 区间</th><th>当前建议</th><th>最新结论</th><th>操作按钮</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><div class="stock-name">宁德时代 300750</div><div class="sub-text">A股 · 最近分析：2026-04-24 21:15</div></td>
+                                <td><div>¥182.40</div><div class="sub-text">PE 21.8 · 近 20 日 -3.4%</div></td>
+                                <td><div>电池 / 新能源车</div><div class="sub-text">成长型</div></td>
+                                <td><span class="tag tag-stage">B 阶段</span><span class="tag tag-zone">合理偏低区</span></td>
+                                <td><span class="tag tag-action">适合做第一笔决策</span><div class="sub-text">关注状态：待决策</div></td>
+                                <td><div>行业景气仍在，估值回落后性价比改善。</div><div class="sub-text">风险：盈利增速放缓</div></td>
+                                <td><div class="action-group"><a class="row-link primary" href="/entry-decision">进场决策</a><a class="row-link secondary" href="/stock-analysis-record">股票分析</a><a class="row-link secondary" href="/trade-plan-analysis">持仓计划分析</a></div></td>
+                            </tr>
+                            <tr>
+                                <td><div class="stock-name">中国神华 601088</div><div class="sub-text">A股 · 最近分析：2026-04-25 08:40</div></td>
+                                <td><div>¥41.62</div><div class="sub-text">PE 12.3 · 股息率 6.1%</div></td>
+                                <td><div>煤炭 / 能源</div><div class="sub-text">红利型</div></td>
+                                <td><span class="tag tag-stage">C 阶段</span><span class="tag tag-zone">合理区</span></td>
+                                <td><span class="tag tag-watch">继续观察</span><div class="sub-text">关注状态：研究中</div></td>
+                                <td><div>防御属性突出，但当前位置不够便宜。</div><div class="sub-text">风险：商品价格波动</div></td>
+                                <td><div class="action-group"><a class="row-link primary" href="/entry-decision">进场决策</a><a class="row-link secondary" href="/stock-analysis-record">股票分析</a><a class="row-link secondary" href="/trade-plan-analysis">持仓计划分析</a></div></td>
+                            </tr>
+                            <tr>
+                                <td><div class="stock-name">中芯国际 688981</div><div class="sub-text">科创板 · 最近分析：2026-04-25 10:05</div></td>
+                                <td><div>¥89.70</div><div class="sub-text">PS 6.4 · 近 20 日 +8.7%</div></td>
+                                <td><div>半导体 / 国产替代</div><div class="sub-text">主题成长</div></td>
+                                <td><span class="tag tag-stage">D 阶段</span><span class="tag tag-zone">高估区</span></td>
+                                <td><span class="tag tag-watch">暂不进场</span><div class="sub-text">关注状态：待研究</div></td>
+                                <td><div>产业趋势正确，但当前位置更适合观察而非追价。</div><div class="sub-text">风险：波动较大</div></td>
+                                <td><div class="action-group"><a class="row-link primary" href="/entry-decision">进场决策</a><a class="row-link secondary" href="/stock-analysis-record">股票分析</a><a class="row-link secondary" href="/trade-plan-analysis">持仓计划分析</a></div></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="content-section" id="watch-records">
+                <h3>同级历史记录列表</h3>
+                <div class="tabs"><div class="tab active">进场决策记录</div><div class="tab">股票分析记录</div><div class="tab">持仓计划分析记录</div></div>
+                <div class="record-filters"><input class="form-control" value="股票代码 / 名称" /><select class="form-control"><option>决策结论</option></select><select class="form-control"><option>当前阶段</option></select><select class="form-control"><option>是否已转持仓</option></select></div>
+                <div class="record-grid">
+                    <div class="record-card"><h4>宁德时代 - 进场决策 #DC-20260425-013</h4><div class="record-meta">结论：可以做第一笔 · 阶段：B · 区间：合理偏低区 · 创建时间：2026-04-25 10:22</div></div>
+                    <div class="record-card"><h4>中国神华 - 股票分析 #AR-20260424-006</h4><div class="record-meta">分析类型：综合分析 · 模型：qwen3.5-n · 创建时间：2026-04-24 20:11</div></div>
+                    <div class="record-card"><h4>中芯国际 - 持仓计划分析 #TP-20260425-004</h4><div class="record-meta">建议仓位：8% · 建议笔次：第一笔等待 · 风险等级：高 · 创建时间：2026-04-25 09:46</div></div>
+                </div>
+            </section>
+        </main>
+    </div>
+  <script src="/static/ui/nav.js"></script>
+</body>
+</html>
