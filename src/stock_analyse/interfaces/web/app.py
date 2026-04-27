@@ -14,8 +14,10 @@ from stock_analyse.interfaces.web.routes import (
     register_auth_routes,
     register_history_routes,
     register_misc_routes,
+    register_trading_decision_routes,
 )
 from stock_analyse.interfaces.web.services.stock_analyzer_service import StockAnalyzerService
+from stock_analyse.interfaces.web.services.trading_decision_service import TradingDecisionService
 from stock_analyse.interfaces.web.streaming.sse_manager import SSEManager
 
 logging.basicConfig(
@@ -39,6 +41,7 @@ class WebAppContext:
         self.sse_clients: dict = {}
         self.sse_lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=4)
+        self.trading_decision_service = TradingDecisionService()
 
     def check_auth_config(self) -> tuple[bool, dict]:
         if not self.analyzer:
@@ -63,4 +66,5 @@ def create_app() -> Flask:
     register_auth_routes(app)
     register_history_routes(app)
     register_analysis_routes(app)
+    register_trading_decision_routes(app)
     return app

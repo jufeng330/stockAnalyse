@@ -334,10 +334,13 @@ class stockCompanyInfo:
         # 历史的个股资金流
 
         try:
-            market_name = self.market.lower()
-            if(self.market  == self.HongKong or self.market == self.usa):
+            if not isinstance(self.market, str):
+                raise ValueError(f'market 必须是字符串，当前类型: {type(self.market).__name__}')
+            normalized_market = self.market.strip()
+            market_name = normalized_market.lower()
+            if(normalized_market == self.HongKong or normalized_market == self.usa):
                 return self.get_default_df()
-            if(self.market  == 'zq'):
+            if(normalized_market == 'zq'):
                 market_name = 'sh'
             stock_individual_fund_flow_df = ak.stock_individual_fund_flow(stock=self.symbol, market=market_name)
             # 转换日期列为 datetime 类型，以便进行排序

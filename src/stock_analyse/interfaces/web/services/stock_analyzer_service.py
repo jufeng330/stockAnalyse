@@ -47,6 +47,59 @@ logging.basicConfig(
 class StockAnalyzerService:
     """Web版增强股票分析器（基于最新 stock_analyzer.py 修正，支持AI流式输出）"""
 
+    @staticmethod
+    def _require_string_param(value, field_name: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f'{field_name} 必须是字符串，当前类型: {type(value).__name__}')
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f'{field_name} 不能为空')
+        return normalized
+
+    @classmethod
+    def _normalize_market_param(cls, value: str) -> str:
+        market = cls._require_string_param(value, 'market')
+        lowered = market.lower()
+        if lowered in {'cn', 'sh', 'sz', 'a股'}:
+            return 'SH'
+        if lowered in {'h', 'hk', '港股'}:
+            return 'H'
+        if lowered in {'usa', 'us', '美股'}:
+            return 'usa'
+        if lowered == 'zq':
+            return 'zq'
+        return market
+
+    @classmethod
+    def _normalize_analysis_identity(cls, stock_code, market):
+        normalized_stock_code = cls._require_string_param(stock_code, 'stock_code')
+        normalized_market = cls._normalize_market_param(market)
+        return normalized_stock_code, normalized_market
+
+    def _send_streaming_error(self, message: str) -> None:
+        if self.streaming is not None:
+            self.streaming.send_error(message)
+
+    def _normalize_analysis_identity_or_fail(self, stock_code, market):
+        try:
+            return self._normalize_analysis_identity(stock_code, market)
+        except ValueError as exc:
+            self.logger.error(str(exc))
+            self._send_streaming_error(str(exc))
+            return None
+
+    def _coerce_market(self, market):
+        return self._normalize_market_param(market)
+
+    def _coerce_stock_code(self, stock_code):
+        return self._require_string_param(stock_code, 'stock_code')
+
+    def _coerce_identity(self, stock_code, market):
+        return self._normalize_analysis_identity(stock_code, market)
+
+    def _coerce_identity_or_error(self, stock_code, market):
+        return self._normalize_analysis_identity_or_fail(stock_code, market)
+
     def __init__(self, config_file='config.json'):
         self.logger = logging.getLogger(__name__)
         self.config_file = config_file
@@ -265,6 +318,11 @@ class StockAnalyzerService:
         return json_result
 
     def stock_ai_analysis_process(self, stock_code, market, start_date_str, end_date_str, trade_date=None, analysis_depth='standard'):
+        normalized_identity = self._normalize_analysis_identity_or_fail(stock_code, market)
+        if normalized_identity is None:
+            return {'success': False, 'error': 'stock_code 或 market 参数无效'}
+        stock_code, market = normalized_identity
+
         callbacks = {}
         if self.streaming is not None:
             callbacks = {

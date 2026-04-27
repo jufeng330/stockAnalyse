@@ -259,8 +259,12 @@ class stockIndicatorQuantitative:
     import akshare as ak
 
     def get_stock_sina_daily(self, stock_code, market, start_date, end_date, adjust=''):
+        if not isinstance(market, str):
+            raise ValueError(f'market 必须是字符串，当前类型: {type(market).__name__}')
+        market_name = market.strip().lower()
+
         # ===================== A 股 =====================
-        if market.lower() == "sh":
+        if market_name == "sh":
             if stock_code.startswith('6'):
                 stock_code = "sh" + stock_code
             else:
@@ -273,7 +277,7 @@ class stockIndicatorQuantitative:
             )
 
         # ===================== 港股 =====================
-        elif market.lower() == "h":
+        elif market_name == "h":
             # 港股接口：新浪 source
             df = ak.stock_hk_daily(
                 symbol=stock_code,
@@ -281,7 +285,7 @@ class stockIndicatorQuantitative:
             )
 
         # ===================== 美股 =====================
-        elif market.lower() == "usa":
+        elif market_name == "usa":
             # 美股接口：新浪 source
             df = ak.stock_us_daily(
                 symbol=stock_code,

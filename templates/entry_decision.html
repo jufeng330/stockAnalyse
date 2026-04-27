@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>进场决策 - 交易决策中心</title>
+    <link rel="stylesheet" href="/static/ui/nav.css">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #111827;
+            min-height: 100vh;
+        }
+        .app-shell {
+            max-width: 1520px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 20px;
+        }
+        .sidebar, .panel, .header {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 16px;
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
+            backdrop-filter: blur(8px);
+        }
+        .sidebar {
+            padding: 20px 16px;
+            position: sticky;
+            top: 20px;
+            align-self: start;
+            min-height: calc(100vh - 48px);
+        }
+        .panel, .header { padding: 24px; }
+        .header { margin-bottom: 20px; }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header h1 { margin: 0 0 8px; font-size: 30px; }
+        .muted { margin: 0; color: #6b7280; line-height: 1.6; }
+        .content-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .score-grid, .grid-2, .grid-3, .context-grid, .kv-grid {
+            display: grid;
+            gap: 12px;
+        }
+        .score-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .context-grid, .kv-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+        .score-card {
+            border-radius: 14px;
+            padding: 16px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: #fff;
+        }
+        .score-card h3 { margin: 0 0 10px; font-size: 13px; opacity: .92; }
+        .score-value { font-size: 28px; font-weight: 800; }
+        .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+        .context-hint, .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #eef2ff;
+            color: #4338ca;
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .nav-links a {
+            text-decoration: none;
+            color: #374151;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .panel h2 { margin: 0 0 16px; font-size: 20px; }
+        .panel h3 { margin: 0 0 12px; font-size: 18px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+        }
+        .form-control, textarea.form-control {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            font-size: 14px;
+            background: #fff;
+            font-family: inherit;
+        }
+        textarea.form-control { min-height: 96px; resize: vertical; }
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+        .btn, .btn-light {
+            border: none;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .btn {
+            color: #fff;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            flex: 1 1 180px;
+        }
+        .btn-light {
+            color: #374151;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            flex: 1 1 160px;
+        }
+        .btn:disabled, .btn-light:disabled { opacity: .65; cursor: not-allowed; }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+        .dot.connected { background: #22c55e; }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .progress-wrapper { display: none; margin-top: 16px; }
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #e5e7eb;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            transition: width 0.3s ease;
+        }
+        .progress-text, .helper-text { font-size: 12px; color: #6b7280; line-height: 1.6; }
+        .log-box {
+            background: #111827;
+            color: #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+            height: 260px;
+            overflow: auto;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        .log-entry { margin-bottom: 6px; }
+        .log-info { color: #93c5fd; }
+        .log-success { color: #86efac; }
+        .log-warning { color: #fde68a; }
+        .log-error { color: #fca5a5; }
+        .log-header { color: #f9fafb; font-weight: 700; }
+        .result-block, .summary-box, .pause-box, .kv {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 16px;
+        }
+        .summary-box { background: #fff; }
+        .kv .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+        .kv .value { font-size: 15px; font-weight: 700; line-height: 1.6; word-break: break-word; }
+        .result-stack { display: flex; flex-direction: column; gap: 16px; }
+        .list-block { margin: 0; padding-left: 20px; color: #374151; line-height: 1.8; }
+        .hidden { display: none; }
+        details { margin-top: 12px; }
+        details summary { cursor: pointer; font-weight: 700; color: #374151; }
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #111827;
+            color: #f9fafb;
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-x: auto;
+        }
+        .empty-state, .error-state {
+            min-height: 320px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            text-align: center;
+            gap: 10px;
+            color: #6b7280;
+        }
+        @media (max-width: 1280px) {
+            .app-shell { grid-template-columns: 1fr; }
+            .sidebar { position: static; min-height: auto; }
+        }
+        @media (max-width: 1080px) {
+            .score-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 720px) {
+            .app-shell { padding: 16px; }
+            .score-grid, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" data-page="entry-decision"></aside>
+        <main>
+            <div class="header">
+                <div class="header-top">
+                    <div>
+                        <h1>进场决策</h1>
+                        <p class="muted">基于关注股票上下文执行 6 个专属 AI 角色分析，支持暂停补充与继续执行，并完整展示章节化结果。</p>
+                        <div class="context-hint">关联关注股票：<span id="watchStockIdText">{{ watch_stock.id }}</span></div>
+                    </div>
+                    <div class="nav-links">
+                        <a href="/watch-stocks">关注股票</a>
+                        <a href="/stock-analysis-record?watch_stock_id={{ watch_stock.id }}&code={{ watch_stock.stock_code }}&market={{ watch_stock.market }}">股票分析</a>
+                        <a href="/trade-plan-analysis?watch_stock_id={{ watch_stock.id }}">持仓计划分析</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="score-grid">
+                <div class="score-card"><h3>决策标的</h3><div class="score-value">{{ watch_stock.stock_code }}</div><div class="score-meta">{{ watch_stock.stock_name }}</div></div>
+                <div class="score-card"><h3>市场</h3><div class="score-value">{{ display_market }}</div><div class="score-meta">{{ watch_stock.asset_type }}</div></div>
+                <div class="score-card"><h3>当前价格</h3><div class="score-value">{{ '%.2f'|format(watch_stock.current_price) if watch_stock.current_price is not none else '--' }}</div><div class="score-meta">PE {{ '%.2f'|format(watch_stock.pe) if watch_stock.pe is not none else '--' }}</div></div>
+                <div class="score-card"><h3>最近分析</h3><div class="score-value">{{ watch_stock.last_analysis_at or '暂无' }}</div><div class="score-meta">最新摘要可在本页更新</div></div>
+            </div>
+
+            <div class="content-stack">
+                <div class="panel">
+                    <h2>标的上下文</h2>
+                    <div class="context-grid">
+                        <div class="kv"><div class="label">股票名称</div><div class="value">{{ watch_stock.stock_name }}</div></div>
+                        <div class="kv"><div class="label">股票代码</div><div class="value">{{ watch_stock.stock_code }}</div></div>
+                        <div class="kv"><div class="label">市场</div><div class="value">{{ display_market }}</div></div>
+                        <div class="kv"><div class="label">行业</div><div class="value">{{ watch_stock.industry or '未填写行业' }}</div></div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="label" style="font-size:12px;color:#6b7280;margin-bottom:6px;">上次结论摘要</div>
+                        <div id="previousConclusionText" style="line-height:1.7;font-weight:600;">{{ watch_stock.last_conclusion_summary or '暂无结论摘要' }}</div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>决策参数</h2>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="tradeDate">交易日期</label>
+                            <input id="tradeDate" class="form-control" type="date" value="{{ form_defaults.trade_date }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="analysisDepth">分析深度</label>
+                            <select id="analysisDepth" class="form-control">
+                                <option value="standard" {% if form_defaults.analysis_depth == 'standard' %}selected{% endif %}>standard</option>
+                                <option value="deep" {% if form_defaults.analysis_depth == 'deep' %}selected{% endif %}>deep</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="summary-box" style="margin-bottom:16px;">
+                        <div class="label" style="font-size:12px;color:#6b7280;margin-bottom:6px;">自动取数说明</div>
+                        <div style="line-height:1.7;font-weight:600;">系统会自动从成交数据、技术快照、历史财报和情绪数据中提取估值、预期、财务摘要和周期判断，不再要求手工输入这些字段。</div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="currentPosition">当前仓位</label>
+                            <input id="currentPosition" class="form-control" value="{{ form_defaults.position_input.current_position }}" placeholder="如 0% / 5%">
+                        </div>
+                        <div class="form-group">
+                            <label for="maxTargetPosition">最大目标仓位</label>
+                            <input id="maxTargetPosition" class="form-control" value="{{ form_defaults.position_input.max_target_position }}" placeholder="如 15% / 30%">
+                        </div>
+                    </div>
+                    <div class="btn-row">
+                        <button id="generateBtn" class="btn" type="button" onclick="generateDecision()">生成决策</button>
+                        <button id="resumeBtn" class="btn-light hidden" type="button" onclick="resumeDecision()">继续执行</button>
+                        <button id="saveBtn" class="btn-light" type="button" onclick="saveDecisionRecord()">保存决策记录</button>
+                    </div>
+                    <div class="helper-text">本页通过 `/api/trading-decision/watch-stocks/{{ watch_stock.id }}/entry-decision/analyze` 发起任务，通过 `/api/trading-decision/entry-decisions/&lt;session_id&gt;/resume` 继续执行，并继续复用 `/api/sse` 接收日志与结果。除仓位约束外，决策所需字段默认由后端自动取数补全。</div>
+                    <div class="status-row">
+                        <div class="status-pill"><span id="sseDot" class="dot"></span><span id="sseStatus">SSE 未连接</span></div>
+                        <div class="status-pill" id="systemStatus">系统就绪</div>
+                    </div>
+                    <div id="progressWrapper" class="progress-wrapper">
+                        <div id="progressText" class="progress-text">准备开始...</div>
+                        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+                    </div>
+                    <div id="pausePanel" class="pause-box hidden" style="margin-top:16px;">
+                        <h3 style="margin-bottom:8px;">暂停补充</h3>
+                        <div id="pausePromptText" style="line-height:1.7;font-weight:600;"></div>
+                        <div id="pauseMissingFields" class="helper-text" style="margin-top:8px;"></div>
+                    </div>
+                    {% if active_session and active_session.status == 'paused' %}
+                    <div class="pause-box" style="margin-top:16px;">
+                        <h3 style="margin-bottom:8px;">当前暂停状态</h3>
+                        <div style="line-height:1.7;font-weight:600;">{{ active_session.pause_prompt or '请补充缺失字段后继续执行。' }}</div>
+                        <div class="helper-text" style="margin-top:8px;">缺失字段：{{ (active_session.missing_fields_json or [])|join('、') or '请补充必要输入' }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="panel">
+                    <h2>运行日志</h2>
+                    <div id="logBox" class="log-box">
+                        <div class="log-entry log-info">[系统] 等待发起进场决策任务...</div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>决策结果</h2>
+                    {% if selected_record %}
+                    <div class="helper-text" style="margin-bottom:12px;">已加载历史决策记录：{{ selected_record.id }}{% if selected_record.suggested_action %} · {{ selected_record.suggested_action }}{% endif %}{% if selected_record.conclusion_summary %} · {{ selected_record.conclusion_summary }}{% endif %}</div>
+                    {% endif %}
+                    <div id="resultsContent">
+                        <div class="empty-state">
+                            <div style="font-size:48px;">🧭</div>
+                            <div>点击“生成决策”后展示章节化进场决策结果。</div>
+                            <div style="font-size:13px;color:#9ca3af;">结果区会展示结论、reasoning，以及原始 JSON。</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/ui/nav.js"></script>
+    <script>
+        const WATCH_STOCK_ID = {{ watch_stock.id | tojson }};
+        const ACTIVE_SESSION = {{ active_session | tojson }};
+        const SELECTED_RECORD = {{ selected_record | tojson }};
+        const API_BASE = '/api/trading-decision/watch-stocks';
+        const SESSION_API_BASE = '/api/trading-decision/entry-decisions';
+        const RECORD_API_BASE = '/api/trading-decision/entry-decision-records';
+
+        let sseConnection = null;
+        let currentClientId = null;
+        let currentSessionId = ACTIVE_SESSION ? ACTIVE_SESSION.id : null;
+        let currentResult = SELECTED_RECORD ? (SELECTED_RECORD.full_result_json || null) : null;
+        let isAnalyzing = false;
+
+        function generateClientId() {
+            return 'entry_decision_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+        }
+
+        function addLog(message, type = 'info') {
+            const logBox = document.getElementById('logBox');
+            const line = document.createElement('div');
+            line.className = `log-entry log-${type}`;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logBox.appendChild(line);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function setSSEStatus(connected) {
+            const dot = document.getElementById('sseDot');
+            const text = document.getElementById('sseStatus');
+            if (connected) {
+                dot.classList.add('connected');
+                text.textContent = 'SSE 已连接';
+            } else {
+                dot.classList.remove('connected');
+                text.textContent = 'SSE 未连接';
+            }
+        }
+
+        function setSystemStatus(text) {
+            document.getElementById('systemStatus').textContent = text;
+        }
+
+        function updateProgress(percent, message) {
+            document.getElementById('progressWrapper').style.display = 'block';
+            document.getElementById('progressFill').style.width = `${percent}%`;
+            document.getElementById('progressText').textContent = message || '处理中...';
+        }
+
+        function resetProgress() {
+            document.getElementById('progressWrapper').style.display = 'none';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = '准备开始...';
+        }
+
+        function setRunningState(running, statusText) {
+            isAnalyzing = running;
+            document.getElementById('generateBtn').disabled = running;
+            document.getElementById('resumeBtn').disabled = running;
+            setSystemStatus(statusText);
+            if (!running) {
+                setTimeout(() => {
+                    if (!isAnalyzing) {
+                        resetProgress();
+                        if (statusText !== '分析失败' && statusText !== '等待补充') {
+                            setSystemStatus('系统就绪');
+                        }
+                    }
+                }, 1200);
+            }
+        }
+
+        function initSSE() {
+            if (sseConnection) {
+                sseConnection.close();
+            }
+            currentClientId = generateClientId();
+            sseConnection = new EventSource(`/api/sse?client_id=${currentClientId}`);
+            addLog('正在建立 SSE 连接', 'info');
+            sseConnection.onopen = () => {
+                setSSEStatus(true);
+                addLog('SSE 连接已建立', 'success');
+            };
+            sseConnection.onmessage = event => {
+                try {
+                    handleSSEMessage(JSON.parse(event.data));
+                } catch (error) {
+                    addLog(`SSE 消息解析失败: ${error.message}`, 'warning');
+                }
+            };
+            sseConnection.onerror = () => {
+                setSSEStatus(false);
+                addLog('SSE 连接异常，准备重连', 'warning');
+                setTimeout(() => {
+                    if (!sseConnection || sseConnection.readyState === EventSource.CLOSED) {
+                        initSSE();
+                    }
+                }, 3000);
+            };
+        }
+
+        function handleSSEMessage(message) {
+            const eventType = message.event;
+            const data = message.data || {};
+            switch (eventType) {
+                case 'connected':
+                    addLog(`已绑定客户端 ${data.client_id}`, 'success');
+                    break;
+                case 'log':
+                    addLog(data.message || '', data.type || 'info');
+                    break;
+                case 'progress':
+                    updateProgress(data.percent || 0, data.message || '处理中...');
+                    break;
+                case 'decision_role_result':
+                    addLog(`角色完成: ${data.role_title || data.role_name || 'unknown'}`, 'success');
+                    renderRolePreview(data);
+                    break;
+                case 'decision_pause':
+                    showPausePanel(data);
+                    setRunningState(false, '等待补充');
+                    break;
+                case 'final_result':
+                    hidePausePanel();
+                    currentResult = data;
+                    renderResult(data);
+                    syncSummaryFieldsFromResult(data);
+                    break;
+                case 'analysis_complete':
+                    addLog(data.message || '分析完成', 'success');
+                    setRunningState(false, '分析完成');
+                    break;
+                case 'analysis_error':
+                case 'error':
+                    renderError(data.error || '未知错误');
+                    addLog(data.error || '未知错误', 'error');
+                    setRunningState(false, '分析失败');
+                    break;
+                case 'heartbeat':
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        function collectPayload() {
+            return {
+                trade_date: document.getElementById('tradeDate').value,
+                analysis_depth: document.getElementById('analysisDepth').value,
+                position_input: {
+                    current_position: document.getElementById('currentPosition').value.trim(),
+                    max_target_position: document.getElementById('maxTargetPosition').value.trim()
+                },
+                client_id: currentClientId
+            };
+        }
+
+        async function generateDecision() {
+            if (isAnalyzing) {
+                addLog('已有任务在执行，请稍候', 'warning');
+                return;
+            }
+            currentResult = null;
+            hidePausePanel();
+            renderLoading();
+            setRunningState(true, '分析中');
+            updateProgress(5, '准备发起进场决策任务...');
+            addLog(`开始生成决策: {{ watch_stock.stock_code }}`, 'header');
+            try {
+                const response = await fetch(`${API_BASE}/${WATCH_STOCK_ID}/entry-decision/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collectPayload())
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error?.message || result.message || `HTTP ${response.status}`);
+                }
+                currentSessionId = result.data.session_id;
+                addLog(result.message || '进场决策任务已启动', 'success');
+            } catch (error) {
+                renderError(error.message);
+                addLog(`启动失败: ${error.message}`, 'error');
+                setRunningState(false, '分析失败');
+            }
+        }
+
+        async function resumeDecision() {
+            if (!currentSessionId) {
+                addLog('没有可继续的 session_id', 'warning');
+                return;
+            }
+            if (isAnalyzing) {
+                addLog('已有任务在执行，请稍候', 'warning');
+                return;
+            }
+            setRunningState(true, '继续执行中');
+            updateProgress(5, '准备继续执行进场决策...');
+            addLog(`继续执行会话: ${currentSessionId}`, 'header');
+            try {
+                const response = await fetch(`${SESSION_API_BASE}/${currentSessionId}/resume`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collectPayload())
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error?.message || result.message || `HTTP ${response.status}`);
+                }
+                hidePausePanel();
+                addLog(result.message || '进场决策任务已继续执行', 'success');
+            } catch (error) {
+                addLog(`继续执行失败: ${error.message}`, 'error');
+                setRunningState(false, '分析失败');
+            }
+        }
+
+        async function saveDecisionRecord() {
+            if (!currentResult || currentResult.success !== true) {
+                addLog('当前没有可保存的完整决策结果', 'warning');
+                return;
+            }
+            document.getElementById('saveBtn').disabled = true;
+            addLog('正在保存进场决策记录', 'info');
+            try {
+                const response = await fetch(RECORD_API_BASE, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        watch_stock_id: WATCH_STOCK_ID,
+                        session_id: currentSessionId || '',
+                        trade_date: document.getElementById('tradeDate').value,
+                        raw_result: currentResult
+                    })
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error?.message || result.message || '保存失败');
+                }
+                addLog(result.message || '进场决策记录已保存', 'success');
+                const saved = result.data || {};
+                document.getElementById('previousConclusionText').textContent = saved.conclusion_summary || '暂无结论摘要';
+            } catch (error) {
+                addLog(`保存失败: ${error.message}`, 'error');
+            } finally {
+                document.getElementById('saveBtn').disabled = false;
+            }
+        }
+
+        function showPausePanel(data) {
+            currentSessionId = data.session_id || currentSessionId;
+            const panel = document.getElementById('pausePanel');
+            panel.classList.remove('hidden');
+            document.getElementById('resumeBtn').classList.remove('hidden');
+            document.getElementById('pausePromptText').textContent = data.prompt || '请补充缺失字段后继续执行。';
+            const fields = Array.isArray(data.missing_fields) ? data.missing_fields : [];
+            document.getElementById('pauseMissingFields').textContent = fields.length ? `缺失字段: ${fields.join('、')}` : '请补充必要输入。';
+            focusFirstMissingField(fields);
+            addLog(`任务已暂停: ${data.prompt || ''}`, 'warning');
+        }
+
+        function hidePausePanel() {
+            document.getElementById('pausePanel').classList.add('hidden');
+            document.getElementById('resumeBtn').classList.add('hidden');
+            document.getElementById('pausePromptText').textContent = '';
+            document.getElementById('pauseMissingFields').textContent = '';
+        }
+
+        function focusFirstMissingField(fields) {
+            if (!Array.isArray(fields) || !fields.length) {
+                return;
+            }
+            const fieldMap = {
+                'position_input.current_position': 'currentPosition',
+                'position_input.max_target_position': 'maxTargetPosition'
+            };
+            const targetId = fieldMap[fields[0]];
+            if (targetId) {
+                const el = document.getElementById(targetId);
+                if (el) {
+                    el.focus();
+                }
+            }
+        }
+
+        function renderLoading() {
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="empty-state">
+                    <div style="font-size:48px;">⏳</div>
+                    <div>正在生成 {{ watch_stock.stock_code }} 的进场决策</div>
+                    <div style="font-size:13px;color:#9ca3af;">等待 SSE 推送阶段日志与最终结果...</div>
+                </div>
+            `;
+        }
+
+        function renderRolePreview(data) {
+            const mount = document.getElementById('resultsContent');
+            const existing = document.getElementById('rolePreviewMount');
+            if (existing) {
+                existing.innerHTML += renderSectionCard(data.role_title || data.role_name || '阶段结果', data.output || {});
+                return;
+            }
+            mount.innerHTML = `<div id="rolePreviewMount" class="result-stack">${renderSectionCard(data.role_title || data.role_name || '阶段结果', data.output || {})}</div>`;
+        }
+
+        function renderResult(result) {
+            if (!result || result.success !== true) {
+                renderError('返回结果格式不正确');
+                return;
+            }
+            const data = result.data || {};
+            const html = [
+                renderSectionCard('标的基本信息', data.basic_info || {}),
+                renderSectionCard('宏观分析', data.macro_analysis || {}),
+                renderSectionCard('资产分类', data.asset_classification || {}),
+                renderSectionCard('价值阶段分析', data.value_stage_analysis || {}),
+                renderSectionCard('价格分区分析', data.price_zone_analysis || {}),
+                renderSectionCard('买卖计划分析', data.buy_plan_analysis || {}),
+                renderSectionCard('风险控制分析', data.risk_control_analysis || {}),
+                renderSectionCard('最终决策卡', data.decision_card || {}),
+                renderSectionCard('执行元信息', data.meta || {}),
+                renderRawJsonBlock('查看快照原始数据', data.snapshot || {}),
+                renderRawJsonBlock('查看手工补充输入', data.manual_inputs || {}),
+                renderRawJsonBlock('查看完整结果 JSON', data)
+            ].filter(Boolean).join('');
+            document.getElementById('resultsContent').innerHTML = `<div class="result-stack">${html}</div>`;
+            addLog(`进场决策结果已返回: ${data.stock_code || '{{ watch_stock.stock_code }}'}`, 'success');
+        }
+
+        function renderSectionCard(title, value) {
+            const kvs = renderKVGrid(value);
+            const listBlocks = renderNestedLists(value);
+            return `
+                <div class="result-block">
+                    <h3>${escapeHtml(title)}</h3>
+                    ${kvs}
+                    ${listBlocks}
+                    ${renderRawJsonBlock(`查看${title}原始 JSON`, value)}
+                </div>
+            `;
+        }
+
+        function renderKVGrid(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                return `<div class="kv-grid">${renderKV('内容', formatValue(value))}</div>`;
+            }
+            const entries = Object.entries(value).filter(([, item]) => !isNestedCollection(item));
+            if (!entries.length) {
+                return '';
+            }
+            return `<div class="kv-grid">${entries.map(([key, item]) => renderKV(humanizeKey(key), formatValue(item))).join('')}</div>`;
+        }
+
+        function renderNestedLists(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                return '';
+            }
+            return Object.entries(value)
+                .filter(([, item]) => isNestedCollection(item))
+                .map(([key, item]) => {
+                    if (Array.isArray(item)) {
+                        return `<div class="summary-box" style="margin-top:12px;"><div class="label" style="font-size:12px;color:#6b7280;margin-bottom:8px;">${escapeHtml(humanizeKey(key))}</div>${renderList(item)}</div>`;
+                    }
+                    return `<div class="summary-box" style="margin-top:12px;"><div class="label" style="font-size:12px;color:#6b7280;margin-bottom:8px;">${escapeHtml(humanizeKey(key))}</div><pre>${escapeHtml(safeJsonStringify(item))}</pre></div>`;
+                })
+                .join('');
+        }
+
+        function renderList(items) {
+            const normalized = Array.isArray(items) ? items : [items];
+            return `<ul class="list-block">${normalized.map(item => `<li>${escapeHtml(formatValue(item))}</li>`).join('')}</ul>`;
+        }
+
+        function renderKV(label, value) {
+            return `<div class="kv"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value == null || value === '' ? '-' : String(value))}</div></div>`;
+        }
+
+        function syncSummaryFieldsFromResult(result) {
+            const data = result.data || {};
+            const decisionCard = data.decision_card || {};
+            const riskControl = data.risk_control_analysis || {};
+            const valueStage = data.value_stage_analysis || {};
+            const priceZone = data.price_zone_analysis || {};
+            const buyPlan = data.buy_plan_analysis || {};
+            const suggestion = decisionCard.suggested_action || buyPlan.suggested_action || '';
+            const summary = riskControl.conclusion_summary || decisionCard.execution_summary || '';
+            document.getElementById('previousConclusionText').textContent = summary || '暂无结论摘要';
+            if (decisionCard.current_stage || valueStage.current_stage) {
+                // keep hidden summary sync in inputs if user wants to save again later
+            }
+            addLog(`建议动作: ${suggestion || '-'}`, 'info');
+        }
+
+        function renderError(message) {
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="error-state">
+                    <div style="font-size:48px;">❌</div>
+                    <div>生成决策失败</div>
+                    <div style="max-width:520px;line-height:1.6;">${escapeHtml(message || '未知错误')}</div>
+                </div>
+            `;
+        }
+
+        function humanizeKey(key) {
+            const mapping = {
+                stock_code: '股票代码',
+                stock_name: '股票名称',
+                market: '市场',
+                industry: '行业',
+                asset_type: '资产类型',
+                current_price: '当前价格',
+                investment_horizon: '投资周期',
+                macro_view: '宏观看法',
+                macro_conclusion: '宏观结论',
+                macro_reasoning: '宏观理由',
+                asset_classification: '资产分类',
+                classification_reasoning: '分类理由',
+                current_stage: '当前阶段',
+                stage_reasoning: '阶段理由',
+                price_zone: '价格区间',
+                zone_reasoning: '分区理由',
+                action_signal: '动作信号',
+                action_reasoning: '动作理由',
+                suggested_action: '建议动作',
+                suggested_entry_leg: '建议第几笔',
+                max_target_position: '最大目标仓位',
+                current_position: '当前仓位',
+                risk_level: '风险等级',
+                risk_reasoning: '风险理由',
+                conclusion_summary: '结论摘要',
+                execution_summary: '执行摘要',
+                duration_ms: '耗时(ms)',
+                current_role: '当前角色',
+                status: '状态',
+                trade_date: '交易日期'
+            };
+            return mapping[key] || key;
+        }
+
+        function isNestedCollection(value) {
+            return Array.isArray(value) || (value && typeof value === 'object');
+        }
+
+        function formatValue(value) {
+            if (value === null || value === undefined || value === '') {
+                return '-';
+            }
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                return String(value);
+            }
+            if (Array.isArray(value)) {
+                return value.map(item => formatValue(item)).join('；');
+            }
+            try {
+                return JSON.stringify(value, null, 2);
+            } catch (error) {
+                return String(value);
+            }
+        }
+
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function safeJsonStringify(value) {
+            try {
+                return JSON.stringify(value, null, 2);
+            } catch (error) {
+                return String(value);
+            }
+        }
+
+        function renderRawJsonBlock(title, value) {
+            if (!value || (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0)) {
+                return '';
+            }
+            return `<details><summary>${escapeHtml(title)}</summary><pre>${escapeHtml(safeJsonStringify(value))}</pre></details>`;
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initSSE();
+            addLog('进场决策页面已加载', 'success');
+            if (ACTIVE_SESSION && ACTIVE_SESSION.status === 'paused') {
+                showPausePanel({
+                    session_id: ACTIVE_SESSION.id,
+                    missing_fields: ACTIVE_SESSION.missing_fields_json || [],
+                    prompt: ACTIVE_SESSION.pause_prompt || '存在待补充输入'
+                });
+            }
+            if (SELECTED_RECORD && SELECTED_RECORD.full_result_json) {
+                renderResult(SELECTED_RECORD.full_result_json);
+            }
+        });
+
+        window.addEventListener('beforeunload', function() {
+            if (sseConnection) {
+                sseConnection.close();
+            }
+        });
+    </script>
+</body>
+</html>

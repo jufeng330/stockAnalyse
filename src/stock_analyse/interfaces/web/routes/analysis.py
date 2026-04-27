@@ -18,6 +18,157 @@ def _context():
     return current_app.extensions['stock_analyse.context']
 
 
+def _require_scalar_string(value, field_name: str, default: str | None = None) -> str:
+    if value is None:
+        return (default or '').strip()
+    if isinstance(value, (dict, list, tuple, set)):
+        raise ValueError(f'{field_name} 必须是字符串')
+    return str(value).strip()
+
+
+def _normalize_analysis_market(value) -> str:
+    market = _require_scalar_string(value, 'market', 'SH')
+    lowered = market.lower()
+    if lowered in {'cn', 'sh', 'sz', 'a股'}:
+        return 'SH'
+    if lowered in {'h', 'hk', '港股'}:
+        return 'H'
+    if lowered in {'usa', 'us', '美股'}:
+        return 'usa'
+    if lowered == 'zq':
+        return 'zq'
+    return market
+
+
+def _parse_analyze_stock_ai_payload():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise ValueError('请求体必须是 JSON 对象')
+    return _normalize_analyze_stock_ai_payload(data)
+
+
+def _normalize_analyze_stock_ai_payload(data: dict):
+    stock_code = _require_scalar_string(data.get('stock_code'), 'stock_code')
+    if not stock_code:
+        raise ValueError('stock_code 不能为空')
+
+    market = _normalize_analysis_market(data.get('market', 'SH'))
+    client_id = _require_scalar_string(data.get('client_id'), 'client_id') or None
+    trade_date = _require_scalar_string(data.get('trade_date'), 'trade_date') or None
+    analysis_depth = _require_scalar_string(data.get('analysis_depth'), 'analysis_depth', 'standard') or 'standard'
+    start_date = _require_scalar_string(data.get('start_date'), 'start_date') or None
+    end_date = _require_scalar_string(data.get('end_date'), 'end_date') or None
+
+    return {
+        'stock_code': stock_code,
+        'market': market,
+        'client_id': client_id,
+        'trade_date': trade_date,
+        'analysis_depth': analysis_depth,
+        'start_date': start_date,
+        'end_date': end_date,
+    }
+
+
+def _start_stock_ai_analysis_task(context, payload: dict):
+    stock_code = payload['stock_code']
+    market = payload['market']
+    client_id = payload['client_id']
+    trade_date = payload['trade_date']
+    analysis_depth = payload['analysis_depth']
+    start_date_str = payload['start_date'] or (datetime.now() - timedelta(days=100)).strftime('%Y-%m-%d')
+    end_date_str = payload['end_date'] or datetime.now().strftime('%Y-%m-%d')
+    lock_name = f'ai_{stock_code}'
+
+    with context.task_lock:
+        if lock_name in context.analysis_tasks:
+            return jsonify({'success': False, 'error': f'股票 {stock_code} 正在AI分析中，请稍候'}), 429
+        context.analysis_tasks[lock_name] = {
+            'start_time': datetime.now(),
+            'status': 'analyzing',
+            'client_id': client_id,
+        }
+
+    try:
+        def run_analysis():
+            streamer = StreamingAnalyzer(client_id, context.sse_manager)
+            try:
+                streamer.send_log(f"🚀 开始AI个股分析: {stock_code}", 'header')
+                streamer.send_progress('singleProgress', 5, '开始AI个股分析...')
+                context.analyzer.streaming = streamer
+                context.analyzer.stock_ai_analysis_process(stock_code, market, start_date_str, end_date_str, trade_date=trade_date, analysis_depth=analysis_depth)
+                logger.info(f'AI个股分析完成: {stock_code}')
+                streamer.send_log(f"🚀 AI个股分析完成: {stock_code}", 'header')
+                streamer.send_progress('singleProgress', 100, 'AI个股分析完成...')
+                streamer.send_completion(f'AI个股分析完成: {stock_code}')
+            except Exception as exc:
+                streamer.send_log(f"🚀 AI个股分析失败: {stock_code}", 'header')
+                streamer.send_progress('singleProgress', 100, 'AI个股分析失败...')
+                streamer.send_error(f'AI个股分析失败: {stock_code}, 错误: {exc}')
+                streamer.send_completion(f'AI个股分析失败: {stock_code}, 错误: {exc}')
+                logger.error(f'AI个股分析失败: {stock_code}, 错误: {exc}')
+            finally:
+                with context.task_lock:
+                    context.analysis_tasks.pop(lock_name, None)
+
+        context.executor.submit(run_analysis)
+        return jsonify({'success': True, 'data': '', 'message': f'股票 {stock_code} AI分析已启动', 'task_mode': 'async', 'client_id': client_id})
+    except Exception as exc:
+        logger.error(f'AI个股分析失败: {exc}')
+        with context.task_lock:
+            context.analysis_tasks.pop(lock_name, None)
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+def start_stock_ai_analysis_from_payload(payload: dict):
+    return _start_stock_ai_analysis_task(_context(), _normalize_analyze_stock_ai_payload(payload))
+
+
+def normalize_analysis_market_value(value) -> str:
+    return _normalize_analysis_market(value)
+
+
+def require_scalar_string_value(value, field_name: str, default: str | None = None) -> str:
+    return _require_scalar_string(value, field_name, default)
+
+
+def default_stock_ai_date_range() -> tuple[str, str]:
+    return (
+        (datetime.now() - timedelta(days=100)).strftime('%Y-%m-%d'),
+        datetime.now().strftime('%Y-%m-%d'),
+    )
+
+
+def default_trade_date_value() -> str:
+    return datetime.now().strftime('%Y-%m-%d')
+
+
+def build_stock_ai_payload(
+    *,
+    stock_code: str,
+    market: str,
+    client_id: str | None,
+    trade_date: str | None,
+    analysis_depth: str | None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    return _normalize_analyze_stock_ai_payload(
+        {
+            'stock_code': stock_code,
+            'market': market,
+            'client_id': client_id,
+            'trade_date': trade_date,
+            'analysis_depth': analysis_depth or 'standard',
+            'start_date': start_date,
+            'end_date': end_date,
+        }
+    )
+
+
+def start_stock_ai_analysis(context, payload: dict):
+    return _start_stock_ai_analysis_task(context, payload)
+
 
 def _get_stock_analysis_defaults(context):
     settings = context.settings
@@ -203,55 +354,11 @@ def register_analysis_routes(app):
 
     @app.route('/api/analyze_stock_ai', methods=['GET', 'POST'])
     def analyze_stock_ai():
-        context = _context()
-        data = request.json
-        stock_code = data.get('stock_code', '').strip()
-        market = data.get('market', 'SH').strip()
-        client_id = data.get('client_id')
-        trade_date = data.get('trade_date')
-        analysis_depth = data.get('analysis_depth', 'standard')
-        start_date_str = data.get('start_date') or (datetime.now() - timedelta(days=100)).strftime('%Y-%m-%d')
-        end_date_str = data.get('end_date') or datetime.now().strftime('%Y-%m-%d')
-        lock_name = f'ai_{stock_code}'
-
-        with context.task_lock:
-            if lock_name in context.analysis_tasks:
-                return jsonify({'success': False, 'error': f'股票 {stock_code} 正在AI分析中，请稍候'}), 429
-            context.analysis_tasks[lock_name] = {
-                'start_time': datetime.now(),
-                'status': 'analyzing',
-                'client_id': client_id,
-            }
-
         try:
-            def run_analysis():
-                streamer = StreamingAnalyzer(client_id, context.sse_manager)
-                try:
-                    streamer.send_log(f"🚀 开始AI个股分析: {stock_code}", 'header')
-                    streamer.send_progress('singleProgress', 5, '开始AI个股分析...')
-                    context.analyzer.streaming = streamer
-                    context.analyzer.stock_ai_analysis_process(stock_code, market, start_date_str, end_date_str, trade_date=trade_date, analysis_depth=analysis_depth)
-                    logger.info(f'AI个股分析完成: {stock_code}')
-                    streamer.send_log(f"🚀 AI个股分析完成: {stock_code}", 'header')
-                    streamer.send_progress('singleProgress', 100, 'AI个股分析完成...')
-                    streamer.send_completion(f'AI个股分析完成: {stock_code}')
-                except Exception as exc:
-                    streamer.send_log(f"🚀 AI个股分析失败: {stock_code}", 'header')
-                    streamer.send_progress('singleProgress', 100, 'AI个股分析失败...')
-                    streamer.send_error(f'AI个股分析失败: {stock_code}, 错误: {exc}')
-                    streamer.send_completion(f'AI个股分析失败: {stock_code}, 错误: {exc}')
-                    logger.error(f'AI个股分析失败: {stock_code}, 错误: {exc}')
-                finally:
-                    with context.task_lock:
-                        context.analysis_tasks.pop(lock_name, None)
-
-            context.executor.submit(run_analysis)
-            return jsonify({'success': True, 'data': '', 'message': f'股票 {stock_code} AI分析已启动', 'task_mode': 'async', 'client_id': client_id})
-        except Exception as exc:
-            logger.error(f'AI个股分析失败: {exc}')
-            with context.task_lock:
-                context.analysis_tasks.pop(lock_name, None)
-            return jsonify({'success': False, 'error': str(exc)}), 500
+            payload = _parse_analyze_stock_ai_payload()
+        except ValueError as exc:
+            return jsonify({'success': False, 'error': str(exc)}), 400
+        return start_stock_ai_analysis(_context(), payload)
 
     @app.route('/stock', methods=['GET', 'POST'])
     def stock_analysis():

@@ -52,6 +52,12 @@ class StreamingAnalyzer:
     def send_error(self, error_message):
         self.sse_manager.send_to_client(self.client_id, 'analysis_error', {'error': error_message})
 
+    def send_role_result(self, data):
+        self.sse_manager.send_to_client(self.client_id, 'decision_role_result', self.clean_data_for_json(data))
+
+    def send_pause(self, data):
+        self.sse_manager.send_to_client(self.client_id, 'decision_pause', self.clean_data_for_json(data))
+
     def send_ai_stream(self, content):
         self.sse_manager.send_to_client(self.client_id, 'ai_stream', {'content': content})
 
@@ -80,6 +86,18 @@ class StreamingAnalyzer:
             return obj.isoformat()
         if isinstance(obj, pd.NaT.__class__):
             return None
+        if isinstance(obj, pd.DataFrame):
+            try:
+                return self.clean_data_for_json(obj.to_dict('records'))
+            except Exception:
+                return str(obj)
+        if isinstance(obj, pd.Series):
+            try:
+                return self.clean_data_for_json(obj.to_dict())
+            except Exception:
+                return str(obj)
+        if obj is None or isinstance(obj, (str, bool)):
+            return obj
         if pd.isna(obj):
             return None
         if hasattr(obj, 'to_dict'):
@@ -92,8 +110,6 @@ class StreamingAnalyzer:
                 return self.clean_data_for_json(obj.item())
             except Exception:
                 return str(obj)
-        if obj is None or isinstance(obj, (str, bool)):
-            return obj
         try:
             json.dumps(obj)
             return obj

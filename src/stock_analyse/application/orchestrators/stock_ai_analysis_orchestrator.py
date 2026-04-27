@@ -172,29 +172,39 @@ class StockAIAnalysisOrchestrator:
         trader_conf = float(state.trader_output.get('confidence', 0.5) or 0.5)
 
         composite = round((technical_score + sentiment_score + bull_conf * 100 + (1 - bear_conf) * 100 + trader_conf * 100) / 5, 2)
-        action = 'watch'
-        if composite >= 75:
-            action = 'buy'
-        elif composite >= 60:
-            action = 'hold'
-        elif composite < 40:
-            action = 'sell'
+        trader_summary = state.trader_output.get('summary', '')
+        structured_summary = trader_summary if isinstance(trader_summary, dict) else {}
+        summary_text = self._decision_summary_text(trader_summary)
+
+        action = str(structured_summary.get('action', '') or '').strip().lower()
+        if not action:
+            action = 'watch'
+            if composite >= 75:
+                action = 'buy'
+            elif composite >= 60:
+                action = 'hold'
+            elif composite < 40:
+                action = 'sell'
 
         risk_level = 'medium'
-        risk_summary = state.manager_outputs.get('risk_manager', {}).get('summary', '')
-        lowered = risk_summary.lower()
-        if '高' in risk_summary or 'high' in lowered:
+        risk_summary_text = self._decision_summary_text(state.manager_outputs.get('risk_manager', {}).get('summary', ''))
+        lowered = risk_summary_text.lower()
+        if '高' in risk_summary_text or 'high' in lowered:
             risk_level = 'high'
-        elif '低' in risk_summary or 'low' in lowered:
+        elif '低' in risk_summary_text or 'low' in lowered:
             risk_level = 'low'
 
         return {
             'action': action,
+            'stance': str(structured_summary.get('stance', '') or '').strip(),
             'confidence': round(trader_conf, 2),
             'risk_level': risk_level,
-            'summary': state.trader_output.get('summary', ''),
-            'position_suggestion': self._position_suggestion(action, risk_level),
-            'time_horizon': '3-10 trading days',
+            'summary': summary_text,
+            'logic': str(structured_summary.get('logic', '') or '').strip(),
+            'position_suggestion': structured_summary.get('position_suggestion') or self._position_suggestion(action, risk_level),
+            'time_horizon': str(structured_summary.get('time_horizon', '3-10 trading days') or '3-10 trading days').strip(),
+            'signals': state.trader_output.get('signals', []),
+            'risks': state.trader_output.get('risks', []),
             'evidence': state.trader_output.get('evidence', []),
             'scores': {
                 'technical': technical_score,
@@ -203,11 +213,42 @@ class StockAIAnalysisOrchestrator:
             },
         }
 
-    def _position_suggestion(self, action: str, risk_level: str) -> str:
+    def _decision_summary_text(self, summary: Any) -> str:
+        if isinstance(summary, str):
+            return summary
+        if isinstance(summary, dict):
+            for key in ('logic', 'summary', 'stance', 'action'):
+                value = str(summary.get(key, '') or '').strip()
+                if value:
+                    return value
+        return ''
+
+    def _position_suggestion(self, action: str, risk_level: str) -> dict[str, str]:
         if action == 'buy':
-            return '20%-30%' if risk_level == 'high' else '30%-50%'
+            return {
+                'target_position': '20%-30%' if risk_level == 'high' else '30%-50%',
+                'add_condition': '放量突破关键压力位后分批加仓',
+                'reduce_condition': '冲高放量不突破或跌回突破位下方时减仓',
+                'stop_loss_reference': '跌破最近关键支撑位时止损',
+            }
         if action == 'hold':
-            return '10%-30%'
+            return {
+                'target_position': '10%-30%',
+                'add_condition': '站稳右侧确认位后小幅加仓',
+                'reduce_condition': '跌破观察位或风险事件兑现时降仓',
+                'stop_loss_reference': '跌破区间下沿时止损',
+            }
         if action == 'sell':
-            return '0%-10%'
-        return '0%-20%'
+            return {
+                'target_position': '0%-10%',
+                'add_condition': '暂不主动加仓',
+                'reduce_condition': '反弹承压时继续降低仓位',
+                'stop_loss_reference': '若已持有，跌破弱势支撑位离场',
+            }
+        return {
+            'target_position': '0%-20%',
+            'add_condition': '等待明确信号再加仓',
+            'reduce_condition': '信号走弱时继续观望或减仓',
+            'stop_loss_reference': '跌破观察区下沿时止损',
+        }
+

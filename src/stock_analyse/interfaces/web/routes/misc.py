@@ -52,31 +52,18 @@ def register_misc_routes(app):
         return render_template('stock.html')
 
 
-    @app.route('/index', methods=['GET'])
-    @app.route('/watch-stocks', methods=['GET'])
-    def index():
-        return send_file(UI_DOC_ROOT / 'watch_stocks_page.html')
-
 
     @app.route('/holding-stocks', methods=['GET'])
     def holding_stocks():
         return send_file(UI_DOC_ROOT / 'holding_stocks_page.html')
 
 
-    @app.route('/entry-decision', methods=['GET'])
-    def entry_decision():
-        return send_file(UI_DOC_ROOT / 'entry_decision_page.html')
-
 
     @app.route('/stock-analysis-record', methods=['GET'])
     def stock_analysis_record():
-        return send_file(UI_DOC_ROOT / 'stock_analysis_page.html')
+        return render_template('stock_analysis_record.html')
 
-
-    @app.route('/trade-plan-analysis', methods=['GET'])
-    def trade_plan_analysis():
-        return send_file(UI_DOC_ROOT / 'trade_plan_analysis_page.html')
-
+    # /trade-plan-analysis 已迁移到 trading_decision.py，由真实页面和 API 共同承接。
 
     @app.route('/portfolio-review', methods=['GET'])
     def portfolio_review():
