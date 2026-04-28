@@ -294,7 +294,9 @@ class EntryDecisionOrchestrator:
         market_context = snapshot.get('market_context') or {}
         spot = market_context.get('spot') or {}
         reports = snapshot.get('reports') or {}
-        financial_indicators = snapshot.get('financial_indicators') or {}
+        financial_indicators = snapshot.get('financial_indicators')
+        if financial_indicators is None or (hasattr(financial_indicators, 'empty') and financial_indicators.empty):
+            financial_indicators = {}
         technical = snapshot.get('technical') or {}
         technical_summary = technical.get('summary') or {}
         sentiment = snapshot.get('sentiment') or {}

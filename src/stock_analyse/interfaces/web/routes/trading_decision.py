@@ -72,9 +72,8 @@ def _build_client_id(payload: dict) -> str:
     return provided or f'entry_decision_{uuid4().hex[:12]}'
 
 
-def _run_entry_decision_session_task(session_id: str, client_id: str) -> None:
-    context = _context()
-    service = _service()
+def _run_entry_decision_session_task(session_id: str, client_id: str, context, service) -> None:
+    logger.info(f'进场决策任务开始执行: session_id={session_id}, client_id={client_id}')
     streamer = StreamingAnalyzer(client_id, context.sse_manager)
     lock_name = f'entry_decision_{session_id}'
     session = service.get_entry_decision_session(session_id)
@@ -123,8 +122,6 @@ def _run_entry_decision_session_task(session_id: str, client_id: str) -> None:
     finally:
         with context.task_lock:
             context.analysis_tasks.pop(lock_name, None)
-
-
 def _start_entry_decision_session(session_id: str, client_id: str):
     context = _context()
     lock_name = f'entry_decision_{session_id}'
@@ -138,14 +135,29 @@ def _start_entry_decision_session(session_id: str, client_id: str):
         }
 
     try:
-        context.executor.submit(_run_entry_decision_session_task, session_id, client_id)
+        # 预先获取服务引用，避免在异步线程中访问 current_app
+        service = _service()
+        logger.info(f'启动进场决策任务: session_id={session_id}, client_id={client_id}')
+        future = context.executor.submit(_run_entry_decision_session_task, session_id, client_id, context, service)
+
+        # 添加回调函数处理任务结果
+        def callback(fut):
+            try:
+                result = fut.result()
+                logger.info(f'进场决策任务完成: session_id={session_id}')
+            except Exception as exc:
+                logger.error(f'进场决策任务异常: session_id={session_id}, error={exc}')
+                with context.task_lock:
+                    context.analysis_tasks.pop(lock_name, None)
+
+        future.add_done_callback(callback)
+
         return True, None, 200
     except Exception as exc:
         logger.exception('启动进场决策任务失败: %s', exc)
         with context.task_lock:
             context.analysis_tasks.pop(lock_name, None)
         return False, jsonify({'success': False, 'error': str(exc)}), 500
-
 
 def register_trading_decision_routes(app):
     @app.route('/index', methods=['GET'])

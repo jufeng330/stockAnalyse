@@ -91,8 +91,45 @@
             border: 1px solid #e5e7eb;
             padding: 10px 14px;
             border-radius: 10px;
-            font-size: 14px;
-            font-weight: 600;
+            font-size: 14px;@media (max-width: 1280px) {
+    .app-shell { grid-template-columns: 1fr; }
+    .sidebar { position: static; min-height: auto; }
+}
+@media (max-width: 1024px) {
+    .app-shell { grid-template-columns: 1fr; }
+    .sidebar { position: static; min-height: auto; }
+}
+@media (max-width: 1280px) {
+@media (max-width: 1024px) {
+
+            font-weight: 600;        body {
+            font-family: Arial, sans-serif;
+            padding: 0;
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .main-layout {
+            max-width: 1520px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 20px;
+            min-height: 100vh;
+        }
+        .main-layout main {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 16px;
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
+            padding: 24px;
+        }
+        @media (max-width: 1024px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
         }
         .panel h2 { margin: 0 0 16px; font-size: 20px; }
         .panel h3 { margin: 0 0 12px; font-size: 18px; }

@@ -162,8 +162,11 @@ class StockStrategy:
         """
         score = 0
         buy_signal_str = '买入的信号'
-        stock_code = df_history_data['股票代码']
-
+        stock_code_series = df_history_data['股票代码']
+        if hasattr(stock_code_series, 'iloc'):  # 检查是否是 pandas Series
+            stock_code = stock_code_series.iloc[0] if not df_history_data.empty else ""
+        else:
+            stock_code = stock_code_series
         from stock_analyse.domain.services.stock_wave_analyzer import StockWaveAnalyzer
         wave_service = StockWaveAnalyzer(market=self.market,symbol=stock_code)
 

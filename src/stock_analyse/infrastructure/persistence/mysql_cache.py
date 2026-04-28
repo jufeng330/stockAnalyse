@@ -15,7 +15,7 @@ class MySQLCache:
             self,
             db_user: str = 'aloo',
             db_password: str = 'aloo.1234-qwer',
-            db_host: str = '127.0.0.1',
+            db_host: str = '192.168.1.12',
             db_port: int = '3306',
             db_name: str = 'stock_info',
             cache_dir: str = './cache',

@@ -5,6 +5,8 @@ import traceback
 import akshare as ak
 from datetime import datetime, timedelta
 from stock_analyse.infrastructure.services.company_data_service import stockCompanyInfo
+from stock_analyse.infrastructure.persistence.file_cache import FileCacheUtils
+
 
 class StockSentimentAnalysis:
     """股票分析引擎，计算各类技术指标"""
@@ -14,12 +16,12 @@ class StockSentimentAnalysis:
         初始化股票分析引擎
 
         Args:
-            params: 技术指标配置参数
+          self.cache_service = FileCacheUtils  params: 技术指标配置参数
         """
         self._setup_logging()
         self.market = market
         self.symbol = symbol
-        self.news_cache = {}
+        self.cache_service = FileCacheUtils(market=market, cache_dir='sentiment')
         self.stock_service = stockCompanyInfo(marker=self.market,symbol=self.symbol)
 
 
@@ -50,13 +52,16 @@ class StockSentimentAnalysis:
     def get_comprehensive_news_data(self, stock_code, days=15):
         """获取综合新闻数据（修正版本）"""
         cache_key = f"{stock_code}_{days}"
-        if cache_key in self.news_cache:
-            cache_time, data = self.news_cache[cache_key]
-            if datetime.now() - cache_time < self.news_cache_duration:
-                self.logger.info(f"使用缓存的新闻数据: {stock_code}")
-                return data
+        cache = True
+        current_date = datetime.now().strftime('%Y%m%d')
+        report_type = f"news_{stock_code}_{days}"
 
-        self.logger.info(f"开始获取 {stock_code} 的综合新闻数据（最近{days}天）...")
+        all_news_data = self.cache_service.read_from_serialized(current_date, report_type)
+        if all_news_data is not None and cache:
+            return all_news_data
+
+# ... 获取数据的逻辑 ...
+
 
         try:
             # stock_name = self.get_stock_name(stock_code)
@@ -168,7 +173,9 @@ class StockSentimentAnalysis:
                 self.logger.warning(f"生成新闻摘要失败: {e}")
 
             # 缓存数据
-            self.news_cache[cache_key] = (datetime.now(), all_news_data)
+            if cache:
+                self.cache_service.write_to_cache_serialized(current_date, report_type, all_news_data)
+                self.logger.info(f"开始获取 {stock_code} 的综合新闻数据（最近{days}天）...")
 
             self.logger.info(
                 f"✓ 综合新闻数据获取完成，总计 {all_news_data['news_summary'].get('total_news_count', 0)} 条")

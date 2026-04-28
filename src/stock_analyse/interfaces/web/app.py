@@ -68,3 +68,20 @@ def create_app() -> Flask:
     register_analysis_routes(app)
     register_trading_decision_routes(app)
     return app
+
+# app.py
+
+from flask import Flask
+
+app = Flask(__name__)
+
+
+# ====== 新增：主入口 ======
+if __name__ == '__main__':
+    app = create_app()
+    app.run(
+        host='0.0.0.0',   # 允许外部访问（可选）
+        port=38080,        # 默认端口
+        debug=True,        # 开启调试模式（开发时方便，生产环境务必关闭！）
+        use_reloader=False
+    )
