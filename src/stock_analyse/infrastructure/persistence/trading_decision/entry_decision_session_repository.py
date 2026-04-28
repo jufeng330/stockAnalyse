@@ -151,7 +151,33 @@ class EntryDecisionSessionRepository:
         return f'EDS-{uuid4().hex[:12].upper()}'
 
     def _json_dumps(self, value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(self._make_json_safe(value), ensure_ascii=False)
+
+    def _make_json_safe(self, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): self._make_json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [self._make_json_safe(item) for item in value]
+        if hasattr(value, 'isoformat'):
+            try:
+                return value.isoformat()
+            except Exception:
+                pass
+        if hasattr(value, 'to_dict'):
+            try:
+                if hasattr(value, 'columns') and hasattr(value, 'head'):
+                    return value.to_dict('records')
+                return value.to_dict()
+            except Exception:
+                pass
+        if hasattr(value, 'tolist'):
+            try:
+                return value.tolist()
+            except Exception:
+                pass
+        return str(value)
 
     def _json_loads(self, value: Any, default: Any | None = None) -> Any:
         if value in (None, ''):

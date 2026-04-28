@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
+
 import pandas as pd
 from flask import jsonify
+from stock_analyse.application.dto.entry_decision_state import EntryDecisionState
 
 from stock_analyse.interfaces.web.app import create_app, web_app_context
 from stock_analyse.interfaces.web.routes import trading_decision as trading_decision_routes_module
@@ -287,6 +290,9 @@ class TestTradingDecisionRoutes:
         assert 'renderSectionCard' in content
         assert '查看完整结果 JSON' in content
         assert '结果区会展示结论、reasoning，以及原始 JSON。' in content
+        assert '.nav-links a:hover' in content
+        assert 'font-size: 14px;@media' not in content
+        assert 'font-weight: 600;        body {' not in content
         assert '生成AI决策建议' not in content
         assert 'saveDecision()' not in content
 
@@ -358,6 +364,137 @@ class TestTradingDecisionRoutes:
         assert 'showPausePanel' in content
         assert '继续执行' in content
 
+    def test_start_entry_decision_session_submits_background_task(self, tmp_path, monkeypatch):
+        _patch_stock_lookup_source(monkeypatch)
+        monkeypatch.setenv('STOCK_ANALYSE_TRADING_DECISION_DB_PATH', str(tmp_path / 'entry-decision-start.sqlite3'))
+        service = self.original_service.__class__()
+        web_app_context.trading_decision_service = service
+
+        create_response = self.client.post(
+            '/api/trading-decision/watch-stocks',
+            json={
+                'stock_code': '600519',
+                'stock_name': '贵州茅台',
+                'market': 'A股',
+                'asset_type': '成长龙头',
+            },
+        )
+        watch_stock = create_response.get_json()['data']
+        session = service.create_entry_decision_session(
+            watch_stock['id'],
+            {
+                'trade_date': '2026-04-26',
+                'analysis_depth': 'deep',
+                'position_input': {'current_position': '0%', 'max_target_position': '15%'},
+            },
+        )
+
+        captured = {}
+
+        class StubExecutor:
+            def submit(self, fn, *args):
+                captured['fn'] = fn
+                captured['args'] = args
+                future = Future()
+                future.set_result(None)
+                return future
+
+        with self.app.app_context():
+            context = trading_decision_routes_module._context()
+            original_executor = context.executor
+            context.executor = StubExecutor()
+            try:
+                ok, response, status_code = trading_decision_routes_module._start_entry_decision_session(session['id'], 'entry_client_1')
+            finally:
+                context.executor = original_executor
+
+        assert ok is True
+        assert response is None
+        assert status_code == 200
+        assert captured['fn'] is trading_decision_routes_module._run_entry_decision_session_task
+        assert captured['args'][0] == session['id']
+        assert captured['args'][1] == 'entry_client_1'
+        assert captured['args'][3] is service
+
+        with self.app.app_context():
+            context = trading_decision_routes_module._context()
+            task_key = f'entry_decision_{session["id"]}'
+            assert task_key in context.analysis_tasks
+            assert context.analysis_tasks[task_key]['client_id'] == 'entry_client_1'
+            with context.task_lock:
+                context.analysis_tasks.pop(task_key, None)
+        assert captured['args'][2] is not None
+
+    def test_start_entry_decision_session_rejects_duplicate_task(self, tmp_path, monkeypatch):
+        _patch_stock_lookup_source(monkeypatch)
+        monkeypatch.setenv('STOCK_ANALYSE_TRADING_DECISION_DB_PATH', str(tmp_path / 'entry-decision-start-duplicate.sqlite3'))
+        service = self.original_service.__class__()
+        web_app_context.trading_decision_service = service
+
+        create_response = self.client.post(
+            '/api/trading-decision/watch-stocks',
+            json={
+                'stock_code': '600519',
+                'stock_name': '贵州茅台',
+                'market': 'A股',
+                'asset_type': '成长龙头',
+            },
+        )
+        watch_stock = create_response.get_json()['data']
+        session = service.create_entry_decision_session(watch_stock['id'], {'trade_date': '2026-04-26'})
+
+        with self.app.app_context():
+            context = trading_decision_routes_module._context()
+            task_key = f'entry_decision_{session["id"]}'
+            with context.task_lock:
+                context.analysis_tasks[task_key] = {'status': 'analyzing'}
+            try:
+                ok, response, status_code = trading_decision_routes_module._start_entry_decision_session(session['id'], 'entry_client_1')
+            finally:
+                with context.task_lock:
+                    context.analysis_tasks.pop(task_key, None)
+
+        assert ok is False
+        assert status_code == 429
+        assert response.get_json()['error'] == '当前进场决策任务正在执行，请稍候'
+
+    def test_start_entry_decision_session_cleans_up_on_submit_failure(self, tmp_path, monkeypatch):
+        _patch_stock_lookup_source(monkeypatch)
+        monkeypatch.setenv('STOCK_ANALYSE_TRADING_DECISION_DB_PATH', str(tmp_path / 'entry-decision-start-failure.sqlite3'))
+        service = self.original_service.__class__()
+        web_app_context.trading_decision_service = service
+
+        create_response = self.client.post(
+            '/api/trading-decision/watch-stocks',
+            json={
+                'stock_code': '600519',
+                'stock_name': '贵州茅台',
+                'market': 'A股',
+                'asset_type': '成长龙头',
+            },
+        )
+        watch_stock = create_response.get_json()['data']
+        session = service.create_entry_decision_session(watch_stock['id'], {'trade_date': '2026-04-26'})
+
+        class FailingExecutor:
+            def submit(self, fn, *args):
+                raise RuntimeError('submit failed')
+
+        with self.app.app_context():
+            context = trading_decision_routes_module._context()
+            original_executor = context.executor
+            context.executor = FailingExecutor()
+            try:
+                ok, response, status_code = trading_decision_routes_module._start_entry_decision_session(session['id'], 'entry_client_1')
+                task_key = f'entry_decision_{session["id"]}'
+                assert task_key not in context.analysis_tasks
+            finally:
+                context.executor = original_executor
+
+        assert ok is False
+        assert status_code == 500
+        assert 'submit failed' in response.get_json()['error']
+
     def test_entry_decision_analyze_api_creates_session_and_starts_async_task(self, tmp_path, monkeypatch):
         _patch_stock_lookup_source(monkeypatch)
         monkeypatch.setenv('STOCK_ANALYSE_TRADING_DECISION_DB_PATH', str(tmp_path / 'entry-decision-analyze.sqlite3'))
@@ -413,6 +550,42 @@ class TestTradingDecisionRoutes:
         assert session['manual_inputs_json']['position_input']['current_position'] == '0%'
         assert session['manual_inputs_json']['position_input']['max_target_position'] == '15%'
         assert session['manual_inputs_json'].keys() == {'position_input'}
+
+    def test_entry_decision_session_update_handles_dataframe_in_auto_context(self, tmp_path, monkeypatch):
+        _patch_stock_lookup_source(monkeypatch)
+        monkeypatch.setenv('STOCK_ANALYSE_TRADING_DECISION_DB_PATH', str(tmp_path / 'entry-decision-dataframe-safe.sqlite3'))
+        service = self.original_service.__class__()
+        web_app_context.trading_decision_service = service
+
+        create_response = self.client.post(
+            '/api/trading-decision/watch-stocks',
+            json={
+                'stock_code': '600519',
+                'stock_name': '贵州茅台',
+                'market': 'A股',
+                'asset_type': '成长龙头',
+            },
+        )
+        watch_stock = create_response.get_json()['data']
+        session = service.create_entry_decision_session(watch_stock['id'], {'trade_date': '2026-04-26'})
+        state = EntryDecisionState(
+            session_id=session['id'],
+            watch_stock_id=watch_stock['id'],
+            request={'trade_date': '2026-04-26'},
+            watch_stock=watch_stock,
+            auto_context={'snapshot_df': pd.DataFrame([{'股票代码': '600519', '最新价': 1688.0}])},
+            manual_inputs={'position_input': {'current_position': '0%', 'max_target_position': '15%'}},
+            role_outputs={},
+            current_role='macro_analysis',
+            status='running',
+        )
+
+        updated = service.update_entry_decision_session_from_state(state)
+
+        assert updated is not None
+        assert isinstance(updated['auto_context_json']['snapshot_df'], list)
+        assert updated['auto_context_json']['snapshot_df'][0]['股票代码'] == '600519'
+        assert updated['auto_context_json']['snapshot_df'][0]['最新价'] == 1688.0
 
     def test_entry_decision_resume_api_merges_manual_inputs_and_restarts(self, tmp_path, monkeypatch):
         _patch_stock_lookup_source(monkeypatch)
