@@ -1,0 +1,52 @@
+{
+  "name": "stock-wave",
+  "version": "1.0.0",
+  "description": "股市周期分析 Skill，基于艾略特波浪理论提供趋势识别和行情可视化",
+  "author": "stock-analyse",
+  "license": "MIT",
+  "runtime": "uv",
+  "entry": "scripts/main.py",
+  "environment": {
+    "PYTHONPATH": "/mnt/github/stockAnalyse/",
+    "VIRTUAL_ENV": "/mnt/github/stockAnalyse/.venv"
+  },
+  "inputs": {
+    "action": {
+      "type": "string",
+      "required": true,
+      "enum": ["analyze", "trend", "visualize"],
+      "description": "操作类型"
+    },
+    "market": {
+      "type": "string",
+      "required": true,
+      "enum": ["SH", "SZ", "H", "usa", "zq"],
+      "description": "市场代码"
+    },
+    "symbol": {
+      "type": "string",
+      "required": true,
+      "description": "股票代码"
+    },
+    "days": {
+      "type": "integer",
+      "required": false,
+      "default": 120,
+      "description": "分析日期范围长度 (天数)"
+    }
+  },
+  "outputs": {
+    "success": {
+      "type": "boolean",
+      "description": "操作是否成功"
+    },
+    "data": {
+      "type": "object",
+      "description": "返回数据"
+    },
+    "message": {
+      "type": "string",
+      "description": "提示信息"
+    }
+  }
+}

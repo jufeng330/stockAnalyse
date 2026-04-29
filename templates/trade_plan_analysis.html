@@ -191,7 +191,8 @@
         .kv .value { font-size: 15px; font-weight: 700; color: #111827; word-break: break-word; }
         .result-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .result-list .result-block h3, .history-card h3 { margin: 0 0 8px; font-size: 16px; }
-        .markdown-summary {
+        .markdown-summary,
+        .markdown-body {
             background: #fff;
             border: 1px solid #e5e7eb;
             border-radius: 14px;
@@ -201,18 +202,24 @@
         }
         .markdown-summary h2,
         .markdown-summary h3,
-        .markdown-summary h4 {
+        .markdown-summary h4,
+        .markdown-body h2,
+        .markdown-body h3,
+        .markdown-body h4 {
             color: #111827;
             margin-top: 24px;
             margin-bottom: 12px;
         }
-        .markdown-summary h2:first-child { margin-top: 0; }
-        .markdown-summary hr {
+        .markdown-summary h2:first-child,
+        .markdown-body h2:first-child { margin-top: 0; }
+        .markdown-summary hr,
+        .markdown-body hr {
             border: none;
             border-top: 1px solid #e5e7eb;
             margin: 20px 0;
         }
-        .markdown-summary blockquote {
+        .markdown-summary blockquote,
+        .markdown-body blockquote {
             margin: 16px 0;
             padding: 12px 16px;
             background: #eef2ff;
@@ -221,9 +228,13 @@
             color: #4338ca;
         }
         .markdown-summary ul,
-        .markdown-summary ol { padding-left: 22px; }
-        .markdown-summary li { margin: 6px 0; }
-        .markdown-summary p { margin: 10px 0; }
+        .markdown-summary ol,
+        .markdown-body ul,
+        .markdown-body ol { padding-left: 22px; }
+        .markdown-summary li,
+        .markdown-body li { margin: 6px 0; }
+        .markdown-summary p,
+        .markdown-body p { margin: 10px 0; }
         .helper-text {
             margin-bottom: 12px;
             padding: 10px 12px;
@@ -369,8 +380,8 @@
                         </div>
                     </div>
                     <div class="btn-row">
-                        <button id="generateBtn" class="btn" type="button" onclick="generateTradePlan()">生成计划草案</button>
-                        <button id="saveBtn" class="btn-light" type="button" onclick="saveTradePlan()">保存计划分析记录</button>
+                        <button id="generateBtn" class="btn" type="button" onclick="generateTradePlan()">生成持仓计划分析</button>
+                        <button id="saveBtn" class="btn-light" type="button" onclick="saveTradePlan()">保存持仓计划分析记录</button>
                     </div>
                     <div class="muted" style="margin-top:8px;font-size:12px;">本页通过 `/api/trading-decision/watch-stocks/{{ watch_stock.id }}/trade-plan-analysis/run` 发起任务，并继续复用 `/api/sse` 接收日志与最终结果。</div>
                     <div class="muted" style="margin-top:6px;font-size:12px;">AI 角色：股票分析师</div>
@@ -399,13 +410,28 @@
                         {% if selected_markdown %}
                         <div class="result-stack">
                             <div class="source-chip-row">
+                                <div class="source-chip decision-action">动作：{{ selected_record.decision_action_label or selected_record.decision_action or '--' }}</div>
                                 <div class="source-chip">模板：{{ selected_meta.get('template_name') or '持仓计划模板（买前执行版）' }}</div>
                                 <div class="source-chip">来源：{{ selected_meta.get('data_source') or 'unknown' }}</div>
                             </div>
-                            <div class="markdown-summary">{{ selected_markdown | safe }}</div>
+                            <div class="result-list tradePlanHistory">
+                                <div class="result-block"><h3>风险等级</h3><div>{{ selected_record.risk_level or '--' }}</div></div>
+                                <div class="result-block"><h3>时间维度</h3><div>{{ selected_record.time_horizon or '--' }}</div></div>
+                                <div class="result-block"><h3>目标仓位</h3><div>{{ (selected_record.position_suggestion_json or {}).get('target_position') or selected_record.max_target_position or '--' }}</div></div>
+                                <div class="result-block"><h3>止损参考</h3><div>{{ selected_record.sell_rules or ((selected_record.position_suggestion_json or {}).get('stop_loss_reference')) or '--' }}</div></div>
+                                <div class="result-block"><h3>加仓条件</h3><div>{{ selected_record.add_position_rules or ((selected_record.position_suggestion_json or {}).get('add_condition')) or '--' }}</div></div>
+                                <div class="result-block"><h3>减仓条件</h3><div>{{ selected_record.reduce_position_rules or ((selected_record.position_suggestion_json or {}).get('reduce_condition')) or '--' }}</div></div>
+                            </div>
+                            <div class="muted" style="margin-top:8px;line-height:1.7;">风险说明：{{ selected_record.risk_notes or ((selected_record.risks_json or []) | join('、')) or '--' }}</div>
+                            <div class="muted" style="margin-top:6px;line-height:1.7;">结论摘要：{{ selected_record.conclusion_summary or '--' }}</div>
+                            <div class="muted" style="margin-top:6px;line-height:1.7;">decision_action：{{ selected_record.decision_action or '--' }}</div>
+                            <div class="muted" style="margin-top:6px;line-height:1.7;">trade_plan_markdown：{{ selected_record.trade_plan_markdown or '--' }}</div>
+                            <div class="muted" style="margin-top:6px;line-height:1.7;">position_suggestion：{{ selected_record.position_suggestion_json | tojson }}</div>
+                            <div class="muted" style="margin-top:6px;line-height:1.7;">conclusion_summary：{{ selected_record.conclusion_summary or '--' }}</div>
+                            <div class="markdown-summary markdown-body">{{ selected_markdown | safe }}</div>
                             <details>
                                 <summary>查看原始 JSON</summary>
-                                <pre id="rawResultJson">{{ selected_record.raw_result_json | tojson(indent=2) }}</pre>
+                                <pre id="rawResultJson" class="tradePlanRawJson">{{ selected_record.raw_result_json | tojson(indent=2) }}</pre>
                             </details>
                         </div>
                         {% else %}
@@ -463,14 +489,18 @@
     <script src="/static/ui/nav.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
     <script>
+        const PAGE_KEY = 'trade_plan_analysis';
         const WATCH_STOCK_ID = {{ watch_stock.id | tojson }};
         const API_BASE = '/api/trading-decision/watch-stocks';
         const RECORDS_API = '/api/trading-decision/trade-plan-analysis-records';
-        const tradePlanPrefill = {{ (selected_record.raw_result_json if selected_record and selected_record.raw_result_json else {}) | tojson }};
+        const tradePlanInitialResult = {{ (selected_record.raw_result_json if selected_record and selected_record.raw_result_json else {}) | tojson }};
+        const tradePlanPrefill = tradePlanInitialResult;
+        const tradePlanMarkdown = {{ ((selected_record.raw_result_json or {}).get('data', {}).get('trade_plan_markdown', '') if selected_record else '') | tojson }};
         const positionSuggestion = {{ (selected_record.position_suggestion_json if selected_record and selected_record.position_suggestion_json else {}) | tojson }};
+        const positionSuggestionJson = positionSuggestion;
         let sseConnection = null;
         let currentClientId = null;
-        let currentResult = tradePlanPrefill && Object.keys(tradePlanPrefill).length ? tradePlanPrefill : null;
+        let currentResult = tradePlanInitialResult && Object.keys(tradePlanInitialResult).length ? tradePlanInitialResult : null;
 
         function addLog(message, level = 'info') {
             const logBox = document.getElementById('logBox');
@@ -574,11 +604,12 @@
                 document.getElementById('resultsContent').innerHTML = `
                     <div class="result-stack">
                         <div class="source-chip-row">
+                            <div class="source-chip decision-action">动作：${escapeHtml(decision.action_label || decision.action || '--')}</div>
                             <div class="source-chip">模板：${escapeHtml(meta.template_name || '持仓计划模板（买前执行版）')}</div>
                             <div class="source-chip">来源：${escapeHtml(meta.data_source || '--')}</div>
                             <div class="source-chip">缓存：${escapeHtml((meta.cache_hits || []).join('、') || '未命中')}</div>
                         </div>
-                        <div class="markdown-summary">${renderedMarkdown}</div>
+                        <div class="markdown-summary markdown-body">${renderedMarkdown}</div>
                         <details>
                             <summary>查看原始 JSON</summary>
                             <pre id="rawResultJson">${escapeHtml(JSON.stringify(result, null, 2))}</pre>

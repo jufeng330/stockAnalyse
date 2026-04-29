@@ -1,0 +1,58 @@
+{
+  "name": "stock-news",
+  "version": "1.0.0",
+  "description": "股票消息与情绪分析 Skill，提供新闻抓取、舆情监控和投资者情绪量化指标",
+  "author": "stock-analyse",
+  "license": "MIT",
+  "runtime": "uv",
+  "entry": "scripts/main.py"
+  "environment": {
+    "PYTHONPATH": "/mnt/github/stockAnalyse/",
+    "VIRTUAL_ENV": "/mnt/github/stockAnalyse/.venv"
+  },
+  "inputs": {
+    "action": {
+      "type": "string",
+      "required": true,
+      "enum": ["news", "sentiment", "comprehensive"],
+      "description": "操作类型"
+    },
+    "market": {
+      "type": "string",
+      "required": true,
+      "enum": ["SH", "SZ", "H", "usa", "zq"],
+      "description": "市场代码"
+    },
+    "symbol": {
+      "type": "string",
+      "required": true,
+      "description": "股票代码"
+    },
+    "days": {
+      "type": "integer",
+      "required": false,
+      "default": 30,
+      "description": "查询天数"
+    },
+    "keywords": {
+      "type": "array",
+      "items": "string",
+      "required": false,
+      "description": "关键主题词列表"
+    }
+  },
+  "outputs": {
+    "success": {
+      "type": "boolean",
+      "description": "操作是否成功"
+    },
+    "data": {
+      "type": "object",
+      "description": "返回数据"
+    },
+    "message": {
+      "type": "string",
+      "description": "提示信息"
+    }
+  }
+}

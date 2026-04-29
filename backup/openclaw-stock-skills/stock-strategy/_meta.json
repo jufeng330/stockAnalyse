@@ -1,0 +1,7 @@
+{
+  "author": "StockLib Team",
+  "description": "提供股票综合策略评分、买入信号生成、波浪分析、趋势判断等交易策略功能",
+  "name": "stock-strategy",
+  "tags": ["股票", "交易策略", "评分系统", "波浪分析", "趋势分析"],
+  "version": "1.0.0"
+}

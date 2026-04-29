@@ -1,0 +1,7 @@
+{
+  "author": "StockLib Team",
+  "description": "提供概念板块查询、行业板块分析、成分股查询、板块关联分析等板块分析功能",
+  "name": "stock-sector",
+  "tags": ["股票", "板块分析", "概念板块", "行业板块", "成分股"],
+  "version": "1.0.0"
+}
