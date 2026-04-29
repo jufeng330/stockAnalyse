@@ -28,6 +28,7 @@ from stock_analyse.application.use_cases import query_select_history as query_se
 from stock_analyse.application.use_cases import run_stock_selection as run_stock_selection_use_case
 from stock_analyse.infrastructure.config.settings import get_settings, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SYSTEM_PROMPT
 from stock_analyse.interfaces.web.streaming.streaming_analyzer import StreamingAnalyzer
+from stock_analyse.interfaces.web.services.trading_decision_service import TradingDecisionService
 from stock_analyse.infrastructure.services.market_data_service import stockBorderInfo
 from stock_analyse.infrastructure.services.company_data_service import stockCompanyInfo
 from stock_analyse.application.services.quantitative_analysis_service import stockIndicatorQuantitative
@@ -317,7 +318,19 @@ class StockAnalyzerService:
         self.streaming.send_error(json_result.get('error'))
         return json_result
 
-    def stock_ai_analysis_process(self, stock_code, market, start_date_str, end_date_str, trade_date=None, analysis_depth='standard'):
+    def stock_ai_analysis_process(
+        self,
+        stock_code,
+        market,
+        start_date_str,
+        end_date_str,
+        trade_date=None,
+        analysis_depth='standard',
+        watch_stock_id=None,
+        stock_name=None,
+        holding_stock_id=None,
+        analysis_scene=None,
+    ):
         normalized_identity = self._normalize_analysis_identity_or_fail(stock_code, market)
         if normalized_identity is None:
             return {'success': False, 'error': 'stock_code 或 market 参数无效'}
@@ -352,6 +365,37 @@ class StockAnalyzerService:
 
         if json_result.get('success'):
             scores = json_result.get('data', {}).get('scores', {})
+            trading_decision_service = TradingDecisionService()
+            watch_stock_context = None
+            if watch_stock_id:
+                watch_stock_context = {
+                    'id': str(watch_stock_id).strip(),
+                    'stock_code': stock_code,
+                    'stock_name': str(stock_name or (json_result.get('data', {}) or {}).get('stock_name') or '').strip(),
+                    'market': (json_result.get('data', {}) or {}).get('market') or market,
+                }
+            cache_scene = 'holding_reanalysis' if str(analysis_scene or '').strip() == 'holding_reanalysis' else 'stock_analysis'
+            trading_decision_service.save_result_markdown_cache(cache_scene, json_result, watch_stock_context)
+            try:
+                if str(analysis_scene or '').strip() == 'holding_reanalysis' or str(holding_stock_id or '').strip():
+                    trading_decision_service.save_stock_analysis_record(
+                        {
+                            'holding_stock_id': str(holding_stock_id or '').strip(),
+                            'analysis_scene': 'holding_reanalysis',
+                            'trade_date': trade_date or '',
+                            'raw_result': json_result,
+                        }
+                    )
+                elif watch_stock_id:
+                    trading_decision_service.save_stock_analysis_record(
+                        {
+                            'watch_stock_id': str(watch_stock_id).strip(),
+                            'trade_date': trade_date or '',
+                            'raw_result': json_result,
+                        }
+                    )
+            except Exception as exc:
+                self.logger.error(f"保存股票分析历史记录失败: {exc}")
             if self.streaming is not None:
                 self.streaming.send_scores({
                     'technical': scores.get('technical', 0),

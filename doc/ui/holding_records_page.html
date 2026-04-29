@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>持仓历史记录 - 交易决策中心</title>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #1f2937; min-height: 100vh; }
+    .app-shell { max-width: 1520px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+    .sidebar, .header, .panel, .record-card, .score-card { background: rgba(255, 255, 255, 0.96); border-radius: 16px; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12); backdrop-filter: blur(8px); }
+    .sidebar { padding: 20px 16px; position: sticky; top: 20px; align-self: start; min-height: calc(100vh - 48px); }
+    .header, .panel { padding: 20px; }
+    .header { margin-bottom: 20px; }
+    .panel { margin-bottom: 20px; }
+    .header h2 { margin: 0 0 8px; font-size: 30px; color: #111827; }
+    .header p, .panel-desc, .muted { margin: 0; color: #6b7280; line-height: 1.6; }
+    .score-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .score-card { padding: 16px; color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+    .score-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; opacity: .92; }
+    .score-value { font-size: 28px; font-weight: 800; }
+    .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+    .panel-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+    .panel h3 { margin: 0; font-size: 20px; color: #111827; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .btn, .btn-light, .row-link { border: none; border-radius: 12px; padding: 12px 14px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+    .btn { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+    .btn-light { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+    .row-link.primary { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+    .row-link.secondary { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+    .tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .tab { padding: 10px 14px; border-radius: 10px; background: #f3f4f6; color: #475569; font-size: 13px; font-weight: 700; }
+    .tab.active { background: #eef2ff; color: #4338ca; }
+    .hidden { display: none !important; }
+    .record-filters { display: grid; grid-template-columns: 1.4fr repeat(3, minmax(0, 1fr)) auto; gap: 12px; align-items: end; margin-bottom: 16px; }
+    .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 13px; }
+    .form-control { width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; background: #fff; }
+    .record-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .record-card { padding: 18px; }
+    .record-card h4 { margin: 0 0 8px; font-size: 16px; }
+    .record-meta { color: #6b7280; font-size: 13px; line-height: 1.7; }
+    .record-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+    .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 16px; color: #6b7280; font-size: 13px; }
+    .pagination-actions { display: flex; gap: 10px; }
+    @media (max-width: 1360px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; min-height: auto; }
+      .score-grid, .record-detail-grid { grid-template-columns: 1fr 1fr; }
+      .record-filters { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 720px) {
+      .score-grid, .record-detail-grid, .record-filters { grid-template-columns: 1fr; }
+      .panel-header, .pagination { flex-direction: column; align-items: stretch; }
+      .pagination-actions { justify-content: stretch; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" data-page="holding-records"></aside>
+    <main>
+      <div class="header">
+        <h2>持仓历史记录</h2>
+        <p>统一查看持仓域的二次分析、买卖决策与复盘历史记录。展示方式参考关注股票页的历史记录中心，但范围聚焦已持仓标的。</p>
+      </div>
+
+      <div class="score-grid">
+        <div class="score-card"><h3>历史记录总数</h3><div class="score-value">32</div><div class="score-meta">覆盖 12 只持仓标的</div></div>
+        <div class="score-card"><h3>二次分析记录</h3><div class="score-value">11</div><div class="score-meta">近 30 天新增 4 条</div></div>
+        <div class="score-card"><h3>买卖决策记录</h3><div class="score-value">13</div><div class="score-meta">含补仓 / 减仓 / 卖出</div></div>
+        <div class="score-card"><h3>复盘记录</h3><div class="score-value">8</div><div class="score-meta">含周 / 月 / 季度视角</div></div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>同级历史记录列表</h3>
+            <p class="panel-desc">二次分析、买卖决策与复盘记录都会在这里汇总展示最近历史。</p>
+          </div>
+          <div class="toolbar">
+            <a class="btn-light" href="/holding-stocks#holding-table">返回持仓列表</a>
+          </div>
+        </div>
+
+        <div class="tabs">
+          <div class="tab" data-tab="reanalysis">二次分析记录</div>
+          <div class="tab" data-tab="decision">买卖决策记录</div>
+          <div class="tab" data-tab="review">复盘记录</div>
+        </div>
+
+        <div class="record-filters">
+          <div class="form-group"><label>股票代码 / 名称</label><input class="form-control" value="300750 / 宁德时代"></div>
+          <div class="form-group"><label>记录类型</label><select id="recordTypeSelect" class="form-control"><option value="all">全部类型</option><option value="reanalysis">二次分析记录</option><option value="decision">买卖决策记录</option><option value="review">复盘记录</option></select></div>
+          <div class="form-group"><label>结论标签 / 风险等级</label><select class="form-control"><option>全部标签</option></select></div>
+          <div class="form-group"><label>创建时间</label><select class="form-control"><option>近 30 天</option></select></div>
+          <a id="applyFilterLink" class="btn" href="/holding-records?record_type=all">应用筛选</a>
+        </div>
+
+        <div class="record-grid">
+          <div class="record-card">
+            <h4>宁德时代 300750 <span class="muted">(SZ)</span></h4>
+            <div class="record-detail-grid">
+              <div class="record-card" data-record-type="reanalysis">
+                <h4>二次分析记录</h4>
+                <div style="margin-bottom: 10px;">
+                  <div><strong>2026-04-25</strong> · 逻辑轻微变化</div>
+                  <div class="record-meta">维持原计划，重点跟踪第二笔补仓条件是否成立。</div>
+                  <a class="row-link primary" href="/holding-reanalysis">查看页面</a>
+                </div>
+              </div>
+              <div class="record-card" data-record-type="decision">
+                <h4>买卖决策记录</h4>
+                <div style="margin-bottom: 10px;">
+                  <div><strong>2026-04-25</strong> · 补仓决策</div>
+                  <div class="record-meta">当前位置接近补仓区，但仍需等待信号确认，不宜抢跑。</div>
+                  <a class="row-link primary" href="/position-decision">查看页面</a>
+                </div>
+              </div>
+              <div class="record-card" data-record-type="review">
+                <h4>复盘记录</h4>
+                <div style="margin-bottom: 10px;">
+                  <div><strong>2026-04-25</strong> · 周复盘</div>
+                  <div class="record-meta">逻辑仍成立，继续持有并跟踪第二笔条件。</div>
+                  <a class="row-link primary" href="/holding-review">查看页面</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="record-card">
+            <h4>中际旭创 300308 <span class="muted">(SZ)</span></h4>
+            <div class="record-detail-grid">
+              <div class="record-card" data-record-type="reanalysis">
+                <h4>二次分析记录</h4>
+                <div style="margin-bottom: 10px;">
+                  <div><strong>2026-04-25</strong> · 风险抬升</div>
+                  <div class="record-meta">进入高估区后需重点关注兑现节奏与情绪回撤。</div>
+                  <a class="row-link primary" href="/holding-reanalysis">查看页面</a>
+                </div>
+              </div>
+              <div class="record-card" data-record-type="decision">
+                <h4>买卖决策记录</h4>
+                <div style="margin-bottom: 10px;">
+                  <div><strong>2026-04-25</strong> · 减仓决策</div>
+                  <div class="record-meta">建议先减 20%，优先释放短期高估风险。</div>
+                  <a class="row-link primary" href="/position-decision">查看页面</a>
+                </div>
+              </div>
+              <div class="record-card" data-record-type="review">
+                <h4>复盘记录</h4>
+                <div style="margin-bottom: 10px;">
+                  <div><strong>2026-04-24</strong> · 月复盘</div>
+                  <div class="record-meta">盈利主要来自景气抬升，但仓位纪律仍需优化。</div>
+                  <a class="row-link primary" href="/holding-review">查看页面</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pagination">
+          <div>第 1 页 · 每页 2 组 · 共 6 组</div>
+          <div class="pagination-actions">
+            <a class="btn-light" href="/holding-records">上一页</a>
+            <a class="btn-light" href="/holding-records">下一页</a>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/ui/nav.js"></script>
+  <script>
+    (() => {
+      const params = new URLSearchParams(window.location.search);
+      const recordType = params.get('record_type') || 'all';
+      const select = document.getElementById('recordTypeSelect');
+      const applyLink = document.getElementById('applyFilterLink');
+      const tabs = document.querySelectorAll('[data-tab]');
+      const cards = document.querySelectorAll('[data-record-type]');
+
+      function applyRecordType(type) {
+        const normalized = type || 'all';
+        if (select) select.value = normalized;
+        if (applyLink) applyLink.href = `/holding-records?record_type=${normalized}`;
+
+        tabs.forEach((tab) => {
+          tab.classList.toggle('active', normalized !== 'all' && tab.dataset.tab === normalized);
+        });
+
+        cards.forEach((card) => {
+          const visible = normalized === 'all' || card.dataset.recordType === normalized;
+          card.classList.toggle('hidden', !visible);
+        });
+      }
+
+      if (select) {
+        select.addEventListener('change', (event) => {
+          applyRecordType(event.target.value);
+        });
+      }
+
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          applyRecordType(tab.dataset.tab);
+        });
+      });
+
+      applyRecordType(recordType);
+    })();
+  </script>
+</body>
+</html>

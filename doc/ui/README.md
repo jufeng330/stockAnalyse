@@ -30,15 +30,16 @@
 
 ### 持仓股票动作页
 
-- `holding_review_page.html`：持仓复盘页
-- `holding_status_refresh_page.html`：持仓状态刷新页
+- `holding_review_page.html`：统一复盘页
+- `holding_records_page.html`：独立持仓历史记录页
+- `holding_status_refresh_page.html`：持仓状态刷新兼容页
 - `holding_reanalysis_page.html`：二次分析 / 再评估页
-- `add_position_decision_page.html`：补仓决策页
-- `reduce_position_decision_page.html`：减仓决策页
-- `sell_decision_page.html`：卖出决策页
-- `weekly_holding_review_page.html`：周复盘页
-- `monthly_holding_review_page.html`：月复盘页
-- `quarterly_holding_review_page.html`：季度复盘页
+- `add_position_decision_page.html`：统一买卖决策页
+- `reduce_position_decision_page.html`：减仓决策兼容页
+- `sell_decision_page.html`：卖出决策兼容页
+- `weekly_holding_review_page.html`：周复盘兼容页
+- `monthly_holding_review_page.html`：月复盘兼容页
+- `quarterly_holding_review_page.html`：季度复盘兼容页
 
 ## 设计目标
 
@@ -107,16 +108,20 @@
 
 重点体现：
 
-- 筛选条件位于“当前持仓标的”上方，采用横向筛选条
-- 每只持仓股票有多种动作按钮，并已映射到独立页面
+- 列表页先展示“当前摘要”，下半区再展示“Tab + 列表”的历史记录区
+- 持仓与成本区按“累计持仓数量 + 持仓均价 + 多次买入批次 + 买卖明细”设计
+- 持仓栏目导航只保留 5 个子页面
+  - 持仓列表
+  - 二次分析
+  - 买卖决策
   - 复盘
-  - 持仓状态刷新
-  - 二次分析 / 再评估
-  - 补仓决策
-  - 减仓决策
-  - 卖出决策
-  - 周复盘 / 月复盘 / 季度复盘
-- 页面同时提供动作历史记录区
+  - 历史记录
+- 其中：
+  - 买卖决策页内再区分 补仓 / 减仓 / 卖出
+  - 复盘页内再选择 通用 / 周 / 月 / 季度
+- 历史记录页统一承接：二次分析记录、买卖决策记录、复盘记录
+- 历史记录已从持仓列表页内锚点调整为独立页面，便于按标的和记录类型集中检索
+- 当前原型仍由 `misc.py` 返回 `doc/ui/*.html`，后续真实化实现应迁移到真实模板与 API
 
 ### 3. 整体分析和复盘页
 
@@ -159,15 +164,21 @@
 
 ### 持仓股票动作路由
 
-- `/holding-review` -> `holding_review_page.html`
-- `/holding-status-refresh` -> `holding_status_refresh_page.html`
+- `/holding-stocks` -> `holding_stocks_page.html`
 - `/holding-reanalysis` -> `holding_reanalysis_page.html`
-- `/add-position-decision` -> `add_position_decision_page.html`
-- `/reduce-position-decision` -> `reduce_position_decision_page.html`
-- `/sell-decision` -> `sell_decision_page.html`
-- `/weekly-holding-review` -> `weekly_holding_review_page.html`
-- `/monthly-holding-review` -> `monthly_holding_review_page.html`
-- `/quarterly-holding-review` -> `quarterly_holding_review_page.html`
+- `/position-decision` -> `add_position_decision_page.html`（统一买卖决策页）
+- `/holding-review` -> `holding_review_page.html`（统一复盘页，页面内选择周 / 月 / 季度）
+- `/holding-records` -> `holding_records_page.html`（独立持仓历史记录页）
+
+兼容保留路由：
+
+- `/add-position-decision`
+- `/reduce-position-decision`
+- `/sell-decision`
+- `/holding-status-refresh`
+- `/weekly-holding-review`
+- `/monthly-holding-review`
+- `/quarterly-holding-review`
 
 ## 使用方式
 

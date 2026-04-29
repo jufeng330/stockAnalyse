@@ -191,6 +191,70 @@
         .kv .value { font-size: 15px; font-weight: 700; color: #111827; word-break: break-word; }
         .result-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .result-list .result-block h3, .history-card h3 { margin: 0 0 8px; font-size: 16px; }
+        .markdown-summary {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 24px;
+            line-height: 1.85;
+            color: #1f2937;
+        }
+        .markdown-summary h2,
+        .markdown-summary h3,
+        .markdown-summary h4 {
+            color: #111827;
+            margin-top: 24px;
+            margin-bottom: 12px;
+        }
+        .markdown-summary h2:first-child { margin-top: 0; }
+        .markdown-summary hr {
+            border: none;
+            border-top: 1px solid #e5e7eb;
+            margin: 20px 0;
+        }
+        .markdown-summary blockquote {
+            margin: 16px 0;
+            padding: 12px 16px;
+            background: #eef2ff;
+            border-left: 4px solid #6366f1;
+            border-radius: 10px;
+            color: #4338ca;
+        }
+        .markdown-summary ul,
+        .markdown-summary ol { padding-left: 22px; }
+        .markdown-summary li { margin: 6px 0; }
+        .markdown-summary p { margin: 10px 0; }
+        .helper-text {
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: #fffbeb;
+            color: #92400e;
+            border: 1px solid #fde68a;
+            border-radius: 10px;
+            font-size: 13px;
+        }
+        .result-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .source-chip-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .source-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #4338ca;
+            font-size: 12px;
+            font-weight: 700;
+        }
         .history-link {
             display: inline-flex;
             margin-top: 10px;
@@ -309,6 +373,7 @@
                         <button id="saveBtn" class="btn-light" type="button" onclick="saveTradePlan()">保存计划分析记录</button>
                     </div>
                     <div class="muted" style="margin-top:8px;font-size:12px;">本页通过 `/api/trading-decision/watch-stocks/{{ watch_stock.id }}/trade-plan-analysis/run` 发起任务，并继续复用 `/api/sse` 接收日志与最终结果。</div>
+                    <div class="muted" style="margin-top:6px;font-size:12px;">AI 角色：股票分析师</div>
                     <div class="status-row">
                         <div class="status-pill"><span id="sseDot" class="dot"></span><span id="sseStatus">SSE 未连接</span></div>
                         <div class="status-pill" id="systemStatus">系统就绪</div>
@@ -328,6 +393,23 @@
                     <h2>计划草案结果</h2>
                     <div id="resultsContent">
                         {% if selected_record %}
+                        {% set selected_data = (selected_record.raw_result_json or {}).get('data', {}) %}
+                        {% set selected_meta = selected_data.get('meta', {}) %}
+                        {% set selected_markdown = selected_data.get('trade_plan_markdown', '') %}
+                        {% if selected_markdown %}
+                        <div class="result-stack">
+                            <div class="source-chip-row">
+                                <div class="source-chip">模板：{{ selected_meta.get('template_name') or '持仓计划模板（买前执行版）' }}</div>
+                                <div class="source-chip">来源：{{ selected_meta.get('data_source') or 'unknown' }}</div>
+                            </div>
+                            <div class="markdown-summary">{{ selected_markdown | safe }}</div>
+                            <details>
+                                <summary>查看原始 JSON</summary>
+                                <pre id="rawResultJson">{{ selected_record.raw_result_json | tojson(indent=2) }}</pre>
+                            </details>
+                        </div>
+                        {% else %}
+                        <div class="helper-text">当前记录尚未生成模板化持仓计划，已回退到结构化视图。</div>
                         <div class="result-list">
                             <div class="result-block"><h3>最大目标仓位</h3><div>{{ selected_record.max_target_position or '--' }}</div></div>
                             <div class="result-block"><h3>单票仓位上限</h3><div>{{ selected_record.position_limit or '--' }}</div></div>
@@ -341,6 +423,7 @@
                             <summary>查看原始 JSON</summary>
                             <pre id="rawResultJson">{{ selected_record.raw_result_json | tojson(indent=2) }}</pre>
                         </details>
+                        {% endif %}
                         {% else %}
                         <div class="empty-state">
                             <div style="font-size:48px;">📋</div>
@@ -349,37 +432,45 @@
                         </div>
                         {% endif %}
                     </div>
+                    </div>
                 </div>
 
                 <div class="panel">
                     <h2>持仓计划分析历史记录</h2>
-                    <div id="historyList" class="history-grid">
-                        {% if history_items %}
-                            {% for item in history_items %}
-                            <div class="history-card">
-                                <h3>{{ item.id }}</h3>
-                                <div class="muted">{{ item.trade_date or item.created_at }} · {{ item.risk_level or 'medium' }} · {{ item.suggested_action or '继续观察' }}</div>
+                    {% if history_items %}
+                    <div id="historyList" style="display:flex;flex-direction:column;gap:10px;">
+                        {% for item in history_items %}
+                        <a href="/trade-plan-analysis?watch_stock_id={{ watch_stock.id }}&record_id={{ item.id }}" style="text-decoration:none;color:inherit;">
+                            <div class="history-card" style="border:{% if selected_record and selected_record.id == item.id %}2px solid #4f46e5{% else %}1px solid #e5e7eb{% endif %};">
+                                <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                                    <div style="font-weight:700;color:#111827;">{{ item.trade_date or item.created_at }} · {{ item.suggested_action or '继续观察' }}</div>
+                                    <div class="muted">{{ item.id }}</div>
+                                </div>
+                                <div class="muted" style="margin-top:6px;">{{ item.plan_type or '三笔计划' }} · {{ item.risk_preference or '中高风险' }} · 风险 {{ item.risk_level or 'medium' }}</div>
                                 <div style="margin-top:8px;line-height:1.7;">{{ item.conclusion_summary or '暂无摘要' }}</div>
-                                <a class="history-link" href="/trade-plan-analysis?watch_stock_id={{ watch_stock.id }}&record_id={{ item.id }}">查看详情</a>
                             </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="history-card"><h3>暂无历史记录</h3><div class="muted">保存第一条持仓计划分析记录后，这里会展示可回看的历史列表。</div></div>
-                        {% endif %}
+                        </a>
+                        {% endfor %}
                     </div>
+                    {% else %}
+                    <div class="history-card"><h3>暂无历史记录</h3><div class="muted">保存第一条持仓计划分析记录后，这里会展示可回看的历史列表。</div></div>
+                    {% endif %}
                 </div>
             </div>
         </main>
     </div>
 
     <script src="/static/ui/nav.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
     <script>
         const WATCH_STOCK_ID = {{ watch_stock.id | tojson }};
         const API_BASE = '/api/trading-decision/watch-stocks';
         const RECORDS_API = '/api/trading-decision/trade-plan-analysis-records';
+        const tradePlanPrefill = {{ (selected_record.raw_result_json if selected_record and selected_record.raw_result_json else {}) | tojson }};
+        const positionSuggestion = {{ (selected_record.position_suggestion_json if selected_record and selected_record.position_suggestion_json else {}) | tojson }};
         let sseConnection = null;
         let currentClientId = null;
-        let currentResult = null;
+        let currentResult = tradePlanPrefill && Object.keys(tradePlanPrefill).length ? tradePlanPrefill : null;
 
         function addLog(message, level = 'info') {
             const logBox = document.getElementById('logBox');
@@ -474,10 +565,33 @@
             const decision = data.decision || {};
             const position = decision.position_suggestion || {};
             const risks = Array.isArray(decision.risks) ? decision.risks : [];
+            const meta = data.meta || {};
+            const markdown = typeof data.trade_plan_markdown === 'string' ? data.trade_plan_markdown.trim() : '';
+            if (markdown) {
+                const renderedMarkdown = typeof marked !== 'undefined'
+                    ? marked.parse(markdown)
+                    : `<pre>${escapeHtml(markdown)}</pre>`;
+                document.getElementById('resultsContent').innerHTML = `
+                    <div class="result-stack">
+                        <div class="source-chip-row">
+                            <div class="source-chip">模板：${escapeHtml(meta.template_name || '持仓计划模板（买前执行版）')}</div>
+                            <div class="source-chip">来源：${escapeHtml(meta.data_source || '--')}</div>
+                            <div class="source-chip">缓存：${escapeHtml((meta.cache_hits || []).join('、') || '未命中')}</div>
+                        </div>
+                        <div class="markdown-summary">${renderedMarkdown}</div>
+                        <details>
+                            <summary>查看原始 JSON</summary>
+                            <pre id="rawResultJson">${escapeHtml(JSON.stringify(result, null, 2))}</pre>
+                        </details>
+                    </div>
+                `;
+                return;
+            }
             document.getElementById('resultsContent').innerHTML = `
+                <div class="helper-text">当前结果尚未生成模板化持仓计划，已回退到结构化视图。</div>
                 <div class="result-list">
                     <div class="result-block"><h3>最大目标仓位</h3><div>${escapeHtml(position.target_position || '--')}</div></div>
-                    <div class="result-block"><h3>单票仓位上限</h3><div>${escapeHtml(position.target_position || '--')}</div></div>
+                    <div class="result-block"><h3>单票仓位上限</h3><div>${escapeHtml(position.position_limit || position.target_position || '--')}</div></div>
                     <div class="result-block"><h3>补仓与加仓条件</h3><div>${escapeHtml(position.add_condition || '--')}</div></div>
                     <div class="result-block"><h3>减仓条件</h3><div>${escapeHtml(position.reduce_condition || '--')}</div></div>
                     <div class="result-block"><h3>卖出 / 止损规则</h3><div>${escapeHtml(position.stop_loss_reference || '--')}</div></div>
@@ -490,6 +604,13 @@
                 </details>
             `;
         }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const markdownBlock = document.querySelector('#resultsContent .markdown-summary');
+            if (markdownBlock && typeof marked !== 'undefined') {
+                markdownBlock.innerHTML = marked.parse(markdownBlock.textContent || '');
+            }
+        });
 
         async function saveTradePlan() {
             if (!currentResult) {

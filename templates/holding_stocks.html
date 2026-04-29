@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>持仓股票列表 - 交易决策中心</title>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #1f2937;
+      min-height: 100vh;
+    }
+    .app-shell {
+      max-width: 1560px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+    }
+    .sidebar, .header, .panel, .score-card, .table-wrap, .drawer-card {
+      background: rgba(255, 255, 255, 0.96);
+      border-radius: 16px;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(8px);
+    }
+    .sidebar {
+      padding: 20px 16px;
+      position: sticky;
+      top: 20px;
+      align-self: start;
+      min-height: calc(100vh - 48px);
+    }
+    .header, .panel, .drawer-card { padding: 20px; }
+    .header { margin-bottom: 20px; }
+    .panel { margin-bottom: 20px; }
+    .header h2 { margin: 0 0 8px; font-size: 30px; color: #111827; }
+    .header p, .panel-desc, .muted { margin: 0; color: #6b7280; line-height: 1.6; }
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .score-card {
+      padding: 16px;
+      color: #fff;
+      background: linear-gradient(135deg, #0f766e 0%, #0f766e 20%, #0ea5e9 100%);
+    }
+    .score-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; opacity: .92; }
+    .score-value { font-size: 28px; font-weight: 800; }
+    .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+    .panel h3 { margin: 0; font-size: 20px; color: #111827; }
+    .filter-grid, .form-grid {
+      display: grid;
+      grid-template-columns: 1.5fr repeat(4, minmax(0, 1fr)) auto auto;
+      gap: 12px;
+      align-items: end;
+    }
+    .form-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 16px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #374151;
+      font-size: 13px;
+    }
+    .form-control, textarea.form-control {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 14px;
+      background: #fff;
+      font-family: inherit;
+    }
+    textarea.form-control { min-height: 92px; resize: vertical; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn, .btn-light, .row-link {
+      border: none;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+    .btn-light { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+    .btn:disabled, .btn-light:disabled { opacity: .65; cursor: not-allowed; }
+    .status-message {
+      margin-top: 12px;
+      font-size: 13px;
+      color: #4338ca;
+      min-height: 20px;
+    }
+    .status-message.error { color: #dc2626; }
+    .table-wrap { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 1320px; }
+    th, td { padding: 16px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; text-align: left; }
+    th { background: #f8fafc; color: #475569; font-size: 13px; font-weight: 700; }
+    td { font-size: 14px; color: #111827; }
+    tbody tr:hover { background: #fafbff; }
+    .stock-name { font-weight: 800; margin-bottom: 4px; }
+    .sub-text { font-size: 12px; color: #6b7280; line-height: 1.55; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      margin: 0 6px 6px 0;
+    }
+    .tag-risk { background: #fef2f2; color: #b91c1c; }
+    .tag-action { background: #ecfdf5; color: #047857; }
+    .action-group { display: flex; flex-wrap: wrap; gap: 8px; }
+    .row-link.primary { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+    .row-link.secondary { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+    .row-link.ghost { color: #7c3aed; background: #f5f3ff; border: 1px solid #ddd6fe; }
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .pagination-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pagination-actions .disabled { pointer-events: none; opacity: 0.5; }
+    .empty-state {
+      display: grid;
+      place-items: center;
+      min-height: 180px;
+      text-align: center;
+      border: 1px dashed #d1d5db;
+      border-radius: 12px;
+      background: #fff;
+      padding: 24px;
+    }
+    .drawer {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 1000;
+    }
+    .drawer.open { display: flex; }
+    .drawer-card { width: min(980px, 100%); max-height: calc(100vh - 48px); overflow: auto; }
+    .drawer-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .drawer-header h3 { margin: 0; }
+    .drawer-subtitle { margin-top: 6px; color: #6b7280; font-size: 13px; line-height: 1.6; }
+    .close-btn { background: transparent; border: none; font-size: 28px; line-height: 1; cursor: pointer; color: #6b7280; }
+    .search-group { position: relative; grid-column: span 4; }
+    .search-results {
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      z-index: 30;
+      background: #fff;
+      border: 1px solid #d1d5db;
+      border-radius: 12px;
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
+      max-height: 260px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .search-results.open { display: block; }
+    .search-result-item {
+      width: 100%;
+      border: none;
+      background: transparent;
+      text-align: left;
+      padding: 10px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .search-result-item:hover { background: #f5f3ff; }
+    .search-result-title { font-size: 14px; font-weight: 700; color: #111827; }
+    .search-result-meta { margin-top: 4px; font-size: 12px; color: #6b7280; }
+    .search-empty { padding: 12px; font-size: 13px; color: #6b7280; }
+    .search-status { margin-top: 8px; min-height: 18px; font-size: 12px; color: #6b7280; }
+    .search-status.error { color: #dc2626; }
+    .search-status.success { color: #047857; }
+    .loading-text { color: #4338ca; }
+    .selection-badge {
+      margin-top: 8px;
+      display: none;
+      font-size: 12px;
+      color: #047857;
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      border-radius: 999px;
+      padding: 6px 10px;
+      width: fit-content;
+    }
+    .selection-badge.show { display: inline-flex; }
+    .readonly-input { background: #f8fafc; color: #475569; }
+    .span-2 { grid-column: span 2; }
+    .helper-text { font-size: 12px; color: #6b7280; line-height: 1.6; margin-top: 6px; }
+    .search-selected-input { border-color: #86efac; background: #f0fdf4; }
+    .drawer-note {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #f8fafc;
+      color: #475569;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .context-banner {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #eef2ff;
+      color: #4338ca;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    @media (max-width: 1360px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; min-height: auto; }
+      .score-grid, .filter-grid, .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .search-group, .span-2 { grid-column: span 2; }
+    }
+    @media (max-width: 720px) {
+      .score-grid, .filter-grid, .form-grid { grid-template-columns: 1fr; }
+      .search-group, .span-2 { grid-column: span 1; }
+      .drawer { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" data-page="holding-stocks"></aside>
+    <main>
+      <div class="header">
+        <h2>{{ title }}</h2>
+        <p>{{ description }}</p>
+      </div>
+
+      <div class="score-grid">
+        <div class="score-card">
+          <h3>当前持仓数</h3>
+          <div class="score-value">{{ summary.holding_count }}</div>
+          <div class="score-meta">默认列表不展示非 active 持仓</div>
+        </div>
+        <div class="score-card">
+          <h3>已复核持仓</h3>
+          <div class="score-value">{{ summary.reviewed_count }}</div>
+          <div class="score-meta">按最近复核时间字段统计</div>
+        </div>
+        <div class="score-card">
+          <h3>风险标记</h3>
+          <div class="score-value">{{ summary.risk_flag_count }}</div>
+          <div class="score-meta">按风险状态字段统计</div>
+        </div>
+        <div class="score-card">
+          <h3>建议动作</h3>
+          <div class="score-value">{{ summary.suggested_action_count }}</div>
+          <div class="score-meta">按建议动作字段统计</div>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>筛选与操作</h3>
+            <p class="panel-desc">列表首屏为服务端渲染，买入通过 API 写入真实持仓、批次和成交明细。</p>
+          </div>
+          <div class="toolbar">
+            <button class="btn-light" type="button" onclick="resetFilters()">重置筛选</button>
+            <button class="btn" type="button" onclick="openCreateDrawer()">买入</button>
+          </div>
+        </div>
+        <form class="filter-grid" method="get" action="/holding-stocks">
+          <div class="form-group">
+            <label for="keyword">关键字</label>
+            <input id="keyword" class="form-control" name="keyword" value="{{ filters.keyword }}" placeholder="股票代码 / 名称 / 行业 / 备注">
+          </div>
+          <div class="form-group">
+            <label for="market">市场</label>
+            <select id="market" class="form-control" name="market">
+              <option value="">全部市场</option>
+              {% for option in filter_options.markets %}
+              <option value="{{ option }}" {% if filters.market == option %}selected{% endif %}>{{ option }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="asset_type">资产类型</label>
+            <select id="asset_type" class="form-control" name="asset_type">
+              <option value="">全部类型</option>
+              {% for option in filter_options.asset_types %}
+              <option value="{{ option }}" {% if filters.asset_type == option %}selected{% endif %}>{{ option }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="risk_status">风险状态</label>
+            <select id="risk_status" class="form-control" name="risk_status">
+              <option value="">全部风险状态</option>
+              {% for option in filter_options.risk_statuses %}
+              <option value="{{ option }}" {% if filters.risk_status == option %}selected{% endif %}>{{ option }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="suggested_action">建议动作</label>
+            <select id="suggested_action" class="form-control" name="suggested_action">
+              <option value="">全部建议动作</option>
+              {% for option in filter_options.suggested_actions %}
+              <option value="{{ option }}" {% if filters.suggested_action == option %}selected{% endif %}>{{ option }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <input type="hidden" name="page" value="1">
+          <input type="hidden" name="page_size" value="{{ filters.page_size }}">
+          <button class="btn" type="submit">应用筛选</button>
+          <button class="btn-light" type="button" onclick="refreshCurrentList()">刷新列表</button>
+        </form>
+        <div id="statusMessage" class="status-message"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>当前持仓标的</h3>
+            <p class="panel-desc">{{ table_intro }}</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>标的</th>
+                <th>持仓与成本</th>
+                <th>盈亏与仓位</th>
+                <th>风险与建议</th>
+                <th>买卖明细</th>
+                <th>操作按钮</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if items %}
+                {% for item in items %}
+                <tr>
+                  <td>
+                    <div class="stock-name">{{ item.stock_name }} {{ item.stock_code }}</div>
+                    <div class="sub-text">{{ item.display_market }} · {{ item.industry or '未填写行业' }} · {{ item.asset_type or '未填写类型' }}</div>
+                    <div class="sub-text">最近买入：{{ item.latest_buy_label }}<br>最近复核：{{ item.latest_review_label }}</div>
+                    {% if item.linked_watch_stock_id %}
+                    <div class="sub-text">关联关注：{{ item.linked_watch_stock_id }}</div>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <div>当前价：{{ item.current_price_display }} · 数量：{{ item.quantity_display }} 股</div>
+                    <div class="sub-text">持仓均价：{{ item.average_cost_display }}</div>
+                    <div class="sub-text">总成本：{{ item.buy_amount_display }}</div>
+                  </td>
+                  <td>
+                    <div>浮盈亏：{{ item.unrealized_pnl_display }}</div>
+                    <div class="sub-text">收益率：{{ item.unrealized_pnl_pct_display }}</div>
+                    <div class="sub-text">持仓市值：{{ item.market_value_display }}</div>
+                  </td>
+                  <td>
+                    {% if item.risk_status %}<span class="tag tag-risk">{{ item.risk_status }}</span>{% endif %}
+                    {% if item.suggested_action %}<span class="tag tag-action">{{ item.suggested_action }}</span>{% endif %}
+                    {% if not item.risk_status and not item.suggested_action %}<span class="sub-text">暂无风险和建议标记</span>{% endif %}
+                    <div class="sub-text">备注：{{ item.note or '无' }}</div>
+                  </td>
+                  <td>
+                    <div>累计买入：{{ item.buy_amount_display }}</div>
+                    <div class="sub-text">累计卖出：{{ item.sell_amount_display }}</div>
+                    <div class="sub-text">买入批次：{{ item.lot_count }} 笔</div>
+                    <div class="sub-text">成交记录：{{ item.trades|length }} 条</div>
+                  </td>
+                  <td>
+                    <div class="action-group">
+                      <button class="row-link primary" type="button" onclick="openAppendDrawer('{{ item.id }}')">买入</button>
+                      <a class="row-link secondary" href="{{ item.action_links.reanalysis }}?holding_stock_id={{ item.id }}">二次分析</a>
+                      <a class="row-link secondary" href="{{ item.action_links.decision }}?holding_stock_id={{ item.id }}">买卖决策</a>
+                      <a class="row-link secondary" href="{{ item.action_links.review }}?holding_stock_id={{ item.id }}">复盘</a>
+                      <a class="row-link ghost" href="{{ item.action_links.records }}">历史记录</a>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="6">
+                    <div class="empty-state">
+                      <div>
+                        <h4>{{ empty_state.title }}</h4>
+                        <p>{{ empty_state.description }}</p>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <div>第 {{ pagination.page }} 页 · 每页 {{ pagination.page_size }} 条 · 共 {{ pagination.total }} 条</div>
+          <div class="pagination-actions">
+            <a class="btn-light {% if pagination.page <= 1 %}disabled{% endif %}" href="{{ pagination_links.prev }}">上一页</a>
+            <a class="btn-light {% if pagination.page >= pagination.total_pages %}disabled{% endif %}" href="{{ pagination_links.next }}">下一页</a>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="holdingDrawer" class="drawer" aria-hidden="true">
+    <div class="drawer-card">
+      <div class="drawer-header">
+        <div>
+          <h3 id="drawerTitle">新增持仓买入</h3>
+          <p id="drawerSubtitle" class="drawer-subtitle">先搜索并选择股票，再录入买入数量、价格、日期和备注。</p>
+        </div>
+        <button class="close-btn" type="button" onclick="closeDrawer()">×</button>
+      </div>
+      <form id="holdingForm">
+        <input type="hidden" id="holdingStockId" name="holding_stock_id">
+        <input type="hidden" id="linked_watch_stock_id" name="linked_watch_stock_id">
+        <div id="drawerContextBanner" class="context-banner" style="display:none"></div>
+        <div id="stockLookupGroup" class="form-grid">
+          <div class="form-group search-group">
+            <label for="stockLookupQuery">股票代码 / 名称搜索</label>
+            <input id="stockLookupQuery" class="form-control" placeholder="如 300750 / 宁德时代 / Apple / 腾讯" autocomplete="off">
+            <div id="stockSearchResults" class="search-results"></div>
+            <div id="stockSearchStatus" class="search-status">请输入至少 1 个字符开始搜索。</div>
+            <div id="selectedStockBadge" class="selection-badge">已选择标的：<span id="selectedStockText"></span></div>
+            <div class="drawer-note">直接新增持仓时会复用关注股票页的股票搜索接口风格。</div>
+          </div>
+          <div class="form-group">
+            <label for="lookupMarket">搜索市场</label>
+            <select id="lookupMarket" class="form-control">
+              <option value="A股">A股</option>
+              <option value="港股">港股</option>
+              <option value="usa">美股</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="stock_code">股票代码</label>
+            <input id="stock_code" name="stock_code" class="form-control readonly-input" readonly required>
+          </div>
+          <div class="form-group">
+            <label for="stock_name">股票名称</label>
+            <input id="stock_name" name="stock_name" class="form-control readonly-input" readonly required>
+          </div>
+          <div class="form-group">
+            <label for="market_display">市场</label>
+            <input id="market_display" class="form-control readonly-input" readonly required>
+            <input id="form_market" name="market" type="hidden" required>
+          </div>
+          <div class="form-group">
+            <label for="industry">行业</label>
+            <input id="industry" name="industry" class="form-control" placeholder="如 白酒 / 消费 / 半导体">
+          </div>
+          <div class="form-group">
+            <label for="form_asset_type">资产类型</label>
+            <select id="form_asset_type" name="asset_type" class="form-control" required>
+              <option value="">请选择资产类型</option>
+              <option value="指数资产">指数资产</option>
+              <option value="红利资产">红利资产</option>
+              <option value="成长龙头">成长龙头</option>
+              <option value="周期/资源">周期/资源</option>
+              <option value="高弹性主题">高弹性主题</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="current_price">当前价格</label>
+            <input id="current_price" name="current_price" class="form-control" type="number" step="0.01">
+          </div>
+          <div class="form-group">
+            <label for="trade_date">买入日期</label>
+            <input id="trade_date" name="trade_date" class="form-control" type="date" value="{{ form_defaults.trade_date }}" required>
+          </div>
+          <div class="form-group">
+            <label for="quantity">买入数量</label>
+            <input id="quantity" name="quantity" class="form-control" type="number" step="0.01" required>
+          </div>
+          <div class="form-group">
+            <label for="price">买入价格</label>
+            <input id="price" name="price" class="form-control" type="number" step="0.01" required>
+          </div>
+          <div class="form-group">
+            <label for="amount">买入金额</label>
+            <input id="amount" name="amount" class="form-control readonly-input" type="number" step="0.01" readonly>
+            <div class="helper-text">根据买入数量 × 买入价格自动计算。</div>
+          </div>
+          <div class="form-group span-2">
+            <label for="note">备注</label>
+            <textarea id="note" name="note" class="form-control" placeholder="记录这笔买入的原因、计划或风险提示"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="risk_status">风险状态</label>
+            <input id="risk_status" name="risk_status" class="form-control" placeholder="如 高波动 / 破位观察">
+          </div>
+          <div class="form-group">
+            <label for="form_suggested_action">建议动作</label>
+            <input id="form_suggested_action" name="suggested_action" class="form-control" placeholder="如 持有 / 逢低加仓">
+          </div>
+        </div>
+        <div class="toolbar" style="margin-top: 16px;">
+          <button id="submitBtn" class="btn" type="submit">保存买入</button>
+          <button class="btn-light" type="button" onclick="closeDrawer()">取消</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/ui/nav.js"></script>
+  <script>
+    const API_BASE = '/api/trading-decision/holding-stocks';
+    const drawer = document.getElementById('holdingDrawer');
+    const form = document.getElementById('holdingForm');
+    const statusMessage = document.getElementById('statusMessage');
+    const submitBtn = document.getElementById('submitBtn');
+    const drawerTitle = document.getElementById('drawerTitle');
+    const drawerSubtitle = document.getElementById('drawerSubtitle');
+    const drawerContextBanner = document.getElementById('drawerContextBanner');
+    const stockLookupQuery = document.getElementById('stockLookupQuery');
+    const lookupMarket = document.getElementById('lookupMarket');
+    const stockSearchResults = document.getElementById('stockSearchResults');
+    const stockSearchStatus = document.getElementById('stockSearchStatus');
+    const selectedStockBadge = document.getElementById('selectedStockBadge');
+    const selectedStockText = document.getElementById('selectedStockText');
+    const PRESET_FORM_CONTEXT = {{ buy_form_context|tojson }};
+    let searchDebounceTimer = null;
+    let latestSearchToken = 0;
+    let currentMode = 'create';
+    let currentWatchStockId = '';
+
+    function setStatus(message, isError = false) {
+      statusMessage.textContent = message || '';
+      statusMessage.classList.toggle('error', Boolean(isError));
+    }
+
+    function setSearchStatus(message, tone = '') {
+      stockSearchStatus.textContent = message || '';
+      stockSearchStatus.classList.remove('error', 'success', 'loading-text');
+      if (tone) stockSearchStatus.classList.add(tone);
+    }
+
+    function openSearchResults() {
+      stockSearchResults.classList.add('open');
+    }
+
+    function closeSearchResults() {
+      stockSearchResults.classList.remove('open');
+    }
+
+    function resetReadonlyFields() {
+      ['stock_code', 'stock_name', 'form_market', 'market_display', 'industry'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) {
+          input.value = '';
+          input.classList.remove('search-selected-input');
+        }
+      });
+      const assetTypeInput = document.getElementById('form_asset_type');
+      assetTypeInput.value = '';
+      assetTypeInput.classList.remove('search-selected-input');
+      document.getElementById('amount').value = '';
+      document.getElementById('quantity').value = '';
+      document.getElementById('price').value = '';
+      document.getElementById('linked_watch_stock_id').value = '';
+      selectedStockText.textContent = '';
+      selectedStockBadge.classList.remove('show');
+    }
+
+    function applyLookupSelection(item) {
+      document.getElementById('stock_code').value = item.code || '';
+      document.getElementById('stock_name').value = item.name || '';
+      document.getElementById('form_market').value = item.market || '';
+      document.getElementById('market_display').value = item.market || '';
+      document.getElementById('industry').value = item.industry || '';
+      document.getElementById('current_price').value = item.current_price ?? '';
+      if (item.asset_type) {
+        document.getElementById('form_asset_type').value = item.asset_type;
+      }
+      ['stock_code', 'stock_name', 'market_display'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.classList.add('search-selected-input');
+      });
+      stockLookupQuery.value = item.display_label || `${item.code} - ${item.name}`;
+      selectedStockText.textContent = item.display_label || `${item.code} - ${item.name}`;
+      selectedStockBadge.classList.add('show');
+      setSearchStatus('已选择股票并自动回填基础信息。', 'success');
+      closeSearchResults();
+    }
+
+    function renderSearchResults(items) {
+      stockSearchResults.innerHTML = '';
+      if (!items.length) {
+        stockSearchResults.innerHTML = '<div class="search-empty">没有找到匹配的股票，请尝试更短的代码前缀或名称关键字。</div>';
+        openSearchResults();
+        return;
+      }
+      items.forEach((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'search-result-item';
+        button.innerHTML = `
+          <div class="search-result-title">${item.code} - ${item.name}</div>
+          <div class="search-result-meta">${item.market} · ${item.source} · ${item.display_label}</div>
+        `;
+        button.addEventListener('click', () => applyLookupSelection(item));
+        stockSearchResults.appendChild(button);
+      });
+      openSearchResults();
+    }
+
+    async function runStockLookup() {
+      if (currentMode !== 'create') return;
+      const query = stockLookupQuery.value.trim();
+      const market = lookupMarket.value;
+      resetReadonlyFields();
+      if (!query) {
+        closeSearchResults();
+        setSearchStatus('请输入至少 1 个字符开始搜索。');
+        return;
+      }
+      const currentToken = ++latestSearchToken;
+      setSearchStatus('正在搜索候选股票...', 'loading-text');
+      try {
+        const response = await fetch(`${API_BASE}/stock-search?query=${encodeURIComponent(query)}&market=${encodeURIComponent(market)}&limit=10`);
+        const result = await response.json();
+        if (currentToken !== latestSearchToken) return;
+        if (!response.ok || !result.success) throw new Error(result.message || '股票搜索失败');
+        renderSearchResults(result.data || []);
+        setSearchStatus(`找到 ${(result.data || []).length} 条候选股票。`, 'success');
+      } catch (error) {
+        closeSearchResults();
+        setSearchStatus(error.message || '股票搜索失败', 'error');
+      }
+    }
+
+    function scheduleStockLookup() {
+      if (searchDebounceTimer) window.clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = window.setTimeout(runStockLookup, 250);
+    }
+
+    function refreshCurrentList() {
+      window.location.href = window.location.pathname + window.location.search;
+    }
+
+    function resetFilters() {
+      window.location.href = '{{ reset_href }}';
+    }
+
+    function resetFormForMode(mode) {
+      form.reset();
+      document.getElementById('trade_date').value = '{{ form_defaults.trade_date }}';
+      document.getElementById('holdingStockId').value = '';
+      document.getElementById('linked_watch_stock_id').value = '';
+      currentWatchStockId = '';
+      currentMode = mode;
+      drawerContextBanner.style.display = 'none';
+      drawerContextBanner.textContent = '';
+      resetReadonlyFields();
+      closeSearchResults();
+      setSearchStatus(mode === 'create' ? '请输入至少 1 个字符开始搜索。' : '当前模式直接使用预填股票信息。');
+      document.getElementById('stockLookupGroup').style.display = 'grid';
+      stockLookupQuery.readOnly = mode !== 'create';
+      lookupMarket.disabled = mode !== 'create';
+    }
+
+    function openCreateDrawer() {
+      resetFormForMode('create');
+      drawerTitle.textContent = '新增持仓买入';
+      drawerSubtitle.textContent = '先搜索并选择股票，再录入买入数量、价格、日期和备注。';
+      drawer.classList.add('open');
+      drawer.setAttribute('aria-hidden', 'false');
+      setStatus('');
+    }
+
+    async function openAppendDrawer(id) {
+      setStatus('正在加载持仓详情...');
+      const response = await fetch(`${API_BASE}/${id}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        setStatus(payload.message || '加载持仓详情失败', true);
+        return;
+      }
+      const item = payload.data;
+      resetFormForMode('append');
+      currentMode = 'append';
+      drawerTitle.textContent = '追加买入';
+      drawerSubtitle.textContent = '对已有持仓追加一笔买入，系统会自动刷新累计数量、均价和买入金额。';
+      document.getElementById('holdingStockId').value = item.id || '';
+      document.getElementById('linked_watch_stock_id').value = item.linked_watch_stock_id || '';
+      currentWatchStockId = item.linked_watch_stock_id || '';
+      stockLookupQuery.value = `${item.stock_code || ''} - ${item.stock_name || ''}`.trim();
+      document.getElementById('stock_code').value = item.stock_code || '';
+      document.getElementById('stock_name').value = item.stock_name || '';
+      document.getElementById('form_market').value = item.market || '';
+      document.getElementById('market_display').value = item.market || '';
+      document.getElementById('industry').value = item.industry || '';
+      document.getElementById('form_asset_type').value = item.asset_type || '';
+      document.getElementById('current_price').value = item.current_price ?? '';
+      document.getElementById('risk_status').value = item.risk_status || '';
+      document.getElementById('form_suggested_action').value = item.suggested_action || '';
+      ['stock_code', 'stock_name', 'market_display'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input && input.value) input.classList.add('search-selected-input');
+      });
+      selectedStockText.textContent = `${item.stock_code || ''} - ${item.stock_name || ''}`.trim();
+      selectedStockBadge.classList.add('show');
+      drawerContextBanner.textContent = `当前追加到持仓：${item.stock_name || ''} ${item.stock_code || ''}`.trim();
+      drawerContextBanner.style.display = 'block';
+      drawer.classList.add('open');
+      drawer.setAttribute('aria-hidden', 'false');
+      setStatus('');
+    }
+
+    function applyWatchPresetContext(context) {
+      if (!context || !context.watch_stock) return;
+      resetFormForMode('from_watch');
+      currentMode = 'from_watch';
+      const watchStock = context.watch_stock || {};
+      const holdingStock = context.holding_stock || null;
+      currentWatchStockId = watchStock.id || '';
+      drawerTitle.textContent = holdingStock ? '从关注股票追加买入' : '从关注股票转入持仓';
+      drawerSubtitle.textContent = holdingStock
+        ? '这只关注股票已经关联持仓，本次提交会追加一笔买入。'
+        : '这只关注股票还没有持仓，本次提交会创建真实持仓。';
+      document.getElementById('linked_watch_stock_id').value = watchStock.id || '';
+      document.getElementById('holdingStockId').value = holdingStock ? (holdingStock.id || '') : '';
+      stockLookupQuery.value = `${watchStock.stock_code || ''} - ${watchStock.stock_name || ''}`.trim();
+      document.getElementById('stock_code').value = watchStock.stock_code || '';
+      document.getElementById('stock_name').value = watchStock.stock_name || '';
+      document.getElementById('form_market').value = watchStock.market || '';
+      document.getElementById('market_display').value = watchStock.market || '';
+      document.getElementById('industry').value = watchStock.industry || '';
+      document.getElementById('form_asset_type').value = (holdingStock ? (holdingStock.asset_type || '') : (watchStock.asset_type || ''));
+      document.getElementById('current_price').value = watchStock.current_price ?? '';
+      document.getElementById('risk_status').value = holdingStock ? (holdingStock.risk_status || '') : '';
+      document.getElementById('form_suggested_action').value = holdingStock ? (holdingStock.suggested_action || '') : (watchStock.suggested_action || '');
+      ['stock_code', 'stock_name', 'market_display'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input && input.value) input.classList.add('search-selected-input');
+      });
+      selectedStockText.textContent = `${watchStock.stock_code || ''} - ${watchStock.stock_name || ''}`.trim();
+      selectedStockBadge.classList.add('show');
+      drawerContextBanner.textContent = holdingStock
+        ? `来自关注股票：${watchStock.stock_name || ''}，将追加到关联持仓 ${holdingStock.stock_code || ''}`
+        : `来自关注股票：${watchStock.stock_name || ''}，本次将创建持仓并自动建立关联`;
+      drawerContextBanner.style.display = 'block';
+      drawer.classList.add('open');
+      drawer.setAttribute('aria-hidden', 'false');
+    }
+
+    function syncAmountField() {
+      const quantity = Number(document.getElementById('quantity').value || 0);
+      const price = Number(document.getElementById('price').value || 0);
+      const amountInput = document.getElementById('amount');
+      if (quantity > 0 && price > 0) {
+        amountInput.value = (quantity * price).toFixed(2);
+        return;
+      }
+      amountInput.value = '';
+    }
+
+    function closeDrawer() {
+      drawer.classList.remove('open');
+      drawer.setAttribute('aria-hidden', 'true');
+      closeSearchResults();
+    }
+
+    form.addEventListener('submit', async (event) => {
+      syncAmountField();
+      event.preventDefault();
+      submitBtn.disabled = true;
+      const formData = new FormData(form);
+      const payload = Object.fromEntries(formData.entries());
+      let url = API_BASE;
+      let method = 'POST';
+      if (currentMode === 'append') {
+        url = `${API_BASE}/${encodeURIComponent(document.getElementById('holdingStockId').value)}/buy`;
+        method = 'PUT';
+      } else if (currentMode === 'from_watch') {
+        url = `${API_BASE}/from-watch/${encodeURIComponent(currentWatchStockId)}/buy`;
+        method = 'POST';
+      }
+      setStatus('正在保存买入...');
+      try {
+        const response = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || result?.error?.message || '保存失败');
+        }
+        closeDrawer();
+        setStatus(result.message || '保存成功');
+        window.location.href = '/holding-stocks';
+      } catch (error) {
+        setStatus(error.message || '保存失败', true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    stockLookupQuery.addEventListener('input', () => {
+      if (currentMode !== 'create') return;
+      scheduleStockLookup();
+    });
+
+    lookupMarket.addEventListener('change', () => {
+      if (currentMode !== 'create') return;
+      if (stockLookupQuery.value.trim()) scheduleStockLookup();
+    });
+
+    document.getElementById('quantity').addEventListener('input', syncAmountField);
+    document.getElementById('price').addEventListener('input', syncAmountField);
+
+    drawer.addEventListener('click', (event) => {
+      if (event.target === drawer) closeDrawer();
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!drawer.contains(event.target)) closeSearchResults();
+    });
+
+    if (PRESET_FORM_CONTEXT) {
+      applyWatchPresetContext(PRESET_FORM_CONTEXT);
+    }
+  </script>
+</body>
+</html>

@@ -7,9 +7,31 @@ from queue import Empty, Queue
 
 from flask import Response, current_app, jsonify, render_template, request
 
-import stock_analyse.interfaces.web.services.stock_indicator_html_service as stockIndicatorHtml
 import stock_analyse.application.services.quantitative_analysis_service as stockIndicatorQuantitative
+import stock_analyse.interfaces.web.services.stock_indicator_html_service as stockIndicatorHtml
+from stock_analyse.interfaces.web.services.trading_decision_service import TradingDecisionService
 from stock_analyse.interfaces.web.streaming.streaming_analyzer import StreamingAnalyzer
+
+
+def _trading_decision_service() -> TradingDecisionService:
+    return getattr(_context(), 'trading_decision_service', None) or TradingDecisionService()
+
+
+def _send_cached_stock_analysis_result(context, payload: dict, cached_result: dict) -> None:
+    client_id = payload['client_id']
+    stock_code = payload['stock_code']
+    lock_name = f'ai_{stock_code}'
+    streamer = StreamingAnalyzer(client_id, context.sse_manager)
+    try:
+        streamer.send_log(f"🚀 命中当天缓存，直接复用股票分析: {stock_code}", 'header')
+        streamer.send_progress('singleProgress', 15, '已命中当天缓存，准备返回结果...')
+        streamer.send_final_result(cached_result)
+        streamer.send_progress('singleProgress', 100, '股票分析缓存结果已返回...')
+        streamer.send_completion(f'AI个股分析完成(缓存): {stock_code}')
+    finally:
+        with context.task_lock:
+            context.analysis_tasks.pop(lock_name, None)
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +83,11 @@ def _normalize_analyze_stock_ai_payload(data: dict):
 
     return {
         'stock_code': stock_code,
+        'stock_name': _require_scalar_string(data.get('stock_name'), 'stock_name') or None,
         'market': market,
+        'watch_stock_id': _require_scalar_string(data.get('watch_stock_id'), 'watch_stock_id') or None,
+        'holding_stock_id': _require_scalar_string(data.get('holding_stock_id'), 'holding_stock_id') or None,
+        'analysis_scene': _require_scalar_string(data.get('analysis_scene'), 'analysis_scene') or None,
         'client_id': client_id,
         'trade_date': trade_date,
         'analysis_depth': analysis_depth,
@@ -90,13 +116,50 @@ def _start_stock_ai_analysis_task(context, payload: dict):
         }
 
     try:
+        service = _trading_decision_service()
+        stock_name = payload.get('stock_name') or stock_code
+        cached_result = service.build_cached_stock_analysis_result(
+            market=market,
+            stock_code=stock_code,
+            stock_name=stock_name,
+            trade_date=trade_date or datetime.now().strftime('%Y-%m-%d'),
+        )
+        if cached_result and payload.get('watch_stock_id'):
+            try:
+                service.save_stock_analysis_record(
+                    {
+                        'watch_stock_id': payload.get('watch_stock_id'),
+                        'trade_date': trade_date or datetime.now().strftime('%Y-%m-%d'),
+                        'raw_result': cached_result,
+                    }
+                )
+            except Exception:
+                logger.exception('复用股票分析缓存时保存历史记录失败: %s', stock_code)
+
+        if cached_result:
+            context.executor.submit(_send_cached_stock_analysis_result, context, payload, cached_result)
+            return jsonify({'success': True, 'data': '', 'message': f'股票 {stock_code} AI分析已启动', 'task_mode': 'async', 'client_id': client_id})
+
         def run_analysis():
             streamer = StreamingAnalyzer(client_id, context.sse_manager)
             try:
                 streamer.send_log(f"🚀 开始AI个股分析: {stock_code}", 'header')
                 streamer.send_progress('singleProgress', 5, '开始AI个股分析...')
                 context.analyzer.streaming = streamer
-                context.analyzer.stock_ai_analysis_process(stock_code, market, start_date_str, end_date_str, trade_date=trade_date, analysis_depth=analysis_depth)
+                result = context.analyzer.stock_ai_analysis_process(
+                    stock_code,
+                    market,
+                    start_date_str,
+                    end_date_str,
+                    trade_date=trade_date,
+                    analysis_depth=analysis_depth,
+                    watch_stock_id=payload.get('watch_stock_id'),
+                    stock_name=payload.get('stock_name'),
+                    holding_stock_id=payload.get('holding_stock_id'),
+                    analysis_scene=payload.get('analysis_scene'),
+                )
+                if isinstance(result, dict) and result.get('success'):
+                    service.annotate_result_source(result, result_source='live')
                 logger.info(f'AI个股分析完成: {stock_code}')
                 streamer.send_log(f"🚀 AI个股分析完成: {stock_code}", 'header')
                 streamer.send_progress('singleProgress', 100, 'AI个股分析完成...')

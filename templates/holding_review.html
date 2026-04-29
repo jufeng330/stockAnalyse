@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>持仓复盘 - 交易决策中心</title>
+    <link rel="stylesheet" href="/static/ui/nav.css">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #1f2937;
+            min-height: 100vh;
+        }
+        .app-shell {
+            max-width: 1520px;
+            margin: 0 auto;
+            padding: 24px;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 20px;
+        }
+        .sidebar, .header, .panel {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 16px;
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12);
+            backdrop-filter: blur(8px);
+        }
+        .sidebar {
+            padding: 20px 16px;
+            position: sticky;
+            top: 20px;
+            align-self: start;
+            min-height: calc(100vh - 48px);
+        }
+        .header, .panel { padding: 24px; }
+        .header { margin-bottom: 20px; }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .header h1 { margin: 0 0 8px; font-size: 30px; color: #111827; }
+        .header p, .muted { margin: 0; color: #6b7280; line-height: 1.6; }
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .nav-links a {
+            text-decoration: none;
+            color: #374151;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .context-hint {
+            margin-top: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #eef2ff;
+            color: #4338ca;
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .score-grid, .context-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .score-card {
+            border-radius: 14px;
+            padding: 16px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: #fff;
+        }
+        .score-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; opacity: .92; }
+        .score-value { font-size: 24px; font-weight: 800; }
+        .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+        .content-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .panel h2 { margin: 0 0 16px; font-size: 20px; color: #111827; }
+        .grid-2, .grid-3 {
+            display: grid;
+            gap: 12px;
+        }
+        .grid-2 { grid-template-columns: 1fr 1fr; }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .form-group { margin-bottom: 16px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #374151;
+        }
+        .form-control, select.form-control {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid #d1d5db;
+            border-radius: 10px;
+            font-size: 14px;
+            background: #fff;
+            font-family: inherit;
+        }
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+        .btn, .btn-light {
+            border: none;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .btn {
+            color: #fff;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            flex: 1 1 180px;
+        }
+        .btn-light {
+            color: #374151;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            flex: 1 1 180px;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #eef2ff;
+            color: #4338ca;
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+        .dot.connected { background: #22c55e; }
+        .progress-wrapper { display: none; margin-top: 16px; }
+        .progress-bar { width: 100%; height: 10px; border-radius: 999px; overflow: hidden; background: #e5e7eb; }
+        .progress-fill { width: 0%; height: 100%; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+        .progress-text { font-size: 13px; color: #6b7280; margin-bottom: 8px; }
+        .log-box {
+            background: #111827;
+            color: #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+            height: 240px;
+            overflow: auto;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        .log-entry { margin-bottom: 6px; }
+        .log-info { color: #93c5fd; }
+        .log-success { color: #86efac; }
+        .log-error { color: #fca5a5; }
+        .kv, .history-card, .summary-card, .evidence-item {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 14px;
+        }
+        .kv .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+        .kv .value { font-size: 15px; font-weight: 700; color: #111827; word-break: break-word; }
+        .tabs-nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .tab-button {
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #374151;
+            border-radius: 999px;
+            padding: 10px 14px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .tab-button.active {
+            background: #4338ca;
+            border-color: #4338ca;
+            color: #fff;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .summary-card h3 { margin: 0 0 8px; font-size: 16px; }
+        .summary-card p { margin: 0; line-height: 1.8; }
+        .evidence-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .evidence-item { background: #fff; }
+        .evidence-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+        .decision-banner {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .decision-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #4338ca;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        details { margin-top: 14px; }
+        details summary { cursor: pointer; font-weight: 700; color: #374151; margin-bottom: 10px; }
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #111827;
+            color: #f9fafb;
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-x: auto;
+        }
+        .empty-state {
+            min-height: 220px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            text-align: center;
+            color: #6b7280;
+            gap: 10px;
+        }
+        @media (max-width: 1280px) {
+            .app-shell { grid-template-columns: 1fr; }
+            .sidebar { position: static; min-height: auto; }
+        }
+        @media (max-width: 1080px) {
+            .score-grid, .context-grid, .grid-3 { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 720px) {
+            .app-shell { padding: 16px; }
+            .grid-2, .grid-3, .score-grid, .context-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" data-page="holding-review"></aside>
+        <main>
+            <div class="header">
+                <div class="header-top">
+                    <div>
+                        <h1>持仓复盘</h1>
+                        <p>基于当前持仓、历史成交、原始买入决策、再评估记录、买卖决策与报表市场数据，由交易专家生成结构化持仓复盘草案。</p>
+                        <div class="context-hint">关联持仓：<span id="holdingStockIdText">{{ holding_stock.id }}</span></div>
+                    </div>
+                    <div class="nav-links">
+                        <a href="/holding-stocks">持仓股票</a>
+                        <a href="/holding-reanalysis?holding_stock_id={{ holding_stock.id }}">二次分析</a>
+                        <a href="/position-decision?holding_stock_id={{ holding_stock.id }}">买卖决策</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="score-grid">
+                <div class="score-card"><h3>复盘标的</h3><div class="score-value">{{ holding_stock.stock_code }}</div><div class="score-meta">{{ holding_stock.stock_name }}</div></div>
+                <div class="score-card"><h3>当前仓位</h3><div class="score-value">{{ holding_stock.quantity or 0 }}</div><div class="score-meta">成本 {{ '%.2f'|format(holding_stock.average_cost) if holding_stock.average_cost is not none else '--' }}</div></div>
+                <div class="score-card"><h3>浮盈亏</h3><div class="score-value">{{ '%.2f'|format(holding_stock.unrealized_pnl) if holding_stock.unrealized_pnl is not none else '--' }}</div><div class="score-meta">{{ '%.2f%%'|format(holding_stock.unrealized_pnl_pct) if holding_stock.unrealized_pnl_pct is not none else '--' }}</div></div>
+                <div class="score-card"><h3>最新复盘结论</h3><div class="score-value">{{ selected_record.conclusion_tag_label if selected_record else (holding_stock.suggested_action or '暂无') }}</div><div class="score-meta">最近复核时间 {{ holding_stock.last_review_at or '暂无' }}</div></div>
+            </div>
+
+            <div class="content-stack">
+                <div class="panel">
+                    <h2>持仓上下文</h2>
+                    <div class="context-grid">
+                        <div class="kv"><div class="label">股票名称</div><div class="value">{{ holding_stock.stock_name }}</div></div>
+                        <div class="kv"><div class="label">股票代码</div><div class="value">{{ holding_stock.stock_code }}</div></div>
+                        <div class="kv"><div class="label">市场 / 行业</div><div class="value">{{ display_market }} / {{ holding_stock.industry or '未填写行业' }}</div></div>
+                        <div class="kv"><div class="label">市值 / 成本</div><div class="value">{{ '%.2f'|format(holding_stock.market_value) if holding_stock.market_value is not none else '--' }} / {{ '%.2f'|format(holding_stock.total_cost) if holding_stock.total_cost is not none else '--' }}</div></div>
+                    </div>
+                    <div class="context-grid" style="margin-top:12px;">
+                        <div class="kv"><div class="label">最近买卖决策</div><div class="value">{{ latest_position_decision.conclusion_summary if latest_position_decision else '暂无' }}</div></div>
+                        <div class="kv"><div class="label">最近二次分析</div><div class="value">{{ latest_reanalysis.conclusion_summary if latest_reanalysis else '暂无' }}</div></div>
+                        <div class="kv"><div class="label">关联关注股票</div><div class="value">{{ watch_stock.stock_name if watch_stock else '暂无关联' }}</div></div>
+                        <div class="kv"><div class="label">当前价格</div><div class="value">{{ '%.2f'|format(holding_stock.current_price) if holding_stock.current_price is not none else '--' }}</div></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>复盘参数</h2>
+                    <div class="grid-3">
+                        <div class="form-group">
+                            <label for="tradeDate">复盘日期</label>
+                            <input id="tradeDate" class="form-control" type="date" value="{{ form_defaults.trade_date }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="reviewType">复盘类型</label>
+                            <select id="reviewType" class="form-control">
+                                <option value="general" {% if form_defaults.review_type == 'general' %}selected{% endif %}>general</option>
+                                <option value="weekly" {% if form_defaults.review_type == 'weekly' %}selected{% endif %}>weekly</option>
+                                <option value="monthly" {% if form_defaults.review_type == 'monthly' %}selected{% endif %}>monthly</option>
+                                <option value="quarterly" {% if form_defaults.review_type == 'quarterly' %}selected{% endif %}>quarterly</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="analysisDepth">分析深度</label>
+                            <select id="analysisDepth" class="form-control">
+                                <option value="standard" {% if form_defaults.analysis_depth == 'standard' %}selected{% endif %}>standard</option>
+                                <option value="deep" {% if form_defaults.analysis_depth == 'deep' %}selected{% endif %}>deep</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label for="periodKey">周期标识</label>
+                        <input id="periodKey" class="form-control" type="text" value="{{ form_defaults.period_key }}" placeholder="例如 2026-W18 / 2026-04 / 2026-Q2">
+                    </div>
+                    <div class="btn-row">
+                        <button id="generateBtn" class="btn" type="button" onclick="generateHoldingReview()">生成复盘草案</button>
+                        <button id="saveBtn" class="btn-light" type="button" onclick="saveHoldingReview()">保存复盘记录</button>
+                    </div>
+                    <div class="muted" style="margin-top:8px;font-size:12px;">本页通过 `/api/trading-decision/holding-stocks/{{ holding_stock.id }}/reviews/run` 发起任务，AI 角色固定为“交易专家”，输入来源为历史成交、原始决策、再评估、买卖决策、财报与市场数据。</div>
+                    <div class="status-row">
+                        <div class="status-pill"><span id="sseDot" class="dot"></span><span id="sseStatus">SSE 未连接</span></div>
+                        <div class="status-pill" id="systemStatus">系统就绪</div>
+                    </div>
+                    <div id="progressWrapper" class="progress-wrapper">
+                        <div id="progressText" class="progress-text">准备开始...</div>
+                        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>运行日志</h2>
+                    <div id="logBox" class="log-box"><div class="log-entry log-info">[系统] 等待发起持仓复盘任务...</div></div>
+                </div>
+
+                <div class="panel">
+                    <h2>持仓复盘结果</h2>
+                    <div id="resultsContent">
+                        {% if selected_record %}
+                        <div id="holdingReviewPrefill" data-result='{{ selected_record.raw_result_json | tojson | forceescape }}'></div>
+                        {% else %}
+                        <div class="empty-state">
+                            <div style="font-size:22px;font-weight:700;">等待生成持仓复盘</div>
+                            <div>点击“生成复盘草案”后展示固定四个 Tab：执行与卖出复盘、结果复盘、方法与纪律、后续动作。</div>
+                            <div style="font-size:13px;color:#9ca3af;">每个 Tab 都会展示顶部结论和底部理由列表，并保留历史回放能力。</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>持仓复盘历史记录</h2>
+                    {% if history_items %}
+                    <div id="historyList" style="display:flex;flex-direction:column;gap:10px;">
+                        {% for item in history_items %}
+                        <a href="/holding-review?holding_stock_id={{ holding_stock.id }}&record_id={{ item.id }}" style="text-decoration:none;color:inherit;">
+                            <div class="history-card" style="border:{% if selected_record and selected_record.id == item.id %}2px solid #4f46e5{% else %}1px solid #e5e7eb{% endif %};">
+                                <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                                    <div style="font-weight:700;color:#111827;">{{ item.trade_date or item.created_at }} · {{ item.review_type_label or '通用复盘' }}</div>
+                                    <div class="muted">{{ item.id }}</div>
+                                </div>
+                                <div class="muted" style="margin-top:6px;">{{ item.analysis_depth or 'standard' }} · {{ item.conclusion_tag_label or '待确认' }}{% if item.period_key %} · {{ item.period_key }}{% endif %}</div>
+                                <div style="margin-top:8px;line-height:1.7;">{{ item.next_action_summary or item.performance_summary or '暂无摘要' }}</div>
+                            </div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="history-card"><h3>暂无历史记录</h3><div class="muted">生成第一条持仓复盘后，这里会展示可回看的历史列表。</div></div>
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/ui/nav.js"></script>
+    <script>
+        const HOLDING_STOCK_ID = {{ holding_stock.id | tojson }};
+        const API_BASE = '/api/trading-decision/holding-stocks';
+        const RECORDS_API = '/api/trading-decision/holding-review-records';
+        const TAB_ORDER = [
+            { id: 'execution_review', title: '执行与卖出复盘' },
+            { id: 'result_review', title: '结果复盘' },
+            { id: 'discipline_review', title: '方法与纪律' },
+            { id: 'next_action', title: '后续动作' },
+        ];
+        let sseConnection = null;
+        let currentClientId = null;
+        let currentResult = null;
+
+        function addLog(message, level = 'info') {
+            const logBox = document.getElementById('logBox');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${level}`;
+            entry.textContent = message;
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function setSystemStatus(text) {
+            document.getElementById('systemStatus').textContent = text;
+        }
+
+        function setProgress(percent, text) {
+            document.getElementById('progressWrapper').style.display = 'block';
+            document.getElementById('progressFill').style.width = `${percent}%`;
+            document.getElementById('progressText').textContent = text;
+        }
+
+        function connectSSE(clientId) {
+            if (sseConnection) {
+                sseConnection.close();
+            }
+            sseConnection = new EventSource(`/api/sse?client_id=${encodeURIComponent(clientId)}`);
+            sseConnection.onopen = () => {
+                document.getElementById('sseDot').classList.add('connected');
+                document.getElementById('sseStatus').textContent = 'SSE 已连接';
+            };
+            sseConnection.onerror = () => {
+                document.getElementById('sseDot').classList.remove('connected');
+                document.getElementById('sseStatus').textContent = 'SSE 连接异常';
+            };
+            sseConnection.addEventListener('log', (event) => {
+                const payload = JSON.parse(event.data || '{}');
+                addLog(payload.message || '', payload.type || 'info');
+            });
+            sseConnection.addEventListener('singleProgress', (event) => {
+                const payload = JSON.parse(event.data || '{}');
+                setProgress(payload.progress || 0, payload.message || '处理中...');
+            });
+            sseConnection.addEventListener('final_result', (event) => {
+                const payload = JSON.parse(event.data || '{}');
+                currentResult = payload;
+                renderHoldingReviewResult(payload);
+            });
+            sseConnection.addEventListener('analysis_complete', (event) => {
+                const payload = JSON.parse(event.data || '{}');
+                addLog(payload.message || '任务完成', 'success');
+                setSystemStatus(payload.message || '分析完成');
+            });
+            sseConnection.addEventListener('analysis_error', (event) => {
+                const payload = JSON.parse(event.data || '{}');
+                const errorMessage = payload.error || payload.message || '任务失败';
+                addLog(errorMessage, 'error');
+                setSystemStatus(errorMessage);
+            });
+            sseConnection.addEventListener('completion', (event) => {
+                const payload = JSON.parse(event.data || '{}');
+                addLog(payload.message || '任务完成', 'success');
+                setSystemStatus(payload.message || '分析完成');
+            });
+            sseConnection.addEventListener('error', (event) => {
+                const payload = JSON.parse(event.data || '{}');
+                const errorMessage = payload.error || payload.message || '任务失败';
+                addLog(errorMessage, 'error');
+                setSystemStatus(errorMessage);
+            });
+        }
+
+        function buildClientId() {
+            return 'holding_review_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+        }
+
+        async function generateHoldingReview() {
+            currentClientId = buildClientId();
+            connectSSE(currentClientId);
+            setSystemStatus('正在生成持仓复盘');
+            setProgress(5, '开始生成持仓复盘...');
+            addLog('开始发起持仓复盘任务', 'info');
+
+            const response = await fetch(`${API_BASE}/${HOLDING_STOCK_ID}/reviews/run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    trade_date: document.getElementById('tradeDate').value,
+                    review_type: document.getElementById('reviewType').value,
+                    period_key: document.getElementById('periodKey').value,
+                    analysis_depth: document.getElementById('analysisDepth').value,
+                    client_id: currentClientId,
+                }),
+            });
+            const body = await response.json();
+            if (!response.ok || body.success !== true) {
+                addLog(body.message || body.error || '启动失败', 'error');
+                setSystemStatus('启动失败');
+                return;
+            }
+            addLog(body.message || '任务已启动', 'success');
+        }
+
+        async function saveHoldingReview() {
+            if (!currentResult) {
+                addLog('请先生成持仓复盘再保存', 'error');
+                return;
+            }
+            const response = await fetch(RECORDS_API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    holding_stock_id: HOLDING_STOCK_ID,
+                    trade_date: document.getElementById('tradeDate').value,
+                    review_type: document.getElementById('reviewType').value,
+                    period_key: document.getElementById('periodKey').value,
+                    analysis_depth: document.getElementById('analysisDepth').value,
+                    raw_result: currentResult,
+                }),
+            });
+            const body = await response.json();
+            if (!response.ok || body.success !== true) {
+                addLog(body.message || '保存失败', 'error');
+                return;
+            }
+            addLog('持仓复盘记录保存成功', 'success');
+            window.location.href = `/holding-review?holding_stock_id=${encodeURIComponent(HOLDING_STOCK_ID)}&record_id=${encodeURIComponent(body.data.id)}`;
+        }
+
+        function renderHoldingReviewResult(result) {
+            const normalizedResult = normalizeHoldingReviewResult(result || {});
+            const data = normalizedResult.data || {};
+            const tabs = normalizeTabs(data.tabs || []);
+            const navHtml = TAB_ORDER.map((tab, index) => `
+                <button class="tab-button ${index === 0 ? 'active' : ''}" data-tab-target="${escapeHtml(tab.id)}" type="button">${escapeHtml(tab.title)}</button>
+            `).join('');
+            const panelsHtml = TAB_ORDER.map((tab, index) => {
+                const item = tabs.find((candidate) => candidate.id === tab.id) || { id: tab.id, title: tab.title, summary: '待确认', evidence: ['待确认'] };
+                const evidenceHtml = (Array.isArray(item.evidence) ? item.evidence : []).map((detail, evidenceIndex) => `
+                    <div class="evidence-item">
+                        <div class="evidence-label">理由 ${evidenceIndex + 1}</div>
+                        <div>${escapeHtml(detail)}</div>
+                    </div>
+                `).join('');
+                const tabBanner = tab.id === 'next_action' ? `
+                    <div class="decision-banner">
+                        <div class="decision-chip">结论标签：${escapeHtml(mapConclusionTagLabel(data.conclusion_tag || ''))}</div>
+                        <div class="decision-chip">动作摘要：${escapeHtml(data.next_action_summary || '--')}</div>
+                    </div>
+                ` : '';
+                return `
+                    <div class="tab-panel ${index === 0 ? 'active' : ''}" data-tab-panel="${escapeHtml(tab.id)}">
+                        ${tabBanner}
+                        <div class="summary-card">
+                            <h3>${escapeHtml(item.title)}结论</h3>
+                            <p>${escapeHtml(item.summary || '待确认')}</p>
+                        </div>
+                        <div class="evidence-list">${evidenceHtml || '<div class="evidence-item">待确认</div>'}</div>
+                    </div>
+                `;
+            }).join('');
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="decision-banner">
+                    <div class="decision-chip">AI 角色：${escapeHtml((data.meta || {}).role || '交易专家')}</div>
+                    <div class="decision-chip">复盘类型：${escapeHtml(mapReviewTypeLabel(data.review_type || 'general'))}</div>
+                    <div class="decision-chip">结论标签：${escapeHtml(mapConclusionTagLabel(data.conclusion_tag || ''))}</div>
+                    <div class="decision-chip">后续动作：${escapeHtml(data.next_action_summary || '--')}</div>
+                </div>
+                <div class="tabs-nav">${navHtml}</div>
+                ${panelsHtml}
+                <details>
+                    <summary>查看原始 JSON</summary>
+                    <pre id="rawResultJson">${escapeHtml(JSON.stringify(normalizedResult, null, 2))}</pre>
+                </details>
+            `;
+            bindTabEvents();
+        }
+
+        function normalizeTabs(tabs) {
+            const source = Array.isArray(tabs) ? tabs.filter((item) => item && typeof item === 'object') : [];
+            return TAB_ORDER.map((expected, index) => {
+                const item = source.find((candidate) => {
+                    const candidateId = String(candidate.id || '').trim().toLowerCase();
+                    const candidateTitle = String(candidate.title || '').trim();
+                    return candidateId === expected.id || candidateTitle === expected.title;
+                }) || source[index] || {};
+                const evidence = Array.isArray(item.evidence) ? item.evidence.filter((detail) => String(detail || '').trim()) : [];
+                return {
+                    id: String(item.id || expected.id),
+                    title: String(item.title || expected.title),
+                    summary: String(item.summary || '待确认'),
+                    evidence: evidence.length ? evidence.map((detail) => String(detail)) : ['待确认'],
+                };
+            });
+        }
+
+        function normalizeHoldingReviewResult(result) {
+            if (result && typeof result === 'object' && result.data && typeof result.data === 'object') {
+                return result;
+            }
+            const source = result && typeof result === 'object' ? result : {};
+            const tabs = Array.isArray(source.tabs) ? source.tabs : [];
+            const evidence = [];
+            tabs.forEach((tab) => {
+                if (!tab || typeof tab !== 'object') {
+                    return;
+                }
+                const details = Array.isArray(tab.evidence) ? tab.evidence : [];
+                details.forEach((detail) => {
+                    const text = String(detail || '').trim();
+                    if (text) {
+                        evidence.push({ tab: String(tab.title || ''), detail: text });
+                    }
+                });
+            });
+            return {
+                success: true,
+                data: {
+                    trade_date: String(source.trade_date || '').trim(),
+                    review_type: String(source.review_type || 'general').trim() || 'general',
+                    period_key: String(source.period_key || '').trim(),
+                    analysis_depth: String(source.analysis_depth || 'standard').trim() || 'standard',
+                    performance_summary: String(source.performance_summary || '').trim(),
+                    execution_summary: String(source.execution_summary || '').trim(),
+                    risk_summary: String(source.risk_summary || '').trim(),
+                    discipline_summary: String(source.discipline_summary || '').trim(),
+                    next_action_summary: String(source.next_action_summary || '').trim(),
+                    conclusion_tag: String(source.conclusion_tag || '').trim(),
+                    tabs,
+                    evidence,
+                    meta: source.meta && typeof source.meta === 'object' ? source.meta : { role: '交易专家' },
+                    context_snapshot: source.context_snapshot && typeof source.context_snapshot === 'object' ? source.context_snapshot : {},
+                },
+            };
+        }
+
+        function bindTabEvents() {
+            document.querySelectorAll('.tab-button').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const target = button.dataset.tabTarget;
+                    document.querySelectorAll('.tab-button').forEach((item) => item.classList.toggle('active', item === button));
+                    document.querySelectorAll('.tab-panel').forEach((panel) => {
+                        panel.classList.toggle('active', panel.dataset.tabPanel === target);
+                    });
+                });
+            });
+        }
+
+        function mapReviewTypeLabel(reviewType) {
+            const normalized = String(reviewType || '').trim().toLowerCase();
+            const mapping = {
+                general: '通用复盘',
+                weekly: '周复盘',
+                monthly: '月复盘',
+                quarterly: '季度复盘',
+            };
+            return mapping[normalized] || normalized || '--';
+        }
+
+        function mapConclusionTagLabel(tag) {
+            const normalized = String(tag || '').trim().toLowerCase();
+            const mapping = {
+                logic_ok: '逻辑仍成立',
+                need_recheck: '需要重新核查',
+                execution_issue: '执行存在问题',
+                risk_rising: '风险上升',
+                prepare_reduce: '准备减仓',
+                prepare_sell: '准备卖出',
+            };
+            return mapping[normalized] || normalized || '--';
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const prefill = document.getElementById('holdingReviewPrefill');
+            if (prefill?.dataset?.result) {
+                currentResult = JSON.parse(prefill.dataset.result);
+                renderHoldingReviewResult(currentResult);
+                addLog('已加载历史持仓复盘记录', 'success');
+            }
+        });
+    </script>
+</body>
+</html>

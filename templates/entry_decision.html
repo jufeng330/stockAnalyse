@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>进场决策 - 交易决策中心</title>
     <link rel="stylesheet" href="/static/ui/nav.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -201,7 +202,115 @@
         .kv .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
         .kv .value { font-size: 15px; font-weight: 700; line-height: 1.6; word-break: break-word; }
         .result-stack { display: flex; flex-direction: column; gap: 16px; }
+        .result-tabs {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .tab-nav {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 6px;
+            background: #eef2ff;
+            border-radius: 14px;
+        }
+        .tab-btn {
+            border: none;
+            background: transparent;
+            color: #4338ca;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.7);
+        }
+        .tab-btn.active {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(79, 70, 229, 0.22);
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .tab-panels {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
         .list-block { margin: 0; padding-left: 20px; color: #374151; line-height: 1.8; }
+        .section-note {
+            margin-top: 10px;
+            color: #4b5563;
+            line-height: 1.8;
+            white-space: pre-wrap;
+        }
+        .markdown-summary {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 24px;
+            line-height: 1.85;
+            color: #1f2937;
+        }
+        .markdown-summary h2,
+        .markdown-summary h3,
+        .markdown-summary h4 {
+            color: #111827;
+            margin-top: 1.2em;
+            margin-bottom: 0.7em;
+        }
+        .markdown-summary h2:first-child {
+            margin-top: 0;
+        }
+        .markdown-summary hr {
+            border: none;
+            border-top: 1px solid #e5e7eb;
+            margin: 24px 0;
+        }
+        .markdown-summary blockquote {
+            margin: 16px 0;
+            padding: 12px 16px;
+            background: #eef2ff;
+            border-left: 4px solid #6366f1;
+            border-radius: 10px;
+            color: #4338ca;
+        }
+        .markdown-summary ul,
+        .markdown-summary ol {
+            padding-left: 24px;
+        }
+        .markdown-summary li {
+            margin: 6px 0;
+        }
+        .markdown-summary p {
+            margin: 10px 0;
+        }
+        .markdown-summary code {
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 6px;
+        }
+        .source-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .source-badge.cache {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .source-badge.live {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
         .hidden { display: none; }
         details { margin-top: 12px; }
         details summary { cursor: pointer; font-weight: 700; color: #374151; }
@@ -277,7 +386,7 @@
                     </div>
                     <div class="summary-box">
                         <div class="label" style="font-size:12px;color:#6b7280;margin-bottom:6px;">上次结论摘要</div>
-                        <div id="previousConclusionText" style="line-height:1.7;font-weight:600;">{{ watch_stock.last_conclusion_summary or '暂无结论摘要' }}</div>
+                        <div id="previousConclusionText" style="line-height:1.7;font-weight:600;">{{ form_defaults.last_conclusion_summary or '暂无结论摘要' }}</div>
                     </div>
                 </div>
 
@@ -339,10 +448,25 @@
                 </div>
 
                 <div class="panel">
-                    <h2>运行日志</h2>
-                    <div id="logBox" class="log-box">
-                        <div class="log-entry log-info">[系统] 等待发起进场决策任务...</div>
+                    <h2>历史决策记录</h2>
+                    {% if history_items %}
+                    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
+                        {% for item in history_items %}
+                        <a href="/entry-decision?watch_stock_id={{ watch_stock.id }}&record_id={{ item.id }}" style="text-decoration:none;color:inherit;">
+                            <div class="summary-box" style="border:{% if selected_record and selected_record.id == item.id %}2px solid #4f46e5{% else %}1px solid #e5e7eb{% endif %};">
+                                <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                                    <div style="font-weight:700;color:#111827;">{{ item.trade_date or '-' }} · {{ item.suggested_action or '待确认动作' }}</div>
+                                    <div class="helper-text">{{ item.id }}</div>
+                                </div>
+                                <div class="helper-text" style="margin-top:6px;">{{ item.current_stage or '待确认阶段' }} · {{ item.current_price_zone or '待确认价格区' }}</div>
+                                <div style="margin-top:8px;line-height:1.7;color:#374151;">{{ item.conclusion_summary or '暂无结论摘要' }}</div>
+                            </div>
+                        </a>
+                        {% endfor %}
                     </div>
+                    {% else %}
+                    <div class="helper-text" style="margin-bottom:18px;">暂无历史决策记录。</div>
+                    {% endif %}
                 </div>
 
                 <div class="panel">
@@ -354,8 +478,15 @@
                         <div class="empty-state">
                             <div style="font-size:48px;">🧭</div>
                             <div>点击“生成决策”后展示章节化进场决策结果。</div>
-                            <div style="font-size:13px;color:#9ca3af;">结果区会展示结论、reasoning，以及原始 JSON。</div>
+                            <div style="font-size:13px;color:#9ca3af;">结果区会展示分析师结果、总结，以及原始 JSON。</div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>运行日志</h2>
+                    <div id="logBox" class="log-box">
+                        <div class="log-entry log-info">[系统] 等待发起进场决策任务...</div>
                     </div>
                 </div>
             </div>
@@ -376,6 +507,50 @@
         let currentSessionId = ACTIVE_SESSION ? ACTIVE_SESSION.id : null;
         let currentResult = SELECTED_RECORD ? (SELECTED_RECORD.full_result_json || null) : null;
         let isAnalyzing = false;
+        let rolePreviewState = {};
+
+        const ROLE_TAB_CONFIG = [
+            { key: 'macro_analysis', title: '宏观分析师', field: 'macro_analysis' },
+            { key: 'asset_classification', title: '资产分类分析师', field: 'asset_classification' },
+            { key: 'value_stage_analysis', title: '价值阶段分析师', field: 'value_stage_analysis' },
+            { key: 'price_zone_analysis', title: '价格分区分析师', field: 'price_zone_analysis' },
+            { key: 'buy_plan_analysis', title: '买卖计划分析师', field: 'buy_plan_analysis' },
+            { key: 'risk_control_analysis', title: '风险控制分析师', field: 'risk_control_analysis' },
+            { key: 'summary', title: '总结', field: null }
+        ];
+
+        const ROLE_KEY_ALIASES = {
+            macro_analysis: 'macro_analysis',
+            macro: 'macro_analysis',
+            macro_analyst: 'macro_analysis',
+            '宏观分析师': 'macro_analysis',
+            '宏观分析': 'macro_analysis',
+            asset_classification: 'asset_classification',
+            asset: 'asset_classification',
+            asset_classifier: 'asset_classification',
+            '资产分类分析师': 'asset_classification',
+            '资产分类': 'asset_classification',
+            value_stage_analysis: 'value_stage_analysis',
+            value_stage: 'value_stage_analysis',
+            value: 'value_stage_analysis',
+            '价值阶段分析师': 'value_stage_analysis',
+            '价值阶段分析': 'value_stage_analysis',
+            price_zone_analysis: 'price_zone_analysis',
+            price_zone: 'price_zone_analysis',
+            price: 'price_zone_analysis',
+            '价格分区分析师': 'price_zone_analysis',
+            '价格分区分析': 'price_zone_analysis',
+            buy_plan_analysis: 'buy_plan_analysis',
+            buy_plan: 'buy_plan_analysis',
+            plan: 'buy_plan_analysis',
+            '买卖计划分析师': 'buy_plan_analysis',
+            '买卖计划分析': 'buy_plan_analysis',
+            risk_control_analysis: 'risk_control_analysis',
+            risk_control: 'risk_control_analysis',
+            risk: 'risk_control_analysis',
+            '风险控制分析师': 'risk_control_analysis',
+            '风险控制分析': 'risk_control_analysis'
+        };
 
         function generateClientId() {
             return 'entry_decision_' + Math.random().toString(36).slice(2) + '_' + Date.now();
@@ -659,37 +834,309 @@
         }
 
         function renderRolePreview(data) {
-            const mount = document.getElementById('resultsContent');
-            const existing = document.getElementById('rolePreviewMount');
-            if (existing) {
-                existing.innerHTML += renderSectionCard(data.role_title || data.role_name || '阶段结果', data.output || {});
+            const roleKey = resolveRoleKey(data.role_key || data.role_name || data.role_title || '');
+            if (!roleKey) {
                 return;
             }
-            mount.innerHTML = `<div id="rolePreviewMount" class="result-stack">${renderSectionCard(data.role_title || data.role_name || '阶段结果', data.output || {})}</div>`;
+            rolePreviewState[roleKey] = {
+                role_title: data.role_title || data.role_name || getRoleConfig(roleKey)?.title || '阶段结果',
+                output: data.output || {}
+            };
+            renderTabbedResults(currentResult, { previewOnly: true, activeKey: roleKey });
         }
 
-        function renderResult(result) {
+        function renderResult(result, options = {}) {
             if (!result || result.success !== true) {
                 renderError('返回结果格式不正确');
                 return;
             }
+            currentResult = result;
+            rolePreviewState = buildRolePreviewStateFromResult(result.data || {});
+            renderTabbedResults(result, options);
             const data = result.data || {};
-            const html = [
-                renderSectionCard('标的基本信息', data.basic_info || {}),
-                renderSectionCard('宏观分析', data.macro_analysis || {}),
-                renderSectionCard('资产分类', data.asset_classification || {}),
-                renderSectionCard('价值阶段分析', data.value_stage_analysis || {}),
-                renderSectionCard('价格分区分析', data.price_zone_analysis || {}),
-                renderSectionCard('买卖计划分析', data.buy_plan_analysis || {}),
-                renderSectionCard('风险控制分析', data.risk_control_analysis || {}),
-                renderSectionCard('最终决策卡', data.decision_card || {}),
-                renderSectionCard('执行元信息', data.meta || {}),
-                renderRawJsonBlock('查看快照原始数据', data.snapshot || {}),
-                renderRawJsonBlock('查看手工补充输入', data.manual_inputs || {}),
-                renderRawJsonBlock('查看完整结果 JSON', data)
-            ].filter(Boolean).join('');
-            document.getElementById('resultsContent').innerHTML = `<div class="result-stack">${html}</div>`;
             addLog(`进场决策结果已返回: ${data.stock_code || '{{ watch_stock.stock_code }}'}`, 'success');
+        }
+
+        function renderTabbedResults(result, options = {}) {
+            const data = result && result.data ? result.data : {};
+            const tabs = buildResultTabs(data, options.previewOnly === true);
+            const activeKey = pickActiveTabKey(tabs, options.activeKey);
+            if (!tabs.length) {
+                document.getElementById('resultsContent').innerHTML = `
+                    <div class="empty-state">
+                        <div style="font-size:48px;">🧭</div>
+                        <div>等待角色结果返回后展示 Tab 内容。</div>
+                        <div style="font-size:13px;color:#9ca3af;">结果区会展示分析师结果、总结，以及原始 JSON。</div>
+                    </div>
+                `;
+                return;
+            }
+            const nav = tabs.map(tab => `
+                <button type="button" class="tab-btn${tab.key === activeKey ? ' active' : ''}" data-tab-key="${escapeHtml(tab.key)}">
+                    ${escapeHtml(tab.title)}
+                </button>
+            `).join('');
+            const panels = tabs.map(tab => `
+                <section class="tab-panel${tab.key === activeKey ? ' active' : ''}" data-tab-panel="${escapeHtml(tab.key)}">
+                    ${tab.content}
+                </section>
+            `).join('');
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="result-tabs">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                        <div class="helper-text">结果区会展示分析师结果、总结，以及原始 JSON。</div>
+                        ${renderSourceBadge(data.result_source || data.meta?.result_source || 'live', data.cache_file || data.meta?.cache_file || '')}
+                    </div>
+                    <div class="tab-nav" id="decisionResultTabs">${nav}</div>
+                    <div class="tab-panels">${panels}</div>
+                </div>
+            `;
+            bindResultTabEvents();
+        }
+
+        function buildResultTabs(data, previewOnly) {
+            const tabs = [];
+            ROLE_TAB_CONFIG.forEach(config => {
+                if (config.key === 'summary') {
+                    if (previewOnly) {
+                        return;
+                    }
+                    tabs.push({
+                        key: config.key,
+                        title: config.title,
+                        content: renderSummaryTab(data)
+                    });
+                    return;
+                }
+                const preview = rolePreviewState[config.key];
+                const value = data[config.field] || (preview ? preview.output : null);
+                if (!hasRenderableContent(value)) {
+                    return;
+                }
+                tabs.push({
+                    key: config.key,
+                    title: preview?.role_title || config.title,
+                    content: renderRoleTab(config.key, value, preview?.role_title || config.title, previewOnly)
+                });
+            });
+            return tabs;
+        }
+
+        function renderRoleTab(roleKey, value, title, previewOnly) {
+            const cards = [];
+            const spec = buildRoleCardSpecs(roleKey, value);
+            spec.forEach(section => {
+                if (!hasRenderableContent(section.value)) {
+                    return;
+                }
+                cards.push(renderStructuredSection(section.title, section.value));
+            });
+            if (!previewOnly) {
+                cards.push(renderRawJsonBlock(`查看${title}原始 JSON`, value));
+            }
+            return `<div class="result-stack">${cards.filter(Boolean).join('')}</div>`;
+        }
+
+        function renderSummaryTab(data) {
+            if (typeof data.entry_decision_summary_markdown === 'string' && data.entry_decision_summary_markdown.trim()) {
+                const renderedMarkdown = typeof marked !== 'undefined'
+                    ? marked.parse(data.entry_decision_summary_markdown)
+                    : `<pre>${escapeHtml(data.entry_decision_summary_markdown)}</pre>`;
+                return `
+                    <div class="result-stack">
+                        <div class="markdown-summary">${renderedMarkdown}</div>
+                        ${renderRawJsonBlock('查看快照原始数据', data.snapshot || {})}
+                        ${renderRawJsonBlock('查看手工补充输入', data.manual_inputs || {})}
+                        ${renderRawJsonBlock('查看完整结果 JSON', data)}
+                    </div>
+                `;
+            }
+            const sections = [
+                { title: '标的基本信息', value: data.basic_info || {} },
+                { title: 'Step 1：宏观判断', value: data.macro_analysis || {} },
+                { title: 'Step 2：资产归类', value: data.asset_classification || {} },
+                { title: 'Step 3：价值阶段判断', value: data.value_stage_analysis || {} },
+                { title: 'Step 4：价格分区', value: data.price_zone_analysis || {} },
+                { title: 'Step 5：三笔买入计划', value: data.buy_plan_analysis || {} },
+                { title: 'Step 6：涨后应对', value: pickNestedValue(data.risk_control_analysis, ['post_buy_rise_plan', 'rise_plan', 'rise_response']) || data.risk_control_analysis || {} },
+                { title: 'Step 7：跌后应对', value: pickNestedValue(data.risk_control_analysis, ['post_buy_fall_plan', 'fall_plan', 'fall_response']) || data.risk_control_analysis || {} },
+                { title: '卖出规则', value: pickNestedValue(data.risk_control_analysis, ['sell_rules', 'sell_rule', 'exit_rules']) || data.risk_control_analysis || {} },
+                { title: '最终一页决策卡', value: data.decision_card || {} },
+                { title: '执行元信息', value: data.meta || {} }
+            ];
+            const cards = sections
+                .filter(section => hasRenderableContent(section.value))
+                .map(section => renderStructuredSection(section.title, section.value));
+            cards.unshift('<div class="helper-text">当前记录尚未生成模板化总结，已回退到结构化章节视图。</div>');
+            cards.push(renderRawJsonBlock('查看快照原始数据', data.snapshot || {}));
+            cards.push(renderRawJsonBlock('查看手工补充输入', data.manual_inputs || {}));
+            cards.push(renderRawJsonBlock('查看完整结果 JSON', data));
+            return `<div class="result-stack">${cards.filter(Boolean).join('')}</div>`;
+        }
+
+        function renderStructuredSection(title, value) {
+            const kvs = renderKVGrid(value);
+            const listBlocks = renderNestedLists(value);
+            const note = renderNarrativeBlock(value);
+            return `
+                <div class="result-block">
+                    <h3>${escapeHtml(title)}</h3>
+                    ${kvs}
+                    ${note}
+                    ${listBlocks}
+                </div>
+            `;
+        }
+
+        function renderNarrativeBlock(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                return '';
+            }
+            const narrativeKeys = ['reason', 'reasoning', 'macro_reasoning', 'classification_reasoning', 'stage_reasoning', 'zone_reasoning', 'action_reasoning', 'risk_reasoning', 'conclusion_summary', 'execution_summary'];
+            const narratives = narrativeKeys
+                .filter(key => typeof value[key] === 'string' && value[key].trim())
+                .map(key => `<div class="section-note"><strong>${escapeHtml(humanizeKey(key))}：</strong>${escapeHtml(value[key])}</div>`);
+            return narratives.join('');
+        }
+
+        function buildRoleCardSpecs(roleKey, value) {
+            switch (roleKey) {
+                case 'macro_analysis':
+                    return [
+                        { title: '宏观结论', value: pickObject(value, ['macro_quick_view', 'macro_view', 'macro_conclusion', 'macro_reasoning', 'research_needed', 'reason']) },
+                        { title: '宏观动作建议', value: pickObject(value, ['benefit_asset_types', 'avoid_asset_types', 'suggested_total_position', 'fit_with_target']) },
+                        { title: '完整宏观分析', value }
+                    ];
+                case 'asset_classification':
+                    return [
+                        { title: '资产归类结论', value: pickObject(value, ['asset_classification', 'classification_reasoning']) },
+                        { title: '推荐打法', value: pickObject(value, ['recommended_playbook', 'upside_logic', 'risk_logic', 'forbidden_playbook']) },
+                        { title: '完整资产分类分析', value }
+                    ];
+                case 'value_stage_analysis':
+                    return [
+                        { title: '价值阶段结论', value: pickObject(value, ['current_stage', 'stage_reasoning', 'reason']) },
+                        { title: '关键维度判断', value: pickObject(value, ['fundamental_view', 'expectation_view', 'valuation_view', 'price_action_view']) },
+                        { title: '完整价值阶段分析', value }
+                    ];
+                case 'price_zone_analysis':
+                    return [
+                        { title: '价格分区结论', value: pickObject(value, ['price_zone', 'zone_reasoning', 'action_signal', 'action_reasoning']) },
+                        { title: '区间判断', value: pickObject(value, ['cheap_zone', 'reasonable_low_zone', 'reasonable_zone', 'overvalued_zone']) },
+                        { title: '完整价格分区分析', value }
+                    ];
+                case 'buy_plan_analysis':
+                    return [
+                        { title: '买卖计划结论', value: pickObject(value, ['suggested_action', 'suggested_entry_leg', 'action_reasoning']) },
+                        { title: '仓位与三笔计划', value: pickObject(value, ['current_position', 'max_target_position', 'first_leg', 'second_leg', 'third_leg', 'execution_plan']) },
+                        { title: '完整买卖计划分析', value }
+                    ];
+                case 'risk_control_analysis':
+                    return [
+                        { title: '风险控制结论', value: pickObject(value, ['risk_level', 'risk_reasoning', 'conclusion_summary']) },
+                        { title: '涨跌应对与卖出规则', value: pickObject(value, ['post_buy_rise_plan', 'post_buy_fall_plan', 'sell_rules', 'rise_plan', 'fall_plan']) },
+                        { title: '完整风险控制分析', value }
+                    ];
+                default:
+                    return [{ title: '阶段结果', value }];
+            }
+        }
+
+        function buildRolePreviewStateFromResult(data) {
+            const state = {};
+            ROLE_TAB_CONFIG.forEach(config => {
+                if (!config.field || !hasRenderableContent(data[config.field])) {
+                    return;
+                }
+                state[config.key] = {
+                    role_title: config.title,
+                    output: data[config.field]
+                };
+            });
+            return state;
+        }
+
+        function resolveRoleKey(rawValue) {
+            const raw = String(rawValue || '').trim();
+            const normalized = raw.toLowerCase();
+            if (!raw) {
+                return '';
+            }
+            if (ROLE_KEY_ALIASES[raw]) {
+                return ROLE_KEY_ALIASES[raw];
+            }
+            if (ROLE_KEY_ALIASES[normalized]) {
+                return ROLE_KEY_ALIASES[normalized];
+            }
+            return ROLE_TAB_CONFIG.find(item => normalized.includes(item.key.replace('_analysis', '')) || raw.includes(item.title.replace('分析师', '')))?.key || '';
+        }
+
+        function getRoleConfig(roleKey) {
+            return ROLE_TAB_CONFIG.find(item => item.key === roleKey) || null;
+        }
+
+        function pickActiveTabKey(tabs, requestedKey) {
+            if (requestedKey && tabs.some(tab => tab.key === requestedKey)) {
+                return requestedKey;
+            }
+            return tabs[0] ? tabs[0].key : '';
+        }
+
+        function bindResultTabEvents() {
+            const buttons = document.querySelectorAll('#decisionResultTabs .tab-btn');
+            buttons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const key = button.getAttribute('data-tab-key');
+                    setActiveResultTab(key);
+                });
+            });
+        }
+
+        function setActiveResultTab(tabKey) {
+            document.querySelectorAll('#decisionResultTabs .tab-btn').forEach(button => {
+                button.classList.toggle('active', button.getAttribute('data-tab-key') === tabKey);
+            });
+            document.querySelectorAll('[data-tab-panel]').forEach(panel => {
+                panel.classList.toggle('active', panel.getAttribute('data-tab-panel') === tabKey);
+            });
+        }
+
+        function hasRenderableContent(value) {
+            if (value === null || value === undefined || value === '') {
+                return false;
+            }
+            if (Array.isArray(value)) {
+                return value.length > 0;
+            }
+            if (typeof value === 'object') {
+                return Object.keys(value).length > 0;
+            }
+            return true;
+        }
+
+        function pickObject(source, keys) {
+            if (!source || typeof source !== 'object' || Array.isArray(source)) {
+                return source;
+            }
+            const result = {};
+            keys.forEach(key => {
+                if (hasRenderableContent(source[key])) {
+                    result[key] = source[key];
+                }
+            });
+            return result;
+        }
+
+        function pickNestedValue(source, keys) {
+            if (!source || typeof source !== 'object') {
+                return null;
+            }
+            for (const key of keys) {
+                if (hasRenderableContent(source[key])) {
+                    return source[key];
+                }
+            }
+            return null;
         }
 
         function renderSectionCard(title, value) {
@@ -738,6 +1185,13 @@
 
         function renderKV(label, value) {
             return `<div class="kv"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value == null || value === '' ? '-' : String(value))}</div></div>`;
+        }
+
+        function renderSourceBadge(resultSource, cacheFile) {
+            const source = resultSource === 'cache' ? 'cache' : 'live';
+            const label = source === 'cache' ? '来自缓存' : '实时生成';
+            const fileText = cacheFile ? ` · ${escapeHtml(cacheFile)}` : '';
+            return `<div class="source-badge ${source}">${label}${fileText}</div>`;
         }
 
         function syncSummaryFieldsFromResult(result) {

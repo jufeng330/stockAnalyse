@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import traceback
 from pathlib import Path
@@ -91,6 +92,123 @@ class StockAiAnalyzer:
         self.data_dir = project_root / 'cache' / 'analyzer_result'
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
+    def _dump_openai_completion(self, stock_name: str, completion, current_date: datetime.datetime) -> None:
+        timestamp_str = current_date.strftime("%Y%m%d%H%M%S")
+        dump_path = self.data_dir / f"{stock_name or 'unknown'}_{self.model}_completion_{timestamp_str}.json"
+        try:
+            if hasattr(completion, 'model_dump_json'):
+                dump_path.write_text(completion.model_dump_json(indent=2), encoding='utf-8')
+                return
+            if hasattr(completion, 'model_dump'):
+                dump_path.write_text(
+                    json.dumps(completion.model_dump(), ensure_ascii=False, indent=2, default=str),
+                    encoding='utf-8',
+                )
+                return
+            if hasattr(completion, 'to_dict'):
+                dump_path.write_text(
+                    json.dumps(completion.to_dict(), ensure_ascii=False, indent=2, default=str),
+                    encoding='utf-8',
+                )
+                return
+            dump_path.write_text(json.dumps(completion, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
+        except Exception as dump_error:
+            debug_log(f"写入 completion dump 失败: {dump_error}")
+            return
+        debug_log(f"OpenAI completion 已保存到文件: {dump_path}")
+
+    def _extract_message_tool_calls(self, choice) -> list:
+        tool_calls = getattr(choice, 'tool_calls', None) or []
+        if tool_calls:
+            return tool_calls
+        function_call = getattr(choice, 'function_call', None)
+        if function_call:
+            return [{'function': function_call}]
+        additional_kwargs = getattr(choice, 'additional_kwargs', None) or {}
+        alt_tool_calls = additional_kwargs.get('tool_calls') or []
+        if alt_tool_calls:
+            return alt_tool_calls
+        alt_function_call = additional_kwargs.get('function_call')
+        if alt_function_call:
+            return [{'function': alt_function_call}]
+        return []
+    def _extract_tool_call_arguments(self, tool_call) -> str:
+        function_call = getattr(tool_call, 'function', None)
+        if function_call is not None:
+            return getattr(function_call, 'arguments', '') or ''
+        if isinstance(tool_call, dict):
+            function_dict = tool_call.get('function') or {}
+            if isinstance(function_dict, dict):
+                return function_dict.get('arguments', '') or ''
+            return getattr(function_dict, 'arguments', '') or ''
+        return ''
+
+    def _summarize_choice(self, choice) -> str:
+        if choice is None:
+            return '<none>'
+        content = getattr(choice, 'content', None)
+        tool_calls = self._extract_message_tool_calls(choice)
+        content_preview = content.strip()[:500] if isinstance(content, str) else repr(content)
+        return f"content={content_preview}, tool_calls={json.dumps(tool_calls, ensure_ascii=False, default=str)[:1000]}"
+
+    def _build_json_reformat_instruction(self, instruction: str) -> str:
+        return (
+            f"{instruction}\n"
+            '你的唯一任务是把输入内容整理成一个合法 JSON 对象字符串。'
+            '不要输出 markdown，不要输出解释，不要补充任何说明文字。'
+        )
+
+    def _build_json_reformat_message(self, raw_text: str) -> str:
+        return (
+            '请将下面内容整理为一个合法 JSON 对象字符串。\n'
+            '要求：\n'
+            '1. 只输出 JSON 对象本身。\n'
+            '2. 去掉 markdown 代码块标记。\n'
+            '3. 如果有中文说明文字，只保留能组成 JSON 对象的部分。\n'
+            '4. 如果内容本身无法整理成 JSON 对象，请原样返回。\n\n'
+            f'原始内容:\n{raw_text}'
+        )
+
+    def _parse_json_content(self, content: str):
+        stripped = (content or '').strip()
+        if not stripped:
+            return None
+        if stripped.startswith('```'):
+            stripped = stripped.strip('`').strip()
+            if stripped.startswith('json'):
+                stripped = stripped[4:].strip()
+        start = stripped.find('{')
+        end = stripped.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            candidate = stripped[start:end + 1]
+            return json.loads(candidate)
+        return None
+
+    def _retry_json_reformat(self, client, request_kwargs: dict, instruction: str, raw_text: str, stock_name: str, current_date: datetime.datetime):
+        fallback_kwargs = dict(request_kwargs)
+        fallback_kwargs.pop('tools', None)
+        fallback_kwargs.pop('tool_choice', None)
+        fallback_kwargs.pop('response_format', None)
+        fallback_kwargs['messages'] = (
+            {'role': 'system', 'content': self._build_json_reformat_instruction(instruction)},
+            {'role': 'user', 'content': self._build_json_reformat_message(raw_text)},
+        )
+        completion = client.chat.completions.create(
+            **fallback_kwargs,
+            stream=False,
+        )
+        self._dump_openai_completion(f"{stock_name or 'unknown'}_json_reformat", completion, current_date)
+        choice = completion.choices[0].message if completion and completion.choices else None
+        if choice is None:
+            raise ValueError('模型在 JSON 重整模式下未返回 message')
+        parsed = self._parse_json_content(getattr(choice, 'content', None))
+        if parsed is not None:
+            return parsed
+        raise ValueError(
+            '当前 AI 服务在首轮生成和 JSON 重整模式下都未返回可解析内容。'
+            f' 原始响应摘要: {self._summarize_choice(choice)}'
+        )
+
     def aliyun_chat_api_call(self, symbol='', message='你好'):
         current_date = datetime.datetime.now()
         stock_name = symbol
@@ -124,10 +242,20 @@ class StockAiAnalyzer:
             result = f"发生异常: {e}"
             return result
 
-    def openai_api_call(self, symbol='', message='你好', instruction='请模拟中国A股的分析大师'):
+    def openai_api_call(
+        self,
+        symbol='',
+        message='你好',
+        instruction='请模拟中国A股的分析大师',
+        *,
+        tools=None,
+        tool_choice=None,
+        response_format=None,
+        require_tool_call=False,
+    ):
         current_date = datetime.datetime.now()
         stock_name = symbol
-        json = ''
+        raw_response = ''
         try:
             debug_log("openai_api_call............................")
             if len(message) > 109024:
@@ -138,29 +266,57 @@ class StockAiAnalyzer:
                 base_url=self.base_http_api_url,
             )
 
-            completion = client.chat.completions.create(
-                model=self.model,
-                messages=(
+            request_kwargs = {
+                'model': self.model,
+                'messages': (
                     {'role': 'system', 'content': instruction},
                     {'role': 'user', 'content': message},
                 ),
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stream=True,
+                'max_tokens': self.max_tokens,
+                'temperature': self.temperature,
+            }
+            if tools:
+                request_kwargs['tools'] = tools
+            if tool_choice:
+                request_kwargs['tool_choice'] = tool_choice
+            if response_format:
+                request_kwargs['response_format'] = response_format
+
+            request_kwargs.pop('tools', None)
+            request_kwargs.pop('tool_choice', None)
+            request_kwargs.pop('response_format', None)
+            completion = client.chat.completions.create(
+                **request_kwargs,
+                stream=False,
             )
+            self._dump_openai_completion(stock_name, completion, current_date)
+            choice = completion.choices[0].message if completion and completion.choices else None
+            if choice is None:
+                raise ValueError('模型未返回 message')
 
-            full_response = ""
-            for chunk in completion:
-                if chunk.choices[0].delta.content is not None:
-                    full_response += chunk.choices[0].delta.content
+            content = getattr(choice, 'content', None)
+            if isinstance(content, str) and content.strip():
+                raw_response = content.strip()
+                parsed = self._parse_json_content(raw_response)
+                if parsed is not None:
+                    return parsed
+                return self._retry_json_reformat(
+                    client,
+                    request_kwargs,
+                    instruction,
+                    raw_response,
+                    stock_name,
+                    current_date,
+                )
 
-            print(full_response)
-            json = full_response
-            return full_response
+            raise ValueError(
+                '当前 AI 服务未返回文本内容，无法进入 JSON 解析。'
+                f' 原始响应摘要: {self._summarize_choice(choice)}'
+            )
         except Exception as e:
-            debug_log(f"发生异常: {e}")
-            result = f"发生异常: {e} reuslt:{json}"
-            return result
+            debug_log(f"发生异常: {e}; raw_response={raw_response}")
+            traceback.print_exc()
+            raise
 
     def process_prompt(self, stock_zyjs_ths_df, stock_individual_info_em_df, stock_zh_a_hist_df, stock_news_em_df,
                        stock_individual_fund_flow_df, technical_indicators_df,

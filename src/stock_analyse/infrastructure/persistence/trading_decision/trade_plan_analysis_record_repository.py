@@ -85,7 +85,7 @@ class TradePlanAnalysisRecordRepository:
                 'SELECT * FROM trade_plan_analysis_records WHERE id = ?',
                 [record_id],
             ).fetchone()
-        return dict(row) if row else None
+        return self._format_row(dict(row)) if row else None
 
     def list_by_watch_stock(self, watch_stock_id: str, limit: int = 10) -> list[dict[str, Any]]:
         with self.connection_factory.connect() as connection:
@@ -99,10 +99,49 @@ class TradePlanAnalysisRecordRepository:
                 ''',
                 [watch_stock_id, limit],
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._format_row(dict(row)) for row in rows]
+
+    def _format_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        entry_plan_json = row.get('entry_plan_json') or {}
+        raw_result_json = row.get('raw_result_json') or {}
+        if isinstance(entry_plan_json, str):
+            try:
+                entry_plan_json = json.loads(entry_plan_json)
+            except Exception:
+                entry_plan_json = {}
+        if isinstance(raw_result_json, str):
+            try:
+                raw_result_json = json.loads(raw_result_json)
+            except Exception:
+                raw_result_json = {}
+        entry_plan_json = entry_plan_json if isinstance(entry_plan_json, dict) else {}
+        raw_result_json = raw_result_json if isinstance(raw_result_json, dict) else {}
+        data = raw_result_json.get('data') if isinstance(raw_result_json.get('data'), dict) else {}
+        decision = data.get('decision') if isinstance(data.get('decision'), dict) else {}
+        trade_plan_markdown = str(entry_plan_json.get('trade_plan_markdown') or data.get('trade_plan_markdown') or '').strip()
+        decision_action = str(decision.get('action') or '').strip()
+        risks_json = decision.get('risks') if isinstance(decision.get('risks'), list) else []
+        position_suggestion_json = decision.get('position_suggestion') if isinstance(decision.get('position_suggestion'), dict) else {}
+        return {
+            **row,
+            'entry_plan_json': entry_plan_json,
+            'raw_result_json': raw_result_json,
+            'decision_action': decision_action,
+            'decision_logic': str(decision.get('logic') or '').strip(),
+            'decision_action_label': self._map_action_label(decision_action),
+            'time_horizon': str(decision.get('time_horizon') or '').strip(),
+            'trade_plan_markdown': trade_plan_markdown,
+            'risks_json': risks_json,
+            'position_suggestion_json': position_suggestion_json,
+        }
 
     def _new_id(self) -> str:
-        return f'TP-{uuid4().hex[:12].upper()}'
+        return f'TPA-{uuid4().hex[:12].upper()}'
 
     def _json_dumps(self, value: Any) -> str:
         return json.dumps(value, ensure_ascii=False)
+
+    def _map_action_label(self, action: str | None) -> str:
+        normalized = (action or '').strip().lower()
+        mapping = {'buy': '适合买入', 'hold': '继续观察', 'watch': '继续观察', 'sell': '不适合买入'}
+        return mapping.get(normalized, action or '')

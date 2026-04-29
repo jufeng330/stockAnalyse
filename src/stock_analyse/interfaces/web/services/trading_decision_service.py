@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from stock_analyse.application.dto.entry_decision_state import EntryDecisionState
+from stock_analyse.application.services.ai_stock_data_facade import AIStockDataFacade
 from stock_analyse.infrastructure.persistence.trading_decision.entry_decision_record_repository import (
     EntryDecisionRecordRepository,
 )
 from stock_analyse.infrastructure.persistence.trading_decision.entry_decision_session_repository import (
     EntryDecisionSessionRepository,
+)
+from stock_analyse.infrastructure.persistence.trading_decision.holding_review_record_repository import (
+    HoldingReviewRecordRepository,
+)
+from stock_analyse.infrastructure.persistence.trading_decision.holding_stock_repository import HoldingStockRepository
+from stock_analyse.infrastructure.persistence.trading_decision.position_decision_record_repository import (
+    PositionDecisionRecordRepository,
+)
+from stock_analyse.infrastructure.persistence.trading_decision.stock_analysis_record_repository import (
+    StockAnalysisRecordRepository,
 )
 from stock_analyse.infrastructure.persistence.trading_decision.trade_plan_analysis_record_repository import (
     TradePlanAnalysisRecordRepository,
@@ -20,30 +34,2468 @@ from stock_analyse.infrastructure.services.market_data_service import stockBorde
 
 
 class TradingDecisionService:
-    def __init__(self, db_path: str | Path | None = None) -> None:
+    def __init__(self, db_path: str | Path | None = None, *, data_facade: AIStockDataFacade | None = None) -> None:
         resolved_db_path = db_path or self._default_db_path()
         self.repository = WatchStockRepository(resolved_db_path)
+        self.holding_repository = HoldingStockRepository(resolved_db_path)
         self.trade_plan_repository = TradePlanAnalysisRecordRepository(resolved_db_path)
+        self.trade_plan_analysis_record_repository = self.trade_plan_repository
+        self.stock_analysis_record_repository = StockAnalysisRecordRepository(resolved_db_path)
+        self.position_decision_record_repository = PositionDecisionRecordRepository(resolved_db_path)
+        self.holding_review_record_repository = HoldingReviewRecordRepository(resolved_db_path)
         self.entry_decision_session_repository = EntryDecisionSessionRepository(resolved_db_path)
         self.entry_decision_record_repository = EntryDecisionRecordRepository(resolved_db_path)
+        self.data_facade = data_facade or AIStockDataFacade()
+        self.trade_plan_cache_dir = Path(__file__).resolve().parents[5] / 'cache' / 'tranding_plan'
+        self.trade_plan_template_path = Path(__file__).resolve().parents[5] / 'doc' / '持仓计划.md'
+        self.trade_plan_cache_biz_markers = {
+            'entry_decision': 'Strategy',
+            'stock_analysis': 'analyse',
+            'trade_plan': 'plan',
+        }
+        self.trade_plan_cache_display_labels = {
+            'entry_decision': '进场策略',
+            'stock_analysis': '股票分析',
+            'trade_plan': '买入计划',
+        }
+        self.trade_plan_template_name = '持仓计划模板（买前执行版）'
+        self.trade_plan_cache_keywords = {
+            'entry_decision': ['entry-decision', 'entry_decision', '进场决策', 'strategy'],
+            'stock_analysis': ['stock-analysis', 'stock_analysis', 'analysis-plan', 'analysis_plan', '股票分析', '分析计划', 'analyse'],
+            'trade_plan': ['trade-plan', 'trade_plan', '持仓计划', '买入计划', 'plan'],
+        }
+        self.trade_plan_role_instruction = '股票交易专家'
 
     def build_watch_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
-        normalized_filters = self.normalize_filters(filters or {})
+        raw_filters = filters or {}
+        normalized_filters = self.normalize_filters(raw_filters)
         result = self.repository.list(normalized_filters)
+        all_history_items = self._build_watch_records_history_items(result.items)
+        history_filters = self.build_watch_history_filters(raw_filters)
+        filtered_history_items = self._filter_watch_records_history_items(all_history_items, history_filters['history_type'])
+        history_items, history_pagination = self._paginate_items(
+            filtered_history_items,
+            page=history_filters['history_page'],
+            page_size=history_filters['history_page_size'],
+        )
+        pagination = {
+            **result.pagination,
+            'total_pages': max((result.pagination.get('total', 0) + result.pagination.get('page_size', 20) - 1) // result.pagination.get('page_size', 20), 1),
+        }
         return {
             'summary': result.summary,
             'items': result.items,
-            'pagination': result.pagination,
+            'pagination': pagination,
+            'pagination_links': {
+                'prev': self.build_watch_stocks_page_href(page=max(pagination.get('page', 1) - 1, 1), filters=normalized_filters, history_filters=history_filters),
+                'next': self.build_watch_stocks_page_href(page=pagination.get('page', 1) + 1, filters=normalized_filters, history_filters=history_filters),
+            },
             'filters': normalized_filters,
             'filter_options': self._build_filter_options(result.items),
-            'history_placeholder': '持仓计划分析已进入真实页面，统一历史中心会在后续阶段补齐。',
+            'history_items': history_items,
+            'history_filter_options': self.build_watch_history_filter_options(),
+            'history_filters': history_filters,
+            'history_filter_summary': self.build_watch_history_filter_summary(history_filters),
+            'history_pagination': history_pagination,
+            'history_pagination_links': {
+                'prev': self.build_watch_stocks_history_href(page=max(history_pagination.get('page', 1) - 1, 1), filters=normalized_filters, history_filters=history_filters),
+                'next': self.build_watch_stocks_history_href(page=history_pagination.get('page', 1) + 1, filters=normalized_filters, history_filters=history_filters),
+            },
         }
+
+    def build_holding_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        raw_filters = filters or {}
+        normalized_filters = self.normalize_holding_filters(raw_filters)
+        result = self.holding_repository.list(normalized_filters)
+        items = [self._build_holding_stock_payload(item) for item in result.items]
+        pagination = {
+            **result.pagination,
+            'total_pages': max((result.pagination.get('total', 0) + result.pagination.get('page_size', 20) - 1) // result.pagination.get('page_size', 20), 1),
+        }
+        return {
+            'summary': result.summary,
+            'items': items,
+            'pagination': pagination,
+            'pagination_links': {
+                'prev': self.build_holding_stocks_page_href(page=max(pagination.get('page', 1) - 1, 1), filters=normalized_filters),
+                'next': self.build_holding_stocks_page_href(page=pagination.get('page', 1) + 1, filters=normalized_filters),
+            },
+            'filters': normalized_filters,
+            'filter_options': self._build_holding_filter_options(result.items),
+        }
+
+    def build_holding_stocks_page_href(self, *, page: int, filters: dict[str, Any]) -> str:
+        query = {
+            'page': max(int(page or 1), 1),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+        }
+        for key in ('keyword', 'market', 'asset_type', 'risk_status', 'suggested_action'):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                query[key] = value
+        return '/holding-stocks?' + urlencode(query)
+
+    def build_holding_stocks_reset_href(self) -> str:
+        return '/holding-stocks'
+
+    def normalize_holding_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'keyword': (filters.get('keyword') or '').strip(),
+            'market': (filters.get('market') or '').strip(),
+            'asset_type': (filters.get('asset_type') or '').strip(),
+            'risk_status': (filters.get('risk_status') or '').strip(),
+            'suggested_action': (filters.get('suggested_action') or '').strip(),
+            'status': (filters.get('status') or '').strip(),
+            'page': self._to_int(filters.get('page'), default=1, minimum=1),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+        }
+
+    def list_holding_stocks(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        normalized_filters = self.normalize_holding_filters(filters or {})
+        result = self.holding_repository.list(normalized_filters)
+        return {
+            'items': [self._build_holding_stock_payload(item) for item in result.items],
+            'summary': result.summary,
+            'pagination': result.pagination,
+            'filters': normalized_filters,
+        }
+
+    def get_holding_stock(self, holding_stock_id: str) -> dict[str, Any] | None:
+        item = self.holding_repository.get_by_id(holding_stock_id)
+        return self._build_holding_stock_payload(item) if item else None
+
+    def get_holding_stock_by_watch_stock(self, watch_stock_id: str) -> dict[str, Any] | None:
+        item = self.holding_repository.get_by_linked_watch_stock_id(watch_stock_id)
+        return self._build_holding_stock_payload(item) if item else None
+
+    def create_holding_stock_buy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = self._normalize_holding_buy_payload(payload, creating=True)
+        created = self.holding_repository.create_with_buy(normalized)
+        if created.get('linked_watch_stock_id'):
+            self.update_watch_stock(
+                created['linked_watch_stock_id'],
+                {
+                    'linked_holding_stock_id': created['id'],
+                    'suggested_action': normalized.get('suggested_action') or '',
+                },
+            )
+        return self._build_holding_stock_payload(created)
+
+    def append_holding_stock_buy(self, holding_stock_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        normalized = self._normalize_holding_buy_payload(payload, creating=False)
+        updated = self.holding_repository.append_buy(holding_stock_id, normalized)
+        return self._build_holding_stock_payload(updated) if updated else None
+
+    def convert_watch_stock_to_holding_buy(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+        linked_holding_id = (watch_stock.get('linked_holding_stock_id') or '').strip()
+        normalized = self._normalize_holding_buy_payload(
+            {
+                **payload,
+                'linked_watch_stock_id': watch_stock_id,
+                'stock_code': payload.get('stock_code') or watch_stock.get('stock_code') or '',
+                'stock_name': payload.get('stock_name') or watch_stock.get('stock_name') or '',
+                'market': payload.get('market') or watch_stock.get('market') or '',
+                'industry': payload.get('industry') or watch_stock.get('industry') or '',
+                'asset_type': payload.get('asset_type') or watch_stock.get('asset_type') or '',
+                'current_price': payload.get('current_price', watch_stock.get('current_price')),
+            },
+            creating=not bool(linked_holding_id),
+        )
+        if linked_holding_id:
+            updated = self.holding_repository.append_buy(linked_holding_id, normalized)
+            if not updated:
+                raise ValueError('关联持仓不存在')
+            self.update_watch_stock(watch_stock_id, {'linked_holding_stock_id': linked_holding_id})
+            return self._build_holding_stock_payload(updated)
+        created = self.holding_repository.create_with_buy(normalized)
+        self.update_watch_stock(watch_stock_id, {'linked_holding_stock_id': created['id']})
+        return self._build_holding_stock_payload(created)
+
+    def _build_holding_stock_payload(self, item: dict[str, Any] | None) -> dict[str, Any]:
+        if not item:
+            return {}
+        lots = self.holding_repository.list_lots(item['id'], limit=10)
+        trades = self.holding_repository.list_trades(item['id'], limit=10)
+        payload = dict(item)
+        payload['lots'] = lots
+        payload['trades'] = trades
+        payload['lot_count'] = len(lots)
+        payload['display_market'] = item.get('market') or 'A股'
+        return payload
+
+    def _normalize_holding_buy_payload(self, payload: dict[str, Any], *, creating: bool) -> dict[str, Any]:
+        normalized = {
+            'linked_watch_stock_id': (payload.get('linked_watch_stock_id') or '').strip(),
+            'stock_code': (payload.get('stock_code') or '').strip(),
+            'stock_name': (payload.get('stock_name') or '').strip(),
+            'market': (payload.get('market') or '').strip(),
+            'industry': (payload.get('industry') or '').strip(),
+            'asset_type': (payload.get('asset_type') or '').strip(),
+            'status': (payload.get('status') or '').strip() or 'active',
+            'risk_status': (payload.get('risk_status') or '').strip(),
+            'suggested_action': (payload.get('suggested_action') or '').strip(),
+            'note': (payload.get('note') or '').strip(),
+            'current_price': payload.get('current_price'),
+            'quantity': payload.get('quantity'),
+            'price': payload.get('price'),
+            'amount': payload.get('amount'),
+            'trade_date': (payload.get('trade_date') or '').strip(),
+            'last_review_at': (payload.get('last_review_at') or '').strip(),
+            'source_watch_stock_id': (payload.get('source_watch_stock_id') or '').strip(),
+        }
+        required_fields = ['quantity', 'price', 'trade_date']
+        if creating:
+            required_fields = ['stock_code', 'stock_name', 'market', 'asset_type', *required_fields]
+        self._require_fields(normalized, required_fields)
+        return normalized
+
+    def _build_holding_filter_options(self, items: list[dict[str, Any]]) -> dict[str, list[str]]:
+        return {
+            'markets': sorted({item['market'] for item in items if item.get('market')}),
+            'asset_types': sorted({item['asset_type'] for item in items if item.get('asset_type')}),
+            'risk_statuses': sorted({item['risk_status'] for item in items if item.get('risk_status')}),
+            'suggested_actions': sorted({item['suggested_action'] for item in items if item.get('suggested_action')}),
+        }
+
+    def build_holding_buy_form_data(self, *, holding_stock_id: str = '', watch_stock_id: str = '') -> dict[str, Any]:
+        if holding_stock_id:
+            holding_stock = self.get_holding_stock(holding_stock_id)
+            if not holding_stock:
+                raise ValueError('持仓不存在')
+            return {
+                'mode': 'append',
+                'holding_stock': holding_stock,
+                'watch_stock': None,
+            }
+        if watch_stock_id:
+            watch_stock = self.get_watch_stock(watch_stock_id)
+            if not watch_stock:
+                raise ValueError('关注股票不存在')
+            return {
+                'mode': 'from_watch',
+                'holding_stock': self.get_holding_stock_by_watch_stock(watch_stock_id),
+                'watch_stock': watch_stock,
+            }
+        return {
+            'mode': 'create',
+            'holding_stock': None,
+            'watch_stock': None,
+        }
+
+    def build_holding_buy_record_detail_url(self, holding_stock: dict[str, Any]) -> str:
+        return f"/holding-records?stock_code={holding_stock.get('stock_code', '')}"
+
+    def build_holding_action_links(self, holding_stock: dict[str, Any]) -> dict[str, str]:
+        return {
+            'reanalysis': '/holding-reanalysis',
+            'decision': '/position-decision',
+            'review': '/holding-review',
+            'records': self.build_holding_buy_record_detail_url(holding_stock),
+        }
+
+    def build_watch_stock_holding_buy_defaults(self, watch_stock_id: str) -> dict[str, Any]:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+        return {
+            'watch_stock_id': watch_stock_id,
+            'stock_code': watch_stock.get('stock_code', ''),
+            'stock_name': watch_stock.get('stock_name', ''),
+            'market': watch_stock.get('market', ''),
+            'industry': watch_stock.get('industry', ''),
+            'asset_type': watch_stock.get('asset_type', ''),
+            'current_price': watch_stock.get('current_price'),
+        }
+
+    def build_holding_summary_badges(self, item: dict[str, Any]) -> list[str]:
+        badges: list[str] = []
+        if item.get('risk_status'):
+            badges.append(item['risk_status'])
+        if item.get('suggested_action'):
+            badges.append(item['suggested_action'])
+        return badges
+
+    def format_holding_quantity(self, value: Any) -> str:
+        quantity = self._to_float(value)
+        if quantity is None:
+            return '0'
+        if float(quantity).is_integer():
+            return str(int(quantity))
+        return f'{quantity:.2f}'
+
+    def format_holding_amount(self, value: Any) -> str:
+        amount = self._to_float(value)
+        if amount is None:
+            return '--'
+        return f'¥{amount:,.2f}'
+
+    def format_holding_percent(self, value: Any) -> str:
+        percent = self._to_float(value)
+        if percent is None:
+            return '--'
+        return f'{percent:+.2f}%'
+
+    def format_holding_price(self, value: Any) -> str:
+        price = self._to_float(value)
+        if price is None:
+            return '--'
+        return f'¥{price:,.2f}'
+
+    def format_holding_trade_date(self, value: Any) -> str:
+        return str(value or '').strip() or '--'
+
+    def format_holding_note(self, value: Any) -> str:
+        return str(value or '').strip() or '无'
+
+    def build_holding_stock_row_view(self, item: dict[str, Any]) -> dict[str, Any]:
+        payload = self._build_holding_stock_payload(item)
+        payload['action_links'] = self.build_holding_action_links(payload)
+        payload['badges'] = self.build_holding_summary_badges(payload)
+        return payload
+
+    def build_holding_stocks_row_views(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [self.build_holding_stock_row_view(item) for item in items]
+
+    def build_holding_stock_list_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        normalized_filters = self.normalize_holding_filters(filters or {})
+        result = self.holding_repository.list(normalized_filters)
+        return {
+            'items': self.build_holding_stocks_row_views(result.items),
+            'summary': result.summary,
+            'pagination': result.pagination,
+            'filters': normalized_filters,
+        }
+
+    def build_holding_stock_detail_payload(self, holding_stock_id: str) -> dict[str, Any] | None:
+        item = self.holding_repository.get_by_id(holding_stock_id)
+        return self.build_holding_stock_row_view(item) if item else None
+
+    def build_holding_watch_conversion_payload(self, watch_stock_id: str) -> dict[str, Any]:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+        holding_stock = self.get_holding_stock_by_watch_stock(watch_stock_id)
+        return {
+            'watch_stock': watch_stock,
+            'holding_stock': holding_stock,
+        }
+
+    def build_holding_page_title(self) -> str:
+        return '持仓股票列表'
+
+    def build_holding_page_description(self) -> str:
+        return '面向“已经买入并持续管理”的标的池，接入真实持仓、批次和买卖明细。'
+
+    def build_holding_empty_state(self) -> dict[str, str]:
+        return {
+            'title': '当前没有符合条件的持仓股票',
+            'description': '你可以先新增一笔买入，或调整筛选条件重新查看。',
+        }
+
+    def build_holding_table_intro(self) -> str:
+        return '二次分析、买卖决策、复盘与历史记录入口会保留在每一行的操作区。'
+
+    def build_holding_status_message(self) -> str:
+        return ''
+
+    def build_holding_buy_success_message(self, *, appended: bool) -> str:
+        return '持仓买入补录成功' if appended else '持仓创建成功'
+
+    def build_holding_from_watch_success_message(self, *, appended: bool) -> str:
+        return '已追加到关联持仓' if appended else '已从关注股票转入持仓'
+
+    def build_holding_summary_cards(self, summary: dict[str, Any]) -> dict[str, Any]:
+        return summary
+
+    def build_holding_form_defaults(self) -> dict[str, Any]:
+        return {
+            'trade_date': datetime.now().strftime('%Y-%m-%d'),
+        }
+
+    def build_holding_filters_for_template(self, filters: dict[str, Any]) -> dict[str, Any]:
+        return filters
+
+    def build_holding_filter_summary(self, filters: dict[str, Any]) -> str:
+        labels = []
+        for key, label in (
+            ('keyword', '关键字'),
+            ('market', '市场'),
+            ('asset_type', '资产类型'),
+            ('risk_status', '风险状态'),
+            ('suggested_action', '建议动作'),
+        ):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                labels.append(f'{label}：{value}')
+        return ' / '.join(labels) if labels else '当前未应用持仓筛选条件。'
+
+    def build_holding_stock_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        page_data = self.build_holding_stocks_page_data(filters)
+        page_data['title'] = self.build_holding_page_title()
+        page_data['description'] = self.build_holding_page_description()
+        page_data['empty_state'] = self.build_holding_empty_state()
+        page_data['table_intro'] = self.build_holding_table_intro()
+        page_data['status_message'] = self.build_holding_status_message()
+        page_data['summary_cards'] = self.build_holding_summary_cards(page_data['summary'])
+        page_data['filters'] = self.build_holding_filters_for_template(page_data['filters'])
+        page_data['filter_summary'] = self.build_holding_filter_summary(page_data['filters'])
+        page_data['reset_href'] = self.build_holding_stocks_reset_href()
+        page_data['form_defaults'] = self.build_holding_form_defaults()
+        page_data['items'] = self.build_holding_stocks_row_views(result.items) if (result := self.holding_repository.list(page_data['filters'])) else []
+        return page_data
+
+    def get_holding_stock_form_detail(self, holding_stock_id: str) -> dict[str, Any] | None:
+        return self.build_holding_stock_detail_payload(holding_stock_id)
+
+    def get_holding_stock_trades(self, holding_stock_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        return self.holding_repository.list_trades(holding_stock_id, limit=limit)
+
+    def get_holding_stock_lots(self, holding_stock_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        return self.holding_repository.list_lots(holding_stock_id, limit=limit)
+
+    def build_holding_buy_api_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._normalize_holding_buy_payload(payload, creating=True)
+
+    def build_holding_append_buy_api_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._normalize_holding_buy_payload(payload, creating=False)
+
+    def build_holding_from_watch_api_payload(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        defaults = self.build_watch_stock_holding_buy_defaults(watch_stock_id)
+        return {**defaults, **payload, 'linked_watch_stock_id': watch_stock_id}
+
+    def build_holding_stock_record_label(self, item: dict[str, Any]) -> str:
+        return f"{item.get('stock_name', '')} {item.get('stock_code', '')}".strip()
+
+    def build_holding_watch_reference_label(self, item: dict[str, Any]) -> str:
+        if not item.get('linked_watch_stock_id'):
+            return ''
+        return f"关联关注股票：{item['linked_watch_stock_id']}"
+
+    def build_holding_table_row_meta(self, item: dict[str, Any]) -> dict[str, str]:
+        return {
+            'stock_label': self.build_holding_stock_record_label(item),
+            'watch_reference': self.build_holding_watch_reference_label(item),
+        }
+
+    def build_holding_stock_list_for_template(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        page_data = self.build_holding_stocks_page_data(filters)
+        page_data['items'] = [
+            {
+                **item,
+                'row_meta': self.build_holding_table_row_meta(item),
+            }
+            for item in page_data['items']
+        ]
+        return page_data
+
+    def build_holding_stocks_template_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        page_data = self.build_holding_stock_list_for_template(filters)
+        page_data['title'] = self.build_holding_page_title()
+        page_data['description'] = self.build_holding_page_description()
+        page_data['filter_summary'] = self.build_holding_filter_summary(page_data['filters'])
+        page_data['reset_href'] = self.build_holding_stocks_reset_href()
+        page_data['form_defaults'] = self.build_holding_form_defaults()
+        page_data['empty_state'] = self.build_holding_empty_state()
+        return page_data
+
+    def build_holding_stocks_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_template_data(filters)
+
+    def build_holding_stocks_api_response(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.list_holding_stocks(filters)
+
+    def build_holding_record_context(self, holding_stock_id: str) -> dict[str, Any] | None:
+        item = self.get_holding_stock(holding_stock_id)
+        if not item:
+            return None
+        return {
+            'holding_stock': item,
+            'trades': self.get_holding_stock_trades(holding_stock_id),
+            'lots': self.get_holding_stock_lots(holding_stock_id),
+        }
+
+    def update_watch_stock_linked_holding(self, watch_stock_id: str, holding_stock_id: str) -> dict[str, Any] | None:
+        return self.update_watch_stock(watch_stock_id, {'linked_holding_stock_id': holding_stock_id})
+
+    def build_holding_buy_payload_from_watch(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        defaults = self.build_watch_stock_holding_buy_defaults(watch_stock_id)
+        return {
+            **defaults,
+            **payload,
+            'linked_watch_stock_id': watch_stock_id,
+        }
+
+    def get_watch_stock_linked_holding_id(self, watch_stock_id: str) -> str:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+        return (watch_stock.get('linked_holding_stock_id') or '').strip()
+
+    def build_holding_buy_redirect_url(self) -> str:
+        return '/holding-stocks'
+
+    def build_watch_stock_buy_redirect_url(self) -> str:
+        return '/watch-stocks'
+
+    def build_holding_action_context(self, holding_stock_id: str) -> dict[str, Any] | None:
+        item = self.get_holding_stock(holding_stock_id)
+        if not item:
+            return None
+        return {
+            'holding_stock': item,
+            'links': self.build_holding_action_links(item),
+        }
+
+    def build_holding_stock_overview(self, holding_stock_id: str) -> dict[str, Any] | None:
+        return self.get_holding_stock(holding_stock_id)
+
+    def build_holding_stock_trade_summary(self, holding_stock_id: str) -> dict[str, Any] | None:
+        item = self.get_holding_stock(holding_stock_id)
+        if not item:
+            return None
+        return {
+            'quantity': item.get('quantity'),
+            'average_cost': item.get('average_cost'),
+            'current_price': item.get('current_price'),
+            'market_value': item.get('market_value'),
+            'total_buy_amount': item.get('total_buy_amount'),
+            'total_sell_amount': item.get('total_sell_amount'),
+            'unrealized_pnl': item.get('unrealized_pnl'),
+            'unrealized_pnl_pct': item.get('unrealized_pnl_pct'),
+        }
+
+    def build_holding_stock_watch_reference(self, holding_stock_id: str) -> dict[str, Any] | None:
+        item = self.get_holding_stock(holding_stock_id)
+        if not item:
+            return None
+        linked_watch_stock_id = (item.get('linked_watch_stock_id') or '').strip()
+        if not linked_watch_stock_id:
+            return None
+        return self.get_watch_stock(linked_watch_stock_id)
+
+    def build_holding_stock_buy_defaults(self, holding_stock_id: str) -> dict[str, Any] | None:
+        item = self.get_holding_stock(holding_stock_id)
+        if not item:
+            return None
+        return {
+            'stock_code': item.get('stock_code', ''),
+            'stock_name': item.get('stock_name', ''),
+            'market': item.get('market', ''),
+            'industry': item.get('industry', ''),
+            'asset_type': item.get('asset_type', ''),
+            'current_price': item.get('current_price'),
+            'trade_date': datetime.now().strftime('%Y-%m-%d'),
+        }
+
+    def build_holding_stock_create_defaults(self) -> dict[str, Any]:
+        return {
+            'trade_date': datetime.now().strftime('%Y-%m-%d'),
+        }
+
+    def build_holding_stock_form_defaults(self, *, holding_stock_id: str = '', watch_stock_id: str = '') -> dict[str, Any]:
+        if holding_stock_id:
+            defaults = self.build_holding_stock_buy_defaults(holding_stock_id)
+            if defaults:
+                return defaults
+        if watch_stock_id:
+            return self.build_watch_stock_holding_buy_defaults(watch_stock_id)
+        return self.build_holding_stock_create_defaults()
+
+    def build_holding_stock_filter_state(self, filters: dict[str, Any]) -> dict[str, Any]:
+        return filters
+
+    def build_holding_stock_filter_options(self, filters: dict[str, Any] | None = None) -> dict[str, list[str]]:
+        result = self.holding_repository.list(self.normalize_holding_filters(filters or {}))
+        return self._build_holding_filter_options(result.items)
+
+    def build_holding_stock_page_links(self, filters: dict[str, Any] | None = None) -> dict[str, str]:
+        normalized = self.normalize_holding_filters(filters or {})
+        return {
+            'reset': self.build_holding_stocks_reset_href(),
+            'page': self.build_holding_stocks_page_href(page=normalized['page'], filters=normalized),
+        }
+
+    def build_holding_stock_metric_labels(self) -> dict[str, str]:
+        return {
+            'quantity': '持仓数量',
+            'average_cost': '持仓均价',
+            'current_price': '当前价',
+            'market_value': '持仓市值',
+            'unrealized_pnl': '浮盈亏',
+            'unrealized_pnl_pct': '收益率',
+        }
+
+    def build_holding_stock_badge_labels(self) -> dict[str, str]:
+        return {
+            'risk_status': '风险状态',
+            'suggested_action': '建议动作',
+        }
+
+    def build_holding_stock_page_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        page_data = self.build_holding_stocks_render_data(filters)
+        page_data['metric_labels'] = self.build_holding_stock_metric_labels()
+        page_data['badge_labels'] = self.build_holding_stock_badge_labels()
+        return page_data
+
+    def build_holding_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_page_model(filters)
+
+    def build_holding_buy_response_payload(self, holding_stock: dict[str, Any]) -> dict[str, Any]:
+        return self.build_holding_stock_row_view(holding_stock)
+
+    def build_holding_buy_append_response_payload(self, holding_stock: dict[str, Any]) -> dict[str, Any]:
+        return self.build_holding_stock_row_view(holding_stock)
+
+    def build_holding_buy_from_watch_response_payload(self, holding_stock: dict[str, Any]) -> dict[str, Any]:
+        return self.build_holding_stock_row_view(holding_stock)
+
+    def build_holding_stock_template_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_data(filters)
+
+    def build_holding_stock_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_template_context(filters)
+
+    def build_holding_list_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_page_data(filters)
+
+    def build_holding_main_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_list_page_data(filters)
+
+    def build_holding_render_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_main_page_data(filters)
+
+    def build_holding_stocks_real_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_page_data(filters)
+
+    def build_holding_page(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_real_page_data(filters)
+
+    def build_holding_buy_page_defaults(self, *, holding_stock_id: str = '', watch_stock_id: str = '') -> dict[str, Any]:
+        return self.build_holding_stock_form_defaults(holding_stock_id=holding_stock_id, watch_stock_id=watch_stock_id)
+
+    def build_holding_stock_recent_trade_label(self, item: dict[str, Any]) -> str:
+        return item.get('latest_buy_at') or '--'
+
+    def build_holding_stock_latest_review_label(self, item: dict[str, Any]) -> str:
+        return item.get('last_review_at') or '--'
+
+    def build_holding_stock_display_payload(self, item: dict[str, Any]) -> dict[str, Any]:
+        payload = self.build_holding_stock_row_view(item)
+        payload['latest_buy_label'] = self.build_holding_stock_recent_trade_label(payload)
+        payload['latest_review_label'] = self.build_holding_stock_latest_review_label(payload)
+        payload['quantity_display'] = self.format_holding_quantity(payload.get('quantity'))
+        payload['average_cost_display'] = self.format_holding_price(payload.get('average_cost'))
+        payload['current_price_display'] = self.format_holding_price(payload.get('current_price'))
+        payload['market_value_display'] = self.format_holding_amount(payload.get('market_value'))
+        payload['buy_amount_display'] = self.format_holding_amount(payload.get('total_buy_amount'))
+        payload['sell_amount_display'] = self.format_holding_amount(payload.get('total_sell_amount'))
+        payload['unrealized_pnl_display'] = self.format_holding_amount(payload.get('unrealized_pnl'))
+        payload['unrealized_pnl_pct_display'] = self.format_holding_percent(payload.get('unrealized_pnl_pct'))
+        return payload
+
+    def build_holding_stocks_display_items(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        result = self.holding_repository.list(self.normalize_holding_filters(filters or {}))
+        return [self.build_holding_stock_display_payload(item) for item in result.items]
+
+    def build_holding_stocks_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        page_data = self.build_holding_stocks_page_data(filters)
+        page_data['items'] = self.build_holding_stocks_display_items(page_data['filters'])
+        page_data['title'] = self.build_holding_page_title()
+        page_data['description'] = self.build_holding_page_description()
+        page_data['empty_state'] = self.build_holding_empty_state()
+        page_data['reset_href'] = self.build_holding_stocks_reset_href()
+        page_data['form_defaults'] = self.build_holding_form_defaults()
+        return page_data
+
+    def build_real_holding_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_vm(filters)
+
+    def build_holding_view_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_stocks_page_data(filters)
+
+    def build_holding_page_view_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_view_model(filters)
+
+    def build_real_holding_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_view_model(filters)
+
+    def build_holding_template_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_data(filters)
+
+    def build_holding_stocks_template_data_for_render(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_data(filters)
+
+    def build_holding_page_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_template_data_for_render(filters)
+
+    def build_holding_stocks_route_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_render_data(filters)
+
+    def build_holding_list_route_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_payload(filters)
+
+    def build_holding_routes_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_list_route_payload(filters)
+
+    def build_real_holding_route_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_routes_page_data(filters)
+
+    def build_holding_page_route_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_route_page_data(filters)
+
+    def build_holding_page_response_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_route_data(filters)
+
+    def build_holding_stocks_response_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_response_data(filters)
+
+    def build_real_holding_stocks_response_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_response_page_data(filters)
+
+    def build_holding_page_render_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_stocks_response_page_data(filters)
+
+    def build_holding_stocks_render_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_render_context(filters)
+
+    def build_real_holding_stocks_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_render_context(filters)
+
+    def build_real_holding_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_stocks_context(filters)
+
+    def build_holding_stocks_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_context(filters)
+
+    def build_holding_page_context_for_render(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_context(filters)
+
+    def build_holding_route_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_context_for_render(filters)
+
+    def build_holding_stocks_render_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_context(filters)
+
+    def build_holding_page_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_render_payload(filters)
+
+    def build_real_holding_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_payload(filters)
+
+    def build_real_holding_page_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_payload(filters)
+
+    def build_holding_page_dataset(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_payload(filters)
+
+    def build_holding_stocks_dataset(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_dataset(filters)
+
+    def build_holding_page_template_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_dataset(filters)
+
+    def build_holding_stocks_page_template_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_template_data(filters)
+
+    def build_holding_template_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_template_data(filters)
+
+    def build_real_holding_template_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_render_data(filters)
+
+    def build_holding_stock_page_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_template_render_data(filters)
+
+    def build_holding_stock_template_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_page_render_data(filters)
+
+    def build_holding_page_render_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_template_render_data(filters)
+
+    def build_holding_stocks_page_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_render_model(filters)
+
+    def build_holding_stocks_final_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_model(filters)
+
+    def build_holding_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_final_page_data(filters)
+
+    def build_holding_page_screen_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_data(filters)
+
+    def build_holding_stocks_screen_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_data(filters)
+
+    def build_holding_main_screen_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_screen_data(filters)
+
+    def build_holding_real_screen_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_main_screen_data(filters)
+
+    def build_holding_screen_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_screen_data(filters)
+
+    def build_holding_page_screen_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_data(filters)
+
+    def build_holding_page_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_model(filters)
+
+    def build_holding_route_payload_for_page(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_payload(filters)
+
+    def build_holding_stocks_page_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_for_page(filters)
+
+    def build_holding_stocks_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_output(filters)
+
+    def build_holding_stocks_real_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_output(filters)
+
+    def build_holding_route_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_real_output(filters)
+
+    def build_holding_page_route_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_output(filters)
+
+    def build_holding_real_page_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_route_output(filters)
+
+    def build_holding_response_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_page_output(filters)
+
+    def build_holding_template_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_response_payload(filters)
+
+    def build_holding_view_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_payload(filters)
+
+    def build_holding_real_view_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_view_payload(filters)
+
+    def build_holding_page_view_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_view_payload(filters)
+
+    def build_holding_final_page_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_view_payload(filters)
+
+    def build_holding_real_final_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_page_payload(filters)
+
+    def build_holding_page_model_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_final_payload(filters)
+
+    def build_holding_real_page_model_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_model_payload(filters)
+
+    def build_holding_template_model_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_page_model_payload(filters)
+
+    def build_holding_render_model_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_model_payload(filters)
+
+    def build_holding_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_model_payload(filters)
+
+    def build_holding_page_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_payload(filters)
+
+    def build_holding_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle(filters)
+
+    def build_holding_page_bundle_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_bundle(filters)
+
+    def build_holding_page_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_data(filters)
+
+    def build_holding_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_payload(filters)
+
+    def build_holding_route_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_bundle_payload(filters)
+
+    def build_holding_page_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_bundle_payload(filters)
+
+    def build_holding_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_result(filters)
+
+    def build_holding_final_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_result(filters)
+
+    def build_holding_page_data_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_result(filters)
+
+    def build_holding_stocks_page_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_data_result(filters)
+
+    def build_holding_stocks_real_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_result(filters)
+
+    def build_holding_page_real_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_real_result(filters)
+
+    def build_holding_real_result_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_real_result(filters)
+
+    def build_holding_route_result_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_result_payload(filters)
+
+    def build_holding_template_result_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_result_payload(filters)
+
+    def build_holding_result_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_result_payload(filters)
+
+    def build_holding_page_return_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_result_payload(filters)
+
+    def build_holding_route_return_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_return_data(filters)
+
+    def build_holding_render_return_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_return_data(filters)
+
+    def build_holding_template_return_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_return_data(filters)
+
+    def build_holding_page_output_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_return_data(filters)
+
+    def build_holding_real_output_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_output_data(filters)
+
+    def build_holding_final_output_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_output_data(filters)
+
+    def build_holding_page_final_output_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_output_data(filters)
+
+    def build_holding_real_page_final_output_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_final_output_data(filters)
+
+    def build_holding_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_page_final_output_data(filters)
+
+    def build_real_holding_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_payload(filters)
+
+    def build_real_holding_page_data_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_payload_data(filters)
+
+    def build_real_holding_page_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_data_payload(filters)
+
+    def build_holding_page_bundle_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_bundle_payload(filters)
+
+    def build_holding_view_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_result(filters)
+
+    def build_holding_real_view_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_view_data(filters)
+
+    def build_holding_page_display_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_view_data(filters)
+
+    def build_holding_display_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_display_data(filters)
+
+    def build_holding_stocks_display_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_display_data(filters)
+
+    def build_holding_real_display_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_display_data(filters)
+
+    def build_holding_page_display_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_display_data(filters)
+
+    def build_holding_render_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_display_payload(filters)
+
+    def build_holding_page_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_payload_data(filters)
+
+    def build_holding_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_context_data(filters)
+
+    def build_holding_stocks_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_context_data(filters)
+
+    def build_real_holding_stocks_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_context_data(filters)
+
+    def build_real_holding_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_stocks_page_vm(filters)
+
+    def build_holding_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_vm(filters)
+
+    def build_holding_vm_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_vm(filters)
+
+    def build_holding_template_vm_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_vm_data(filters)
+
+    def build_holding_page_vm_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_vm_data(filters)
+
+    def build_holding_real_vm_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_vm_data(filters)
+
+    def build_holding_page_real_vm_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_vm_data(filters)
+
+    def build_holding_page_vm_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_real_vm_data(filters)
+
+    def build_holding_vm_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_vm_context(filters)
+
+    def build_holding_final_vm_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_vm_context(filters)
+
+    def build_holding_page_final_vm_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_vm_context(filters)
+
+    def build_holding_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_final_vm_context(filters)
+
+    def build_holding_page_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_output(filters)
+
+    def build_real_holding_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_output(filters)
+
+    def build_real_holding_page_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_output(filters)
+
+    def build_holding_result_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_output(filters)
+
+    def build_holding_page_result_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_result_data(filters)
+
+    def build_holding_page_template_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_result_data(filters)
+
+    def build_holding_render_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_template_context(filters)
+
+    def build_holding_complete_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_context_data(filters)
+
+    def build_holding_full_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_complete_page_data(filters)
+
+    def build_holding_stocks_full_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_full_page_data(filters)
+
+    def build_holding_real_full_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_full_page_data(filters)
+
+    def build_holding_page_ready_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_full_page_data(filters)
+
+    def build_holding_stocks_ready_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_data(filters)
+
+    def build_holding_page_ready_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_ready_data(filters)
+
+    def build_holding_ready_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_payload(filters)
+
+    def build_holding_stocks_ready_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_payload(filters)
+
+    def build_holding_page_ready_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_ready_payload(filters)
+
+    def build_holding_ready_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_model(filters)
+
+    def build_holding_stocks_ready_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_model(filters)
+
+    def build_holding_real_ready_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_ready_model(filters)
+
+    def build_holding_page_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_ready_model(filters)
+
+    def build_holding_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_context(filters)
+
+    def build_holding_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_context(filters)
+
+    def build_holding_real_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_context(filters)
+
+    def build_holding_context_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_context(filters)
+
+    def build_holding_page_context_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_context_payload(filters)
+
+    def build_holding_page_data_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_context_payload(filters)
+
+    def build_holding_bundle_data_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_data_bundle(filters)
+
+    def build_holding_vm_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_bundle_data_payload(filters)
+
+    def build_holding_real_vm_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_vm_bundle(filters)
+
+    def build_holding_return_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_vm_bundle(filters)
+
+    def build_holding_route_return_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_return_payload(filters)
+
+    def build_holding_stocks_page_bundle_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_return_payload(filters)
+
+    def build_holding_real_bundle_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_bundle_context(filters)
+
+    def build_holding_page_bundle_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_bundle_context(filters)
+
+    def build_holding_model_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_context(filters)
+
+    def build_holding_render_model_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_model_context(filters)
+
+    def build_holding_response_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_model_context(filters)
+
+    def build_holding_stock_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_response_context(filters)
+
+    def build_holding_stock_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_context(filters)
+
+    def build_holding_page_source_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_page_context(filters)
+
+    def build_holding_source_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_source_data(filters)
+
+    def build_holding_real_source_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_source_data(filters)
+
+    def build_holding_final_source_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_source_data(filters)
+
+    def build_holding_compact_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_source_data(filters)
+
+    def build_holding_compact_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_compact_page_data(filters)
+
+    def build_holding_minimal_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_compact_context(filters)
+
+    def build_holding_minimal_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_minimal_page_data(filters)
+
+    def build_holding_template_minimal_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_minimal_context(filters)
+
+    def build_holding_real_template_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_minimal_context(filters)
+
+    def build_holding_screen_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_template_context(filters)
+
+    def build_holding_screen_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_context(filters)
+
+    def build_holding_screen_view(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_model(filters)
+
+    def build_holding_stocks_screen_view(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_view(filters)
+
+    def build_holding_real_screen_view(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_screen_view(filters)
+
+    def build_holding_screen_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_screen_view(filters)
+
+    def build_holding_page_screen_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_payload_data(filters)
+
+    def build_holding_screen_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_payload_data(filters)
+
+    def build_holding_page_screen_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_result(filters)
+
+    def build_holding_screen_ready_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_result(filters)
+
+    def build_holding_screen_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_ready_payload(filters)
+
+    def build_holding_render_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_ready_context(filters)
+
+    def build_holding_screen_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_ready_context(filters)
+
+    def build_holding_screen_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_bundle(filters)
+
+    def build_holding_page_bundle_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_bundle_payload(filters)
+
+    def build_holding_bundle_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_output(filters)
+
+    def build_holding_route_bundle_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_bundle_output(filters)
+
+    def build_holding_bundle_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_bundle_output(filters)
+
+    def build_holding_complete_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_bundle_context(filters)
+
+    def build_holding_final_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_complete_context(filters)
+
+    def build_holding_stocks_final_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_context(filters)
+
+    def build_holding_stocks_page_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_final_context(filters)
+
+    def build_holding_ready_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_context_data(filters)
+
+    def build_holding_ready_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_page_data(filters)
+
+    def build_holding_real_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_context_data(filters)
+
+    def build_holding_stocks_real_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_context_data(filters)
+
+    def build_holding_page_route_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_real_context_data(filters)
+
+    def build_real_holding_stocks_route_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_route_context(filters)
+
+    def build_real_holding_route_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_stocks_route_context(filters)
+
+    def build_holding_route_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_route_context(filters)
+
+    def build_holding_page_resource(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_page_context(filters)
+
+    def build_holding_resource(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_resource(filters)
+
+    def build_holding_page_content(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_resource(filters)
+
+    def build_holding_content(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_content(filters)
+
+    def build_holding_template_content(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_content(filters)
+
+    def build_holding_real_template_content(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_content(filters)
+
+    def build_holding_page_content_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_template_content(filters)
+
+    def build_holding_page_compose_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_content_data(filters)
+
+    def build_holding_compose_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_compose_data(filters)
+
+    def build_holding_page_compose_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_compose_data(filters)
+
+    def build_holding_compose_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_compose_payload(filters)
+
+    def build_holding_final_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_compose_payload(filters)
+
+    def build_holding_final_page_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_page_context(filters)
+
+    def build_holding_stocks_view_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_page_data_context(filters)
+
+    def build_holding_stocks_real_view_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_view_context(filters)
+
+    def build_holding_view_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_real_view_context(filters)
+
+    def build_holding_page_view_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_view_context(filters)
+
+    def build_holding_page_materialized_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_view_context(filters)
+
+    def build_holding_page_materialized_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_materialized_data(filters)
+
+    def build_holding_stocks_materialized_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_materialized_payload(filters)
+
+    def build_holding_materialized_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_materialized_payload(filters)
+
+    def build_holding_stocks_materialized_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_materialized_payload(filters)
+
+    def build_holding_page_materialized_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_materialized_data(filters)
+
+    def build_holding_final_materialized_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_materialized_context(filters)
+
+    def build_holding_materialized_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_materialized_context(filters)
+
+    def build_real_holding_materialized_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_materialized_context(filters)
+
+    def build_real_holding_page_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_materialized_context(filters)
+
+    def build_real_holding_page_payload_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_data_context(filters)
+
+    def build_real_holding_response_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_payload_context(filters)
+
+    def build_real_holding_page_response_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_response_context(filters)
+
+    def build_holding_page_final_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_response_context(filters)
+
+    def build_real_holding_template_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_final_context_data(filters)
+
+    def build_real_holding_page_template_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_template_context_data(filters)
+
+    def build_holding_real_template_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_template_context_data(filters)
+
+    def build_holding_route_screen_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_template_context_data(filters)
+
+    def build_holding_page_screen_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_screen_data(filters)
+
+    def build_holding_stocks_screen_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_data_context(filters)
+
+    def build_real_holding_screen_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_screen_data_context(filters)
+
+    def build_real_holding_page_screen_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_screen_data_context(filters)
+
+    def build_holding_stocks_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_screen_data_context(filters)
+
+    def build_holding_page_model_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_model(filters)
+
+    def build_real_holding_model_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_model_data(filters)
+
+    def build_real_holding_page_model_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_model_data(filters)
+
+    def build_holding_render_data_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_model_data(filters)
+
+    def build_holding_page_render_data_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_data_model(filters)
+
+    def build_holding_source_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_render_data_model(filters)
+
+    def build_holding_page_source_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_source_payload(filters)
+
+    def build_holding_stocks_source_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_source_payload(filters)
+
+    def build_holding_page_source_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_source_payload(filters)
+
+    def build_holding_screen_source_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_source_context(filters)
+
+    def build_holding_ui_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_source_context(filters)
+
+    def build_holding_ui_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ui_context(filters)
+
+    def build_holding_page_ui_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ui_payload(filters)
+
+    def build_holding_stocks_ui_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ui_payload(filters)
+
+    def build_holding_stocks_real_ui_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_ui_payload(filters)
+
+    def build_real_holding_ui_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_real_ui_payload(filters)
+
+    def build_real_holding_page_ui_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_ui_payload(filters)
+
+    def build_holding_page_html_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_page_ui_payload(filters)
+
+    def build_holding_html_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_html_context(filters)
+
+    def build_holding_template_html_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_html_context(filters)
+
+    def build_holding_final_template_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_html_context(filters)
+
+    def build_holding_real_template_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_template_context(filters)
+
+    def build_holding_stock_page_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_template_payload(filters)
+
+    def build_holding_stocks_template_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_page_payload(filters)
+
+    def build_holding_stocks_final_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_template_payload(filters)
+
+    def build_holding_stocks_real_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_final_payload(filters)
+
+    def build_holding_render_payload_final(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_real_payload(filters)
+
+    def build_holding_route_page_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_payload_final(filters)
+
+    def build_holding_stocks_route_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_page_payload(filters)
+
+    def build_holding_route_page_data_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_payload_data(filters)
+
+    def build_holding_stocks_route_page_data_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_page_data_model(filters)
+
+    def build_holding_page_render_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_page_data_model(filters)
+
+    def build_holding_stocks_route_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_render_output(filters)
+
+    def build_holding_page_route_render_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_render_data(filters)
+
+    def build_holding_stocks_page_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_route_render_data(filters)
+
+    def build_holding_stocks_route_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_ready_context(filters)
+
+    def build_holding_route_render_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_context(filters)
+
+    def build_real_holding_route_render_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_render_context(filters)
+
+    def build_holding_route_template_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_route_render_context(filters)
+
+    def build_holding_route_final_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_template_data(filters)
+
+    def build_holding_route_display_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_data(filters)
+
+    def build_holding_route_ui_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_display_data(filters)
+
+    def build_holding_route_vm_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_ui_data(filters)
+
+    def build_holding_route_ready_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_vm_data(filters)
+
+    def build_holding_route_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_ready_data(filters)
+
+    def build_holding_route_complete_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_screen_payload(filters)
+
+    def build_real_holding_route_complete_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_complete_data(filters)
+
+    def build_holding_route_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_route_complete_data(filters)
+
+    def build_holding_route_context_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_context_data(filters)
+
+    def build_holding_page_context_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_context_payload(filters)
+
+    def build_holding_page_bundle_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_context_bundle(filters)
+
+    def build_holding_page_bundle_screen(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_vm(filters)
+
+    def build_holding_page_bundle_result_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_screen(filters)
+
+    def build_holding_page_bundle_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_result_payload(filters)
+
+    def build_real_holding_route_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_screen_payload(filters)
+
+    def build_holding_route_payload_data_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_route_payload_data(filters)
+
+    def build_holding_route_screen_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_data_model(filters)
+
+    def build_holding_route_view_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_screen_context(filters)
+
+    def build_holding_route_view_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_view_context(filters)
+
+    def build_holding_route_html_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_view_payload(filters)
+
+    def build_holding_route_output_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_html_context(filters)
+
+    def build_holding_route_template_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_output_model(filters)
+
+    def build_holding_route_bundle_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_template_model(filters)
+
+    def build_holding_route_materialized_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_bundle_model(filters)
+
+    def build_holding_route_screen_model_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_materialized_model(filters)
+
+    def build_holding_route_screen_model_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_screen_model_payload(filters)
+
+    def build_holding_route_final_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_screen_model_context(filters)
+
+    def build_holding_route_final_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_model(filters)
+
+    def build_holding_route_final_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_payload(filters)
+
+    def build_holding_route_final_screen(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_context(filters)
+
+    def build_holding_route_final_screen_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_screen(filters)
+
+    def build_holding_route_final_output(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_screen_context(filters)
+
+    def build_holding_route_final_render_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_output(filters)
+
+    def build_holding_route_final_render_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_render_context(filters)
+
+    def build_holding_route_final_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_render_payload(filters)
+
+    def build_holding_route_final_bundle_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_bundle(filters)
+
+    def build_holding_route_final_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_bundle_context(filters)
+
+    def build_holding_real_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_bundle_payload(filters)
+
+    def build_holding_stocks_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_page_context(filters)
+
+    def build_holding_stocks_page_context_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_context(filters)
+
+    def build_real_holding_stocks_page_context_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_context_model(filters)
+
+    def build_holding_stocks_context_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_stocks_page_context_model(filters)
+
+    def build_holding_page_context_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_context_model(filters)
+
+    def build_holding_real_page_context_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_context_model(filters)
+
+    def build_holding_stocks_page_render_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_page_context_model(filters)
+
+    def build_holding_page_result_payload_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_render_context(filters)
+
+    def build_real_holding_result_payload_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_result_payload_context(filters)
+
+    def build_holding_result_payload_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_result_payload_context(filters)
+
+    def build_holding_stocks_route_payload_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_result_payload_context(filters)
+
+    def build_holding_stocks_route_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_payload_context(filters)
+
+    def build_holding_route_render_payload_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_page_context(filters)
+
+    def build_holding_page_screen_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_render_payload_context(filters)
+
+    def build_holding_page_render_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_context_data(filters)
+
+    def build_holding_real_page_screen_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_render_context_data(filters)
+
+    def build_holding_real_screen_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_page_screen_context_data(filters)
+
+    def build_holding_render_screen_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_screen_context_data(filters)
+
+    def build_holding_route_payload_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_screen_context_data(filters)
+
+    def build_holding_route_payload_ready_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_result(filters)
+
+    def build_holding_route_payload_view(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_ready_result(filters)
+
+    def build_holding_route_payload_screen(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_view(filters)
+
+    def build_holding_route_payload_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_screen(filters)
+
+    def build_holding_page_real_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_bundle(filters)
+
+    def build_holding_stock_page_real_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_real_context(filters)
+
+    def build_holding_page_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_page_real_context(filters)
+
+    def build_holding_summary(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_summary(filters)
+
+    def build_holding_page_output_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_summary(filters)
+
+    def build_holding_page_real_output_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_output_payload(filters)
+
+    def build_holding_ready_output_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_real_output_payload(filters)
+
+    def build_holding_real_ready_output_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_output_payload(filters)
+
+    def build_holding_page_bundle_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_ready_output_payload(filters)
+
+    def build_holding_route_final_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_payload_data(filters)
+
+    def build_holding_page_ready_output_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_final_payload_data(filters)
+
+    def build_holding_render_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_output_data(filters)
+
+    def build_holding_route_screen_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_bundle_payload(filters)
+
+    def build_holding_stocks_route_payload_data_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_screen_payload_data(filters)
+
+    def build_holding_stocks_route_result_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_payload_data_model(filters)
+
+    def build_holding_stocks_route_bundle_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_result_payload_data(filters)
+
+    def build_holding_page_render_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_bundle_payload_data(filters)
+
+    def build_holding_stocks_page_render_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_render_payload_data(filters)
+
+    def build_holding_screen_payload_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_render_payload_data(filters)
+
+    def build_holding_page_payload_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_payload_bundle(filters)
+
+    def build_holding_render_payload_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_payload_bundle(filters)
+
+    def build_holding_route_payload_bundle_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_payload_bundle(filters)
+
+    def build_holding_real_route_payload_bundle_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_payload_bundle_data(filters)
+
+    def build_holding_page_bundle_payload_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_route_payload_bundle_data(filters)
+
+    def build_holding_stocks_route_context_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_payload_context_data(filters)
+
+    def build_holding_stocks_page_context_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_route_context_payload_data(filters)
+
+    def build_holding_page_screen_payload_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_context_payload_data(filters)
+
+    def build_holding_screen_payload_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_payload_context_data(filters)
+
+    def build_holding_output_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_screen_payload_context_data(filters)
+
+    def build_holding_output_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_output_payload_data(filters)
+
+    def build_holding_page_output_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_output_context_data(filters)
+
+    def build_holding_page_terminal_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_output_context_data(filters)
+
+    def build_holding_terminal_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_terminal_data(filters)
+
+    def build_holding_terminal_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_terminal_data(filters)
+
+    def build_holding_final_terminal_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_terminal_payload(filters)
+
+    def build_holding_display_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_terminal_payload(filters)
+
+    def build_holding_page_display_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_display_context(filters)
+
+    def build_holding_core_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_display_context(filters)
+
+    def build_holding_core_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_core_page_data(filters)
+
+    def build_holding_main_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_core_context(filters)
+
+    def build_holding_ui_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_main_context(filters)
+
+    def build_holding_ui_screen_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ui_model(filters)
+
+    def build_holding_ui_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ui_screen_data(filters)
+
+    def build_holding_page_ui_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ui_screen_payload(filters)
+
+    def build_holding_page_ready_template_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ui_screen_payload(filters)
+
+    def build_holding_page_ready_template_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_template_data(filters)
+
+    def build_holding_page_ready_template_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_template_payload(filters)
+
+    def build_holding_page_complete_template_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready_template_context(filters)
+
+    def build_holding_page_complete_template_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_complete_template_context(filters)
+
+    def build_holding_final_template_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_complete_template_payload(filters)
+
+    def build_holding_page_full_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_template_payload_data(filters)
+
+    def build_holding_page_complete_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_full_payload(filters)
+
+    def build_holding_page_final_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_complete_payload(filters)
+
+    def build_holding_page_final_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_final_payload_data(filters)
+
+    def build_holding_page_complete_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_final_screen_payload(filters)
+
+    def build_holding_page_template_screen_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_complete_context_data(filters)
+
+    def build_holding_page_screen_bundle_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_template_screen_context(filters)
+
+    def build_holding_page_screen_bundle_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_bundle_context(filters)
+
+    def build_holding_page_screen_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_bundle_result(filters)
+
+    def build_holding_page_complete_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_bundle_payload(filters)
+
+    def build_holding_stocks_page_complete_bundle_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_complete_bundle_payload(filters)
+
+    def build_holding_final_bundle_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_complete_bundle_payload(filters)
+
+    def build_holding_finish_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_bundle_payload_data(filters)
+
+    def build_holding_page_finish_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_finish_payload(filters)
+
+    def build_holding_page_finish_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_finish_payload(filters)
+
+    def build_holding_page_finish_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_finish_context(filters)
+
+    def build_holding_stocks_finish_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_finish_data(filters)
+
+    def build_holding_finishing_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_finish_data(filters)
+
+    def build_holding_ready(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_finishing_data(filters)
+
+    def build_holding_page_ready(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready(filters)
+
+    def build_holding_completed_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_ready(filters)
+
+    def build_holding_ready_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_completed_payload(filters)
+
+    def build_holding_page_return_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_payload_data(filters)
+
+    def build_holding_return_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_return_payload(filters)
+
+    def build_holding_template_return_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_return_context(filters)
+
+    def build_holding_complete_return_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_template_return_context(filters)
+
+    def build_holding_complete_return_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_complete_return_context(filters)
+
+    def build_holding_stocks_page_ready_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_complete_return_payload(filters)
+
+    def build_holding_real_final_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_ready_payload_data(filters)
+
+    def build_holding_route_ready_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_final_context(filters)
+
+    def build_holding_final_page_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_ready_payload_data(filters)
+
+    def build_holding_page_payload_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_page_payload_data(filters)
+
+    def build_holding_stocks_page_payload_data_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_payload_data_context(filters)
+
+    def build_holding_stocks_page_render_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_payload_data_context(filters)
+
+    def build_holding_render_model_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_render_model(filters)
+
+    def build_holding_page_context_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_model_data(filters)
+
+    def build_holding_context_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_context_result(filters)
+
+    def build_holding_stocks_context_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_context_result(filters)
+
+    def build_holding_real_context_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_context_result(filters)
+
+    def build_holding_route_context_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_context_result(filters)
+
+    def build_holding_final_route_context_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_context_result(filters)
+
+    def build_holding_end_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_route_context_result(filters)
+
+    def build_holding_page_end_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_end_payload(filters)
+
+    def build_holding_end_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_end_payload(filters)
+
+    def build_holding_page_end_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_end_context(filters)
+
+    def build_holding_terminal_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_end_context(filters)
+
+    def build_holding_terminal_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_terminal_context(filters)
+
+    def build_holding_final_terminal_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_terminal_result(filters)
+
+    def build_holding_render_terminal_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_terminal_result(filters)
+
+    def build_holding_terminal_payload_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_render_terminal_result(filters)
+
+    def build_holding_ultimate_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_terminal_payload_data(filters)
+
+    def build_holding_ultimate_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ultimate_payload(filters)
+
+    def build_holding_ultimate_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ultimate_context(filters)
+
+    def build_holding_ultimate_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ultimate_data(filters)
+
+    def build_holding_result_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ultimate_result(filters)
+
+    def build_holding_result_screen(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_result_model(filters)
+
+    def build_holding_stock_screen_model(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_result_screen(filters)
+
+    def build_holding_stock_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_screen_model(filters)
+
+    def build_holding_real_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stock_screen_payload(filters)
+
+    def build_holding_page_screen_model_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_screen_payload(filters)
+
+    def build_holding_page_screen_view_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_model_payload(filters)
+
+    def build_holding_stocks_page_screen_view_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_view_context(filters)
+
+    def build_holding_unified_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_screen_view_context(filters)
+
+    def build_holding_unified_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_unified_page_data(filters)
+
+    def build_holding_unified_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_unified_context(filters)
+
+    def build_holding_page_unified_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_unified_payload(filters)
+
+    def build_holding_page_data_unified(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_unified_payload(filters)
+
+    def build_holding_final_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_data_unified(filters)
+
+    def build_holding_real_page_bundle(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_page_data(filters)
+
+    def build_real_holding_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_page_bundle(filters)
+
+    def build_holding_page_data_real(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_real_holding_data(filters)
+
+    def build_holding_page_bundle_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_data_real(filters)
+
+    def build_holding_route_page_bundle_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bundle_context_data(filters)
+
+    def build_holding_page_final_bundle_context_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_page_bundle_context_data(filters)
+
+    def build_holding_ready_context_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_final_bundle_context_data(filters)
+
+    def build_holding_ready_screen_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_context_payload(filters)
+
+    def build_holding_ready_route_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_screen_payload(filters)
+
+    def build_holding_page_screen_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_ready_route_payload(filters)
+
+    def build_holding_final_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_screen_ready_context(filters)
+
+    def build_holding_output_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_ready_context(filters)
+
+    def build_holding_page_output_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_output_ready_context(filters)
+
+    def build_holding_route_output_ready_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_output_ready_context(filters)
+
+    def build_holding_page_bridge_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_route_output_ready_context(filters)
+
+    def build_holding_page_bridge_payload(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bridge_context(filters)
+
+    def build_holding_page_bridge_result(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bridge_payload(filters)
+
+    def build_holding_full_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_bridge_result(filters)
+
+    def build_holding_page_full_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_full_context(filters)
+
+    def build_holding_page(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page_full_context(filters)
+
+    def build_holding_view(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_page(filters)
+
+    def build_holding_real_view(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_view(filters)
+
+    def build_holding_response(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_real_view(filters)
+
+    def build_holding_stocks_response(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_response(filters)
+
+    def build_holding_complete_page(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_response(filters)
+
+    def build_holding_final_page(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_complete_page(filters)
+
+    def build_holding_real_page(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_final_page(filters)
+
+    def build_watch_stocks_page_href(self, *, page: int, filters: dict[str, Any], history_filters: dict[str, Any]) -> str:
+        query = {
+            'page': max(int(page or 1), 1),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+            'history_page': self._to_int(history_filters.get('history_page'), default=1, minimum=1),
+            'history_page_size': self._to_int(history_filters.get('history_page_size'), default=5, minimum=1, maximum=20),
+            'history_type': history_filters.get('history_type', 'all'),
+        }
+        for key in ('keyword', 'market', 'asset_type', 'stage', 'price_zone'):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                query[key] = value
+        return '/watch-stocks?' + urlencode(query)
+
+    def build_watch_stocks_reset_href(self) -> str:
+        return '/watch-stocks'
+
+    def build_watch_stocks_filter_summary(self, filters: dict[str, Any]) -> str:
+        labels = []
+        for key, label in (
+            ('keyword', '关键字'),
+            ('market', '市场'),
+            ('asset_type', '资产类型'),
+            ('stage', '阶段'),
+            ('price_zone', '价格区间'),
+        ):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                labels.append(f'{label}：{value}')
+        return ' / '.join(labels) if labels else '当前未应用主列表筛选条件。'
+
+    def build_watch_stocks_filter_form_state(self, filters: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'keyword': filters.get('keyword', ''),
+            'market': filters.get('market', ''),
+            'asset_type': filters.get('asset_type', ''),
+            'stage': filters.get('stage', ''),
+            'price_zone': filters.get('price_zone', ''),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+        }
+
+    def build_watch_history_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
+        history_type = (filters.get('history_type') or 'all').strip() or 'all'
+        if history_type not in {'all', 'entry-decision', 'stock-analysis', 'trade-plan'}:
+            history_type = 'all'
+        return {
+            'history_type': history_type,
+            'history_page': self._to_int(filters.get('history_page'), default=1, minimum=1),
+            'history_page_size': self._to_int(filters.get('history_page_size'), default=5, minimum=1, maximum=20),
+        }
+
+    def build_watch_history_filter_options(self) -> list[dict[str, str]]:
+        return [
+            {'value': 'all', 'label': '全部历史'},
+            {'value': 'entry-decision', 'label': '仅进场决策'},
+            {'value': 'stock-analysis', 'label': '仅股票分析'},
+            {'value': 'trade-plan', 'label': '仅持仓计划'},
+        ]
+
+    def build_watch_history_filter_summary(self, history_filters: dict[str, Any]) -> str:
+        labels = {
+            'all': '当前展示全部历史类型。',
+            'entry-decision': '当前仅展示含进场决策记录的标的。',
+            'stock-analysis': '当前仅展示含股票分析记录的标的。',
+            'trade-plan': '当前仅展示含持仓计划记录的标的。',
+        }
+        return labels.get(history_filters.get('history_type', 'all'), labels['all'])
+
+    def build_watch_stocks_history_href(self, *, page: int, filters: dict[str, Any], history_filters: dict[str, Any]) -> str:
+        query = {
+            'page': self._to_int(filters.get('page'), default=1, minimum=1),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+            'history_page': max(int(page or 1), 1),
+            'history_page_size': self._to_int(history_filters.get('history_page_size'), default=5, minimum=1, maximum=20),
+            'history_type': history_filters.get('history_type', 'all'),
+        }
+        for key in ('keyword', 'market', 'asset_type', 'stage', 'price_zone'):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                query[key] = value
+        return '/watch-stocks?' + urlencode(query)
+
+    def _filter_watch_records_history_items(self, history_items: list[dict[str, Any]], history_type: str) -> list[dict[str, Any]]:
+        if history_type == 'entry-decision':
+            return [item for item in history_items if item.get('entry_decision_records')]
+        if history_type == 'stock-analysis':
+            return [item for item in history_items if item.get('stock_analysis_records')]
+        if history_type == 'trade-plan':
+            return [item for item in history_items if item.get('trade_plan_records')]
+        return history_items
+
+    def build_history_center_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        raw_filters = filters or {}
+        normalized_filters = self.normalize_filters(raw_filters)
+        active_tab = (raw_filters.get('tab') or 'all').strip() or 'all'
+        if active_tab not in {'all', 'entry-decision', 'stock-analysis', 'trade-plan', 'files'}:
+            active_tab = 'all'
+
+        all_filters = {**normalized_filters, 'page': 1, 'page_size': 1000}
+        all_result = self.repository.list(all_filters)
+        filtered_watch_stocks = all_result.items
+        all_history_items = self._build_watch_records_history_items(filtered_watch_stocks)
+        all_entry_records = self._build_history_center_entry_records(filtered_watch_stocks)
+        all_stock_analysis_records = self._build_history_center_stock_analysis_records(filtered_watch_stocks)
+        all_trade_plan_records = self._build_history_center_trade_plan_records(filtered_watch_stocks)
+
+        page = normalized_filters.get('page', 1)
+        page_size = normalized_filters.get('page_size', 20)
+        history_items, history_pagination = self._paginate_items(all_history_items, page=page, page_size=page_size)
+        entry_records, entry_pagination = self._paginate_items(all_entry_records, page=page, page_size=page_size)
+        stock_analysis_records, stock_analysis_pagination = self._paginate_items(all_stock_analysis_records, page=page, page_size=page_size)
+        trade_plan_records, trade_plan_pagination = self._paginate_items(all_trade_plan_records, page=page, page_size=page_size)
+
+        active_pagination = {
+            'all': history_pagination,
+            'entry-decision': entry_pagination,
+            'stock-analysis': stock_analysis_pagination,
+            'trade-plan': trade_plan_pagination,
+            'files': {'page': 1, 'page_size': page_size, 'total': 0, 'total_pages': 1},
+        }.get(active_tab, history_pagination)
+        view_filters = {**normalized_filters, 'tab': active_tab}
+        pagination_links = {
+            'prev': self.build_history_center_page_href(tab=active_tab, page=max(active_pagination.get('page', 1) - 1, 1), filters=view_filters),
+            'next': self.build_history_center_page_href(tab=active_tab, page=active_pagination.get('page', 1) + 1, filters=view_filters),
+        }
+
+        return {
+            'summary_cards': {
+                'watch_count': len(all_history_items),
+                'entry_decision_record_count': len(all_entry_records),
+                'stock_analysis_record_count': len(all_stock_analysis_records),
+                'trade_plan_record_count': len(all_trade_plan_records),
+            },
+            'filters': view_filters,
+            'filter_form': self.build_history_center_filter_form_state(view_filters),
+            'filter_summary': self.build_history_center_filter_summary(view_filters),
+            'filter_reset_href': self.build_history_center_reset_href(),
+            'filter_options': self._build_filter_options(filtered_watch_stocks),
+            'tab_links': {
+                'all': self.build_history_center_page_href(tab='all', page=1, filters=view_filters),
+                'entry-decision': self.build_history_center_page_href(tab='entry-decision', page=1, filters=view_filters),
+                'stock-analysis': self.build_history_center_page_href(tab='stock-analysis', page=1, filters=view_filters),
+                'trade-plan': self.build_history_center_page_href(tab='trade-plan', page=1, filters=view_filters),
+                'files': self.build_history_center_page_href(tab='files', page=1, filters=view_filters),
+            },
+            'active_tab': active_tab,
+            'history_items': history_items,
+            'entry_decision_records': entry_records,
+            'stock_analysis_records': stock_analysis_records,
+            'trade_plan_records': trade_plan_records,
+            'active_pagination': active_pagination,
+            'pagination_links': pagination_links,
+            'legacy_history_url': '/history',
+        }
+
+    def _paginate_items(self, items: list[dict[str, Any]], *, page: int, page_size: int) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        safe_page = max(int(page or 1), 1)
+        safe_page_size = max(min(int(page_size or 20), 100), 1)
+        total = len(items)
+        total_pages = max((total + safe_page_size - 1) // safe_page_size, 1)
+        current_page = min(safe_page, total_pages)
+        start = (current_page - 1) * safe_page_size
+        end = start + safe_page_size
+        return items[start:end], {
+            'page': current_page,
+            'page_size': safe_page_size,
+            'total': total,
+            'total_pages': total_pages,
+        }
+
+    def build_history_center_page_href(self, *, tab: str, page: int, filters: dict[str, Any]) -> str:
+        query = {
+            'tab': tab,
+            'page': max(int(page or 1), 1),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+        }
+        for key in ('keyword', 'market', 'asset_type', 'stage', 'price_zone'):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                query[key] = value
+        return '/history-center?' + urlencode(query)
+
+    def build_history_center_reset_href(self) -> str:
+        return '/history-center'
+
+    def build_history_center_filter_form_state(self, filters: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'keyword': filters.get('keyword', ''),
+            'market': filters.get('market', ''),
+            'asset_type': filters.get('asset_type', ''),
+            'stage': filters.get('stage', ''),
+            'price_zone': filters.get('price_zone', ''),
+            'tab': filters.get('tab', 'all'),
+        }
+
+    def build_history_center_filter_summary(self, filters: dict[str, Any]) -> str:
+        labels = []
+        for key, label in (
+            ('keyword', '关键字'),
+            ('market', '市场'),
+            ('asset_type', '资产类型'),
+            ('stage', '阶段'),
+            ('price_zone', '价格区'),
+        ):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                labels.append(f'{label}：{value}')
+        return ' / '.join(labels) if labels else '当前未应用额外筛选条件。'
+
+    def build_watch_record_detail_url(self, record_type: str, watch_stock: dict[str, Any], record: dict[str, Any]) -> str:
+        watch_stock_id = watch_stock.get('id', '')
+        record_id = record.get('id', '')
+        if record_type == 'entry_decision':
+            return f'/entry-decision?watch_stock_id={watch_stock_id}&record_id={record_id}'
+        if record_type == 'stock_analysis':
+            if (record.get('analysis_scene') or '').strip() == 'holding_reanalysis' and (record.get('holding_stock_id') or '').strip():
+                return f'/holding-reanalysis?holding_stock_id={record.get("holding_stock_id", "")}&record_id={record_id}'
+            return f'/stock-analysis-record?watch_stock_id={watch_stock_id}&record_id={record_id}&code={watch_stock.get("stock_code", "")}&market={watch_stock.get("market", "")}'
+        if record_type == 'trade_plan':
+            return f'/trade-plan-analysis?watch_stock_id={watch_stock_id}&record_id={record_id}'
+        return f'/watch-stocks?watch_stock_id={watch_stock_id}'
+
+    def _build_watch_records_history_items(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        history_items: list[dict[str, Any]] = []
+        for item in watch_stocks:
+            watch_stock_id = item.get('id') or ''
+            if not watch_stock_id:
+                continue
+            entry_records = self.list_entry_decision_records(watch_stock_id, limit=3)
+            stock_analysis_records = self.list_stock_analysis_records(watch_stock_id, limit=3)
+            trade_plan_records = self.list_trade_plan_analysis_records(watch_stock_id, limit=3)
+            history_items.append(
+                {
+                    'watch_stock': item,
+                    'entry_decision_records': [
+                        {**record, 'detail_url': self.build_watch_record_detail_url('entry_decision', item, record)}
+                        for record in entry_records
+                    ],
+                    'stock_analysis_records': [
+                        {**record, 'detail_url': self.build_watch_record_detail_url('stock_analysis', item, record)}
+                        for record in stock_analysis_records
+                    ],
+                    'trade_plan_records': [
+                        {**record, 'detail_url': self.build_watch_record_detail_url('trade_plan', item, record)}
+                        for record in trade_plan_records
+                    ],
+                    'counts': {
+                        'entry_decision': len(entry_records),
+                        'stock_analysis': len(stock_analysis_records),
+                        'trade_plan': len(trade_plan_records),
+                    },
+                    'latest_records': {
+                        'entry_decision': ({**entry_records[0], 'detail_url': self.build_watch_record_detail_url('entry_decision', item, entry_records[0])} if entry_records else None),
+                        'stock_analysis': ({**stock_analysis_records[0], 'detail_url': self.build_watch_record_detail_url('stock_analysis', item, stock_analysis_records[0])} if stock_analysis_records else None),
+                        'trade_plan': ({**trade_plan_records[0], 'detail_url': self.build_watch_record_detail_url('trade_plan', item, trade_plan_records[0])} if trade_plan_records else None),
+                    },
+                }
+            )
+        return history_items
+
+    def _build_history_center_entry_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for item in watch_stocks:
+            for record in self.list_entry_decision_records(item.get('id', ''), limit=10):
+                records.append(
+                    {
+                        'watch_stock_id': item.get('id', ''),
+                        'stock_code': item.get('stock_code', ''),
+                        'stock_name': item.get('stock_name', ''),
+                        'market': item.get('market', ''),
+                        'trade_date': record.get('trade_date', ''),
+                        'current_stage': record.get('current_stage', ''),
+                        'current_price_zone': record.get('current_price_zone', ''),
+                        'suggested_action': record.get('suggested_action', ''),
+                        'conclusion_summary': record.get('conclusion_summary', ''),
+                        'detail_url': f"/entry-decision?watch_stock_id={item.get('id', '')}&record_id={record.get('id', '')}",
+                    }
+                )
+        return sorted(records, key=lambda current: (current.get('trade_date') or '', current.get('stock_code') or ''), reverse=True)
+
+    def _build_history_center_stock_analysis_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for item in watch_stocks:
+            for record in self.list_stock_analysis_records(item.get('id', ''), limit=10):
+                scores = record.get('scores_json') or {}
+                records.append(
+                    {
+                        'watch_stock_id': item.get('id', ''),
+                        'holding_stock_id': record.get('holding_stock_id', ''),
+                        'analysis_scene': record.get('analysis_scene', ''),
+                        'stock_code': item.get('stock_code', ''),
+                        'stock_name': item.get('stock_name', ''),
+                        'market': item.get('market', ''),
+                        'trade_date': record.get('trade_date', ''),
+                        'stance': record.get('stance', ''),
+                        'time_horizon': record.get('time_horizon', ''),
+                        'risk_level': record.get('risk_level', ''),
+                        'composite_score': scores.get('composite', 0) if isinstance(scores, dict) else 0,
+                        'conclusion_summary': record.get('conclusion_summary', ''),
+                        'detail_url': self.build_watch_record_detail_url('stock_analysis', item, record),
+                    }
+                )
+        return sorted(records, key=lambda current: (current.get('trade_date') or '', current.get('stock_code') or ''), reverse=True)
+
+    def _build_history_center_trade_plan_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for item in watch_stocks:
+            for record in self.list_trade_plan_analysis_records(item.get('id', ''), limit=10):
+                records.append(
+                    {
+                        'watch_stock_id': item.get('id', ''),
+                        'stock_code': item.get('stock_code', ''),
+                        'stock_name': item.get('stock_name', ''),
+                        'market': item.get('market', ''),
+                        'trade_date': record.get('trade_date', ''),
+                        'plan_type': record.get('plan_type', ''),
+                        'risk_preference': record.get('risk_preference', ''),
+                        'suggested_action': record.get('suggested_action', ''),
+                        'max_target_position': record.get('max_target_position', ''),
+                        'position_limit': record.get('position_limit', ''),
+                        'conclusion_summary': record.get('conclusion_summary', ''),
+                        'detail_url': f"/trade-plan-analysis?watch_stock_id={item.get('id', '')}&record_id={record.get('id', '')}",
+                    }
+                )
+        return sorted(records, key=lambda current: (current.get('trade_date') or '', current.get('stock_code') or ''), reverse=True)
 
     def list_watch_stocks(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         normalized_filters = self.normalize_filters(filters or {})
         result = self.repository.list(normalized_filters)
         return {
-            'items': result.items,
+            'items': [self._format_watch_stock_item(item) for item in result.items],
             'summary': result.summary,
             'pagination': result.pagination,
             'filters': normalized_filters,
@@ -51,10 +2503,12 @@ class TradingDecisionService:
 
     def create_watch_stock(self, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = self._normalize_payload(payload, creating=True)
-        return self.repository.create(normalized)
+        created = self.repository.create(normalized)
+        return self._format_watch_stock_item(created)
 
     def get_watch_stock(self, watch_stock_id: str) -> dict[str, Any] | None:
-        return self.repository.get_by_id(watch_stock_id)
+        row = self.repository.get_by_id(watch_stock_id)
+        return self._format_watch_stock_item(row) if row else None
 
     def update_watch_stock(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         normalized = self._normalize_payload(payload, creating=False)
@@ -122,7 +2576,7 @@ class TradingDecisionService:
                 break
         return results
 
-    def build_entry_decision_page_data(self, watch_stock_id: str) -> dict[str, Any]:
+    def build_entry_decision_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
         watch_stock = self.get_watch_stock(watch_stock_id)
         if not watch_stock:
             raise ValueError('关注股票不存在')
@@ -130,7 +2584,13 @@ class TradingDecisionService:
         watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
         active_session = self.get_latest_active_entry_decision_session(watch_stock_id)
         history_items = self.list_entry_decision_records(watch_stock_id, limit=10)
-        selected_record = history_items[0] if history_items else None
+        selected_record = None
+        if record_id:
+            selected_record = self.get_entry_decision_record(record_id)
+            if not selected_record or selected_record.get('watch_stock_id') != watch_stock_id:
+                raise ValueError('进场决策记录不存在')
+        elif history_items:
+            selected_record = history_items[0]
 
         manual_inputs = (active_session or {}).get('manual_inputs_json', {})
         position_input = manual_inputs.get('position_input', {})
@@ -142,19 +2602,775 @@ class TradingDecisionService:
             'selected_record': selected_record,
             'history_items': history_items,
             'form_defaults': {
-                'trade_date': datetime.now().strftime('%Y-%m-%d'),
+                'trade_date': (selected_record or {}).get('trade_date') or datetime.now().strftime('%Y-%m-%d'),
                 'analysis_depth': 'standard',
                 'position_input': {
                     'current_position': position_input.get('current_position') or '0%',
                     'max_target_position': position_input.get('max_target_position') or '',
                 },
-                'current_stage': watch_stock.get('current_stage') or '',
-                'current_price_zone': watch_stock.get('current_price_zone') or '',
-                'suggested_action': watch_stock.get('suggested_action') or '',
-                'last_conclusion_summary': watch_stock.get('last_conclusion_summary') or '',
-                'last_analysis_at': watch_stock.get('last_analysis_at') or '',
+                'current_stage': (selected_record or {}).get('current_stage') or watch_stock.get('current_stage') or '',
+                'current_price_zone': (selected_record or {}).get('current_price_zone') or watch_stock.get('current_price_zone') or '',
+                'suggested_action': (selected_record or {}).get('suggested_action') or watch_stock.get('suggested_action') or '',
+                'last_conclusion_summary': (selected_record or {}).get('conclusion_summary') or watch_stock.get('last_conclusion_summary') or '',
+                'last_analysis_at': (selected_record or {}).get('trade_date') or watch_stock.get('last_analysis_at') or '',
             },
         }
+
+    def build_stock_analysis_record_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+
+        watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+        history_items = self.list_stock_analysis_records(watch_stock_id, limit=10)
+        selected_record = None
+        if record_id:
+            selected_record = self.get_stock_analysis_record(record_id)
+            if not selected_record or selected_record.get('watch_stock_id') != watch_stock_id:
+                raise ValueError('股票分析记录不存在')
+        elif history_items:
+            selected_record = history_items[0]
+
+        return {
+            'page_mode': 'watch_stock_analysis',
+            'page_title': '股票分析记录',
+            'page_description': '该页面复用单股 AI 分析链路发起研究型分析，并将后台返回结果按真实数据结构动态拆分为多个结果标签页。',
+            'analyze_button_text': '开始股票分析',
+            'watch_stock': watch_stock,
+            'holding_stock': None,
+            'display_market': watch_stock.get('market') or 'A股',
+            'selected_record': selected_record,
+            'history_items': history_items,
+        }
+
+    def build_holding_reanalysis_page_data(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        if watch_stock:
+            watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+
+        history_items = self.list_holding_reanalysis_records(holding_stock_id, limit=10)
+        selected_record = None
+        if record_id:
+            selected_record = self.get_stock_analysis_record(record_id)
+            if not selected_record or selected_record.get('holding_stock_id') != holding_stock_id:
+                raise ValueError('持仓再评估记录不存在')
+        elif history_items:
+            selected_record = history_items[0]
+
+        return {
+            'page_mode': 'holding_reanalysis',
+            'page_title': '持仓二次分析',
+            'page_description': '该页面复用单股 AI 分析链路，但分析上下文会补充当前持仓、历史股票分析、进场决策与行情财务快照。',
+            'analyze_button_text': '开始二次分析',
+            'watch_stock': watch_stock,
+            'holding_stock': holding_stock,
+            'display_market': holding_stock.get('market') or 'A股',
+            'selected_record': selected_record,
+            'history_items': history_items,
+        }
+
+    def build_holding_reanalysis_context(self, holding_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        if watch_stock:
+            watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+
+        trade_date = (payload.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d')
+        market = self._normalize_lookup_market(holding_stock.get('market') or '')
+        stock_code = (holding_stock.get('stock_code') or '').strip()
+        snapshot = self.data_facade.build_snapshot(stock_code=stock_code, market=market, trade_date=trade_date)
+        watch_stock_history = self.list_stock_analysis_records(linked_watch_stock_id, limit=3) if linked_watch_stock_id else []
+        entry_decision_history = self.list_entry_decision_records(linked_watch_stock_id, limit=3) if linked_watch_stock_id else []
+        trade_plan_history = self.list_trade_plan_analysis_records(linked_watch_stock_id, limit=1) if linked_watch_stock_id else []
+        return {
+            'holding_stock': holding_stock,
+            'watch_stock': watch_stock,
+            'trade_date': trade_date,
+            'snapshot': snapshot,
+            'watch_stock_history': watch_stock_history,
+            'entry_decision_history': entry_decision_history,
+            'trade_plan_history': trade_plan_history,
+        }
+
+    def list_holding_reanalysis_records(self, holding_stock_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        rows = self.stock_analysis_record_repository.list_by_holding_stock(holding_stock_id, limit=limit)
+        return [self._format_stock_analysis_record(row) for row in rows]
+
+    def build_holding_reanalysis_record_payload(self, raw_result: dict[str, Any], holding_stock: dict[str, Any], watch_stock: dict[str, Any] | None, request_payload: dict[str, Any]) -> dict[str, Any]:
+        data = raw_result.get('data') or {}
+        decision = data.get('decision') or {}
+        trade_date = (request_payload.get('trade_date') or '').strip() or str(data.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d')
+        conclusion_summary = (
+            (request_payload.get('conclusion_summary') or '').strip()
+            or str(decision.get('summary') or '').strip()
+            or str(data.get('logic') or '').strip()
+            or str(decision.get('logic') or '').strip()
+        )
+        return {
+            'watch_stock_id': (watch_stock or {}).get('id', ''),
+            'holding_stock_id': holding_stock.get('id', ''),
+            'analysis_scene': 'holding_reanalysis',
+            'stock_code': holding_stock.get('stock_code', ''),
+            'stock_name': holding_stock.get('stock_name', ''),
+            'market': holding_stock.get('market', ''),
+            'trade_date': trade_date,
+            'analysis_mode': str(data.get('analysis_mode') or 'agentic').strip(),
+            'stance': str(data.get('stance') or decision.get('stance') or 'reanalysis').strip(),
+            'time_horizon': str(data.get('time_horizon') or decision.get('time_horizon') or '').strip(),
+            'conclusion_summary': conclusion_summary,
+            'risk_level': str(decision.get('risk_level') or '').strip(),
+            'scores_json': data.get('scores') or {},
+            'signals_json': data.get('signals') or [],
+            'risks_json': data.get('risks') or [],
+            'evidence_json': data.get('evidence') or [],
+            'raw_result_json': raw_result,
+        }
+
+    def build_holding_reanalysis_api_payload(self, holding_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        normalized_payload = dict(payload)
+        normalized_payload['holding_stock_id'] = holding_stock_id
+        normalized_payload['analysis_scene'] = 'holding_reanalysis'
+        normalized_payload['watch_stock_id'] = linked_watch_stock_id
+        normalized_payload['stock_code'] = normalized_payload.get('stock_code') or holding_stock.get('stock_code') or ''
+        normalized_payload['stock_name'] = normalized_payload.get('stock_name') or holding_stock.get('stock_name') or ''
+        normalized_payload['market'] = normalized_payload.get('market') or holding_stock.get('market') or ''
+        normalized_payload['reanalysis_context'] = self.build_holding_reanalysis_context(holding_stock_id, normalized_payload)
+        if watch_stock:
+            normalized_payload['watch_stock_context'] = watch_stock
+        return normalized_payload
+
+    def build_holding_reanalysis_tabs(self, raw_result: dict[str, Any]) -> list[dict[str, Any]]:
+        data = raw_result.get('data') or {}
+        decision = data.get('decision') or {}
+        snapshot = data.get('snapshot') or {}
+        scores = data.get('scores') or {}
+        return [
+            {
+                'id': 'fundamental-changes',
+                'label': '基本面变化',
+                'content': str(data.get('logic') or decision.get('logic') or '待补充').strip() or '待补充',
+            },
+            {
+                'id': 'valuation-crowding',
+                'label': '估值与交易拥挤度',
+                'content': json.dumps({'scores': scores, 'snapshot': snapshot}, ensure_ascii=False, indent=2, default=str),
+            },
+            {
+                'id': 'risk-catalyst',
+                'label': '风险与催化',
+                'content': json.dumps(data.get('risks') or decision.get('risks') or [], ensure_ascii=False, indent=2, default=str),
+            },
+            {
+                'id': 'market-sentiment',
+                'label': '市场情绪',
+                'content': json.dumps(data.get('signals') or [], ensure_ascii=False, indent=2, default=str),
+            },
+            {
+                'id': 'adjustment-advice',
+                'label': '调整建议',
+                'content': str(decision.get('summary') or data.get('logic') or '待补充').strip() or '待补充',
+            },
+        ]
+
+    def update_holding_stock_from_reanalysis_record(self, record: dict[str, Any]) -> dict[str, Any] | None:
+        holding_stock_id = (record.get('holding_stock_id') or '').strip()
+        if not holding_stock_id:
+            return None
+        return self.holding_repository.update(
+            holding_stock_id,
+            {
+                'suggested_action': record.get('conclusion_summary') or '',
+                'last_review_at': record.get('trade_date') or '',
+            },
+        )
+
+    def save_holding_reanalysis_record(self, payload: dict[str, Any]) -> dict[str, Any]:
+        holding_stock_id = (payload.get('holding_stock_id') or '').strip()
+        if not holding_stock_id:
+            raise ValueError('缺少 holding_stock_id')
+
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        raw_result = payload.get('raw_result') or {}
+        if raw_result and not isinstance(raw_result, dict):
+            raise ValueError('raw_result 必须是对象')
+
+        if isinstance(raw_result.get('data'), dict):
+            raw_result = dict(raw_result)
+            raw_result['data'] = dict(raw_result.get('data') or {})
+            raw_result['data']['analysis_scene'] = 'holding_reanalysis'
+            raw_result['data']['holding_stock_id'] = holding_stock_id
+            raw_result['data']['watch_stock_id'] = linked_watch_stock_id
+            raw_result['data']['holding_reanalysis_tabs'] = self.build_holding_reanalysis_tabs(raw_result)
+
+        record_payload = self.build_holding_reanalysis_record_payload(raw_result, holding_stock, watch_stock, payload)
+        created = self.stock_analysis_record_repository.create(record_payload)
+        formatted = self._format_stock_analysis_record(created)
+        self.update_holding_stock_from_reanalysis_record(formatted)
+        return formatted
+
+    def build_holding_reanalysis_detail_url(self, holding_stock_id: str, record_id: str) -> str:
+        return f'/holding-reanalysis?holding_stock_id={holding_stock_id}&record_id={record_id}'
+
+    def build_holding_reanalysis_history_items(self, holding_stock_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        return [
+            {
+                **record,
+                'detail_url': self.build_holding_reanalysis_detail_url(holding_stock_id, record.get('id', '')),
+            }
+            for record in self.list_holding_reanalysis_records(holding_stock_id, limit=limit)
+        ]
+
+    def build_holding_reanalysis_summary(self, holding_stock_id: str) -> dict[str, Any]:
+        records = self.list_holding_reanalysis_records(holding_stock_id, limit=1)
+        latest = records[0] if records else None
+        return {
+            'count': len(self.list_holding_reanalysis_records(holding_stock_id, limit=100)),
+            'latest': latest,
+        }
+
+    def get_holding_reanalysis_record(self, record_id: str) -> dict[str, Any] | None:
+        record = self.get_stock_analysis_record(record_id)
+        if not record:
+            return None
+        return record if (record.get('analysis_scene') or '') == 'holding_reanalysis' else None
+
+    def build_holding_reanalysis_form_defaults(self, holding_stock_id: str) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+        return {
+            'stock_code': holding_stock.get('stock_code', ''),
+            'market': self._normalize_lookup_market(holding_stock.get('market') or ''),
+            'trade_date': datetime.now().strftime('%Y-%m-%d'),
+            'analysis_depth': 'standard',
+        }
+
+    def build_holding_reanalysis_page_context(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        page_data = self.build_holding_reanalysis_page_data(holding_stock_id, record_id)
+        page_data['form_defaults'] = self.build_holding_reanalysis_form_defaults(holding_stock_id)
+        page_data['history_items'] = self.build_holding_reanalysis_history_items(holding_stock_id, limit=10)
+        return page_data
+
+    def build_holding_review_page_data(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        if watch_stock:
+            watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+
+        history_items = self.list_holding_review_records(holding_stock_id, limit=10)
+        selected_record = None
+        if record_id:
+            selected_record = self.get_holding_review_record(record_id)
+            if not selected_record or selected_record.get('holding_stock_id') != holding_stock_id:
+                raise ValueError('持仓复盘记录不存在')
+        elif history_items:
+            selected_record = history_items[0]
+
+        latest_position_decision = self.list_position_decision_records(holding_stock_id, limit=1)[0] if self.list_position_decision_records(holding_stock_id, limit=1) else None
+        latest_reanalysis = self.list_holding_reanalysis_records(holding_stock_id, limit=1)[0] if self.list_holding_reanalysis_records(holding_stock_id, limit=1) else None
+        return {
+            'page_mode': 'holding_review',
+            'page_title': '持仓复盘',
+            'page_description': '基于当前持仓、成交轨迹、原始决策与报表市场数据，由交易专家生成结构化持仓复盘草案。',
+            'holding_stock': holding_stock,
+            'watch_stock': watch_stock,
+            'display_market': holding_stock.get('market') or 'A股',
+            'selected_record': selected_record,
+            'history_items': history_items,
+            'latest_position_decision': latest_position_decision,
+            'latest_reanalysis': latest_reanalysis,
+            'form_defaults': self.build_holding_review_form_defaults(holding_stock_id, selected_record),
+        }
+
+    def build_position_decision_page_data(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        if watch_stock:
+            watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+
+        history_items = self.list_position_decision_records(holding_stock_id, limit=10)
+        selected_record = None
+        if record_id:
+            selected_record = self.get_position_decision_record(record_id)
+            if not selected_record or selected_record.get('holding_stock_id') != holding_stock_id:
+                raise ValueError('买卖决策记录不存在')
+        elif history_items:
+            selected_record = history_items[0]
+
+        latest_trade_plan = self.list_trade_plan_analysis_records(linked_watch_stock_id, limit=1)[0] if linked_watch_stock_id and self.list_trade_plan_analysis_records(linked_watch_stock_id, limit=1) else None
+        latest_reanalysis = self.list_holding_reanalysis_records(holding_stock_id, limit=1)[0] if self.list_holding_reanalysis_records(holding_stock_id, limit=1) else None
+        return {
+            'page_mode': 'position_decision',
+            'page_title': '买卖决策',
+            'page_description': '基于当前持仓、财报数据、历史成交与持仓计划，由股票分析师生成真实可执行的买卖决策草案。',
+            'holding_stock': holding_stock,
+            'watch_stock': watch_stock,
+            'display_market': holding_stock.get('market') or 'A股',
+            'selected_record': selected_record,
+            'history_items': history_items,
+            'latest_trade_plan': latest_trade_plan,
+            'latest_reanalysis': latest_reanalysis,
+            'form_defaults': self.build_position_decision_form_defaults(holding_stock_id, selected_record),
+        }
+
+    def build_holding_review_form_defaults(self, holding_stock_id: str, selected_record: dict[str, Any] | None = None) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+        return {
+            'trade_date': (selected_record or {}).get('trade_date') or datetime.now().strftime('%Y-%m-%d'),
+            'review_type': (selected_record or {}).get('review_type') or 'general',
+            'period_key': (selected_record or {}).get('period_key') or '',
+            'analysis_depth': (selected_record or {}).get('analysis_depth') or 'standard',
+        }
+
+    def build_position_decision_form_defaults(self, holding_stock_id: str, selected_record: dict[str, Any] | None = None) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+        return {
+            'trade_date': (selected_record or {}).get('trade_date') or datetime.now().strftime('%Y-%m-%d'),
+            'analysis_depth': (selected_record or {}).get('analysis_depth') or 'standard',
+        }
+
+    def build_holding_review_context(self, holding_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        if watch_stock:
+            watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+
+        request_payload = self.build_holding_review_request(payload)
+        stock_code = (holding_stock.get('stock_code') or '').strip()
+        market = self._normalize_lookup_market(holding_stock.get('market') or '')
+        snapshot = self.data_facade.build_snapshot(stock_code=stock_code, market=market, trade_date=request_payload['trade_date'])
+        trades = self.get_holding_stock_trades(holding_stock_id, limit=30)
+        lots = self.get_holding_stock_lots(holding_stock_id, limit=30)
+        entry_decision_records = self.list_entry_decision_records(linked_watch_stock_id, limit=3) if linked_watch_stock_id else []
+        reanalysis_records = self.list_holding_reanalysis_records(holding_stock_id, limit=3)
+        position_decision_records = self.list_position_decision_records(holding_stock_id, limit=3)
+        recent_trade_steps = [
+            {
+                'trade_type': item.get('trade_type', ''),
+                'trade_date': item.get('trade_date', ''),
+                'price': item.get('price'),
+                'quantity': item.get('quantity'),
+                'amount': item.get('amount'),
+                'note': item.get('note', ''),
+            }
+            for item in trades[:3]
+        ]
+        return {
+            'holding_stock': holding_stock,
+            'watch_stock': watch_stock,
+            'request': request_payload,
+            'trade_history_context': {
+                'trades': trades,
+                'lots': lots,
+                'recent_trade_steps': recent_trade_steps,
+            },
+            'entry_context': {
+                'latest_entry_decision': entry_decision_records[0] if entry_decision_records else None,
+                'entry_decision_history': entry_decision_records,
+            },
+            'reanalysis_context': {
+                'latest_reanalysis': reanalysis_records[0] if reanalysis_records else None,
+                'reanalysis_history': reanalysis_records,
+            },
+            'position_decision_context': {
+                'latest_position_decision': position_decision_records[0] if position_decision_records else None,
+                'position_decision_history': position_decision_records,
+            },
+            'financial_context': {
+                'company_profile': self._simplify_records(snapshot.get('company_profile'), limit=5),
+                'financial_indicators': self._simplify_records(snapshot.get('financial_indicators'), limit=10),
+                'reports': snapshot.get('reports') or {},
+            },
+            'market_context': {
+                'technical': snapshot.get('technical') or {},
+                'sentiment': snapshot.get('sentiment') or {},
+                'market_context': snapshot.get('market_context') or {},
+                'news': self._simplify_records(snapshot.get('news'), limit=5),
+            },
+            'review_focus_context': {
+                'suggested_action': holding_stock.get('suggested_action') or '',
+                'unrealized_pnl': holding_stock.get('unrealized_pnl'),
+                'unrealized_pnl_pct': holding_stock.get('unrealized_pnl_pct'),
+                'quantity': holding_stock.get('quantity'),
+                'last_review_at': holding_stock.get('last_review_at') or '',
+            },
+            'data_source': 'holding_snapshot',
+            'role_instruction': '交易专家',
+        }
+
+    def build_position_decision_context(self, holding_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        if watch_stock:
+            watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+
+        request_payload = self.build_position_decision_request(payload)
+        stock_code = (holding_stock.get('stock_code') or '').strip()
+        market = self._normalize_lookup_market(holding_stock.get('market') or '')
+        snapshot = self.data_facade.build_snapshot(stock_code=stock_code, market=market, trade_date=request_payload['trade_date'])
+        trades = self.get_holding_stock_trades(holding_stock_id, limit=30)
+        lots = self.get_holding_stock_lots(holding_stock_id, limit=30)
+        trade_plan_records = self.list_trade_plan_analysis_records(linked_watch_stock_id, limit=3) if linked_watch_stock_id else []
+        stock_analysis_records = self.list_stock_analysis_records(watch_stock_id=linked_watch_stock_id, limit=3) if linked_watch_stock_id else []
+        entry_decision_records = self.list_entry_decision_records(linked_watch_stock_id, limit=3) if linked_watch_stock_id else []
+        return {
+            'holding_stock': holding_stock,
+            'watch_stock': watch_stock,
+            'request': request_payload,
+            'financial_context': {
+                'company_profile': self._simplify_records(snapshot.get('company_profile'), limit=5),
+                'financial_indicators': self._simplify_records(snapshot.get('financial_indicators'), limit=10),
+                'reports': snapshot.get('reports') or {},
+            },
+            'trade_history_context': {
+                'trades': trades,
+                'lots': lots,
+                'market_snapshot': {
+                    'technical': snapshot.get('technical') or {},
+                    'sentiment': snapshot.get('sentiment') or {},
+                    'market_context': snapshot.get('market_context') or {},
+                    'news': self._simplify_records(snapshot.get('news'), limit=5),
+                },
+            },
+            'holding_plan_context': {
+                'latest_trade_plan': trade_plan_records[0] if trade_plan_records else None,
+                'trade_plan_history': trade_plan_records,
+            },
+            'supporting_context': {
+                'stock_analysis_history': stock_analysis_records,
+                'entry_decision_history': entry_decision_records,
+            },
+            'data_source': 'holding_snapshot',
+            'role_instruction': '股票分析师',
+        }
+
+    def build_holding_review_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'trade_date': (payload.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d'),
+            'review_type': (payload.get('review_type') or 'general').strip() or 'general',
+            'period_key': (payload.get('period_key') or '').strip(),
+            'analysis_depth': (payload.get('analysis_depth') or 'standard').strip() or 'standard',
+            'client_id': (payload.get('client_id') or '').strip() or None,
+        }
+
+    def build_position_decision_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'trade_date': (payload.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d'),
+            'analysis_depth': (payload.get('analysis_depth') or 'standard').strip() or 'standard',
+            'client_id': (payload.get('client_id') or '').strip() or None,
+        }
+
+    def build_holding_review_record_payload(self, raw_result: dict[str, Any], holding_stock: dict[str, Any], watch_stock: dict[str, Any] | None, request_payload: dict[str, Any]) -> dict[str, Any]:
+        normalized_result = self._normalize_holding_review_result(raw_result)
+        data = dict(normalized_result.get('data') or {})
+        trade_date = (request_payload.get('trade_date') or '').strip() or str(data.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d')
+        review_type = (request_payload.get('review_type') or '').strip() or str(data.get('review_type') or 'general').strip()
+        period_key = (request_payload.get('period_key') or '').strip() or str(data.get('period_key') or '').strip()
+        analysis_depth = (request_payload.get('analysis_depth') or '').strip() or str(data.get('analysis_depth') or 'standard').strip()
+        data['holding_stock_id'] = holding_stock.get('id', '')
+        data['watch_stock_id'] = (watch_stock or {}).get('id', '')
+        data['stock_code'] = holding_stock.get('stock_code', '')
+        data['stock_name'] = holding_stock.get('stock_name', '')
+        data['market'] = holding_stock.get('market', '')
+        data['trade_date'] = trade_date
+        data['review_type'] = review_type
+        data['period_key'] = period_key
+        data['analysis_depth'] = analysis_depth
+        normalized_result = {**normalized_result, 'data': data}
+        return {
+            'holding_stock_id': holding_stock.get('id', ''),
+            'watch_stock_id': (watch_stock or {}).get('id', ''),
+            'stock_code': holding_stock.get('stock_code', ''),
+            'stock_name': holding_stock.get('stock_name', ''),
+            'market': holding_stock.get('market', ''),
+            'trade_date': trade_date,
+            'review_type': review_type,
+            'period_key': period_key,
+            'analysis_depth': analysis_depth,
+            'performance_summary': str(data.get('performance_summary') or '').strip(),
+            'execution_summary': str(data.get('execution_summary') or '').strip(),
+            'risk_summary': str(data.get('risk_summary') or '').strip(),
+            'discipline_summary': str(data.get('discipline_summary') or '').strip(),
+            'next_action_summary': str(data.get('next_action_summary') or '').strip(),
+            'conclusion_tag': str(data.get('conclusion_tag') or '').strip(),
+            'tabs_json': data.get('tabs') or [],
+            'evidence_json': data.get('evidence') or [],
+            'context_snapshot_json': data.get('context_snapshot') or {},
+            'raw_result_json': normalized_result,
+        }
+
+    def build_position_decision_record_payload(self, raw_result: dict[str, Any], holding_stock: dict[str, Any], watch_stock: dict[str, Any] | None, request_payload: dict[str, Any]) -> dict[str, Any]:
+        normalized_result = self._normalize_position_decision_result(raw_result)
+        data = dict(normalized_result.get('data') or {})
+        decision = data.get('decision') or {}
+        tabs = data.get('tabs') or []
+        summary_map = {str(item.get('title') or ''): str(item.get('summary') or '').strip() for item in tabs if isinstance(item, dict)}
+        trade_date = (request_payload.get('trade_date') or '').strip() or str(data.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d')
+        analysis_depth = (request_payload.get('analysis_depth') or '').strip() or str(data.get('analysis_depth') or 'standard').strip()
+        data['holding_stock_id'] = holding_stock.get('id', '')
+        data['watch_stock_id'] = (watch_stock or {}).get('id', '')
+        data['stock_code'] = holding_stock.get('stock_code', '')
+        data['stock_name'] = holding_stock.get('stock_name', '')
+        data['market'] = holding_stock.get('market', '')
+        data['trade_date'] = trade_date
+        data['analysis_depth'] = analysis_depth
+        normalized_result = {**normalized_result, 'data': data}
+        return {
+            'holding_stock_id': holding_stock.get('id', ''),
+            'watch_stock_id': (watch_stock or {}).get('id', ''),
+            'stock_code': holding_stock.get('stock_code', ''),
+            'stock_name': holding_stock.get('stock_name', ''),
+            'market': holding_stock.get('market', ''),
+            'trade_date': trade_date,
+            'analysis_depth': analysis_depth,
+            'decision_type': str(decision.get('action') or '').strip(),
+            'decision_status': str(decision.get('status') or '').strip(),
+            'conclusion_summary': str(decision.get('summary') or data.get('conclusion_summary') or '').strip(),
+            'trigger_summary': summary_map.get('触发条件', ''),
+            'reason_summary': summary_map.get('核心理由', ''),
+            'execution_summary': summary_map.get('执行注意事项', ''),
+            'risk_summary': summary_map.get('风险分析', ''),
+            'confidence': str(decision.get('confidence') or '').strip(),
+            'tabs_json': tabs,
+            'evidence_json': data.get('evidence') or [],
+            'raw_result_json': normalized_result,
+        }
+    def _normalize_position_decision_result(self, raw_result: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(raw_result, dict):
+            return {'success': True, 'data': {}}
+        if isinstance(raw_result.get('data'), dict):
+            return raw_result
+
+        tabs = raw_result.get('tabs') if isinstance(raw_result.get('tabs'), list) else []
+        recommended_action = str(raw_result.get('recommended_action') or 'watch').strip().lower() or 'watch'
+        decision_status = str(raw_result.get('decision_status') or self._map_position_decision_status(recommended_action)).strip()
+        confidence = str(raw_result.get('confidence') or 'medium').strip() or 'medium'
+        conclusion_summary = str(raw_result.get('conclusion_summary') or '').strip()
+        evidence = []
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            for item in tab.get('evidence', []) if isinstance(tab.get('evidence'), list) else []:
+                text = str(item).strip()
+                if text:
+                    evidence.append({'tab': str(tab.get('title') or ''), 'detail': text})
+        return {
+            'success': True,
+            'data': {
+                'holding_stock_id': '',
+                'watch_stock_id': '',
+                'stock_code': '',
+                'stock_name': '',
+                'market': '',
+                'trade_date': str(raw_result.get('trade_date') or '').strip(),
+                'analysis_depth': str(raw_result.get('analysis_depth') or 'standard').strip() or 'standard',
+                'decision': {
+                    'action': recommended_action,
+                    'status': decision_status,
+                    'confidence': confidence,
+                    'summary': conclusion_summary,
+                },
+                'conclusion_summary': conclusion_summary,
+                'tabs': tabs,
+                'evidence': evidence,
+                'meta': raw_result.get('meta') if isinstance(raw_result.get('meta'), dict) else {'role': '股票分析师'},
+                'context_snapshot': raw_result.get('context_snapshot') if isinstance(raw_result.get('context_snapshot'), dict) else {},
+            },
+        }
+
+    def _normalize_holding_review_result(self, raw_result: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(raw_result, dict):
+            return {'success': True, 'data': {}}
+        if isinstance(raw_result.get('data'), dict):
+            return raw_result
+
+        tabs = raw_result.get('tabs') if isinstance(raw_result.get('tabs'), list) else []
+        evidence = []
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            for item in tab.get('evidence', []) if isinstance(tab.get('evidence'), list) else []:
+                text = str(item).strip()
+                if text:
+                    evidence.append({'tab': str(tab.get('title') or ''), 'detail': text})
+        return {
+            'success': True,
+            'data': {
+                'holding_stock_id': '',
+                'watch_stock_id': '',
+                'stock_code': '',
+                'stock_name': '',
+                'market': '',
+                'trade_date': str(raw_result.get('trade_date') or '').strip(),
+                'review_type': str(raw_result.get('review_type') or 'general').strip() or 'general',
+                'period_key': str(raw_result.get('period_key') or '').strip(),
+                'analysis_depth': str(raw_result.get('analysis_depth') or 'standard').strip() or 'standard',
+                'performance_summary': str(raw_result.get('performance_summary') or '').strip(),
+                'execution_summary': str(raw_result.get('execution_summary') or '').strip(),
+                'risk_summary': str(raw_result.get('risk_summary') or '').strip(),
+                'discipline_summary': str(raw_result.get('discipline_summary') or '').strip(),
+                'next_action_summary': str(raw_result.get('next_action_summary') or '').strip(),
+                'conclusion_tag': str(raw_result.get('conclusion_tag') or '').strip(),
+                'tabs': tabs,
+                'evidence': evidence,
+                'meta': raw_result.get('meta') if isinstance(raw_result.get('meta'), dict) else {'role': '交易专家'},
+                'context_snapshot': raw_result.get('context_snapshot') if isinstance(raw_result.get('context_snapshot'), dict) else {},
+            },
+        }
+
+    def _map_position_decision_status(self, action: str) -> str:
+        mapping = {
+            'buy': 'buy_candidate',
+            'reduce': 'reduce_candidate',
+            'sell': 'sell_candidate',
+            'watch': 'observe',
+            'hold': 'observe',
+        }
+        return mapping.get(action, 'observe')
+
+
+    def save_holding_review_record(self, payload: dict[str, Any]) -> dict[str, Any]:
+        holding_stock_id = (payload.get('holding_stock_id') or '').strip()
+        if not holding_stock_id:
+            raise ValueError('缺少 holding_stock_id')
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        raw_result = payload.get('raw_result') or {}
+        if raw_result and not isinstance(raw_result, dict):
+            raise ValueError('raw_result 必须是对象')
+        record_payload = self.build_holding_review_record_payload(raw_result, holding_stock, watch_stock, payload)
+        created = self.holding_review_record_repository.create(record_payload)
+        formatted = self._format_holding_review_record(created)
+        self.holding_repository.update(
+            holding_stock_id,
+            {
+                'suggested_action': formatted.get('next_action_summary') or holding_stock.get('suggested_action') or '',
+                'last_review_at': formatted.get('trade_date') or '',
+            },
+        )
+        return formatted
+
+    def save_position_decision_record(self, payload: dict[str, Any]) -> dict[str, Any]:
+        holding_stock_id = (payload.get('holding_stock_id') or '').strip()
+        if not holding_stock_id:
+            raise ValueError('缺少 holding_stock_id')
+        holding_stock = self.get_holding_stock(holding_stock_id)
+        if not holding_stock:
+            raise ValueError('持仓不存在')
+        linked_watch_stock_id = (holding_stock.get('linked_watch_stock_id') or '').strip()
+        watch_stock = self.get_watch_stock(linked_watch_stock_id) if linked_watch_stock_id else None
+        raw_result = payload.get('raw_result') or {}
+        if raw_result and not isinstance(raw_result, dict):
+            raise ValueError('raw_result 必须是对象')
+        record_payload = self.build_position_decision_record_payload(raw_result, holding_stock, watch_stock, payload)
+        created = self.position_decision_record_repository.create(record_payload)
+        formatted = self._format_position_decision_record(created)
+        self.holding_repository.update(
+            holding_stock_id,
+            {
+                'suggested_action': self._map_position_decision_action_to_label(formatted.get('decision_type') or ''),
+                'last_review_at': formatted.get('trade_date') or '',
+            },
+        )
+        return formatted
+
+    def list_holding_review_records(self, holding_stock_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        rows = self.holding_review_record_repository.list_by_holding_stock(holding_stock_id, limit=limit)
+        return [self._format_holding_review_record(row) for row in rows]
+
+    def get_holding_review_record(self, record_id: str) -> dict[str, Any] | None:
+        row = self.holding_review_record_repository.get_by_id(record_id)
+        return self._format_holding_review_record(row) if row else None
+
+    def list_position_decision_records(self, holding_stock_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        rows = self.position_decision_record_repository.list_by_holding_stock(holding_stock_id, limit=limit)
+        return [self._format_position_decision_record(row) for row in rows]
+
+    def get_position_decision_record(self, record_id: str) -> dict[str, Any] | None:
+        row = self.position_decision_record_repository.get_by_id(record_id)
+        return self._format_position_decision_record(row) if row else None
+
+    def list_stock_analysis_records(self, watch_stock_id: str = '', limit: int = 10, holding_stock_id: str = '') -> list[dict[str, Any]]:
+        if holding_stock_id:
+            rows = self.stock_analysis_record_repository.list_by_holding_stock(holding_stock_id, limit=limit)
+            return [self._format_stock_analysis_record(row) for row in rows]
+        rows = self.stock_analysis_record_repository.list_by_watch_stock(watch_stock_id, limit=limit)
+        return [self._format_stock_analysis_record(row) for row in rows]
+
+    def get_stock_analysis_record(self, record_id: str) -> dict[str, Any] | None:
+        row = self.stock_analysis_record_repository.get_by_id(record_id)
+        return self._format_stock_analysis_record(row) if row else None
+
+    def save_stock_analysis_record(self, payload: dict[str, Any]) -> dict[str, Any]:
+        analysis_scene = (payload.get('analysis_scene') or '').strip()
+        if analysis_scene == 'holding_reanalysis' or (payload.get('holding_stock_id') or '').strip():
+            return self.save_holding_reanalysis_record(payload)
+
+        watch_stock_id = (payload.get('watch_stock_id') or '').strip()
+        if not watch_stock_id:
+            raise ValueError('缺少 watch_stock_id')
+
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+
+        raw_result = payload.get('raw_result') or {}
+        if raw_result and not isinstance(raw_result, dict):
+            raise ValueError('raw_result 必须是对象')
+
+        record_payload = self.build_stock_analysis_record_payload(raw_result, watch_stock, payload)
+        created = self.stock_analysis_record_repository.create(record_payload)
+        formatted = self._format_stock_analysis_record(created)
+        self.update_watch_stock(
+            watch_stock_id,
+            {
+                'last_conclusion_summary': formatted.get('conclusion_summary') or watch_stock.get('last_conclusion_summary') or '',
+                'last_analysis_at': formatted.get('trade_date') or watch_stock.get('last_analysis_at') or '',
+            },
+        )
+        return formatted
 
     def create_entry_decision_session(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         watch_stock = self.get_watch_stock(watch_stock_id)
@@ -298,6 +3514,7 @@ class TradingDecisionService:
         if not watch_stock:
             raise ValueError('关注股票不存在')
 
+        watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
         history_items = self.list_trade_plan_analysis_records(watch_stock_id)
         selected_record = None
         if record_id:
@@ -323,6 +3540,520 @@ class TradingDecisionService:
                 'position_limit': (selected_record or {}).get('position_limit') or '',
             },
         }
+
+    def build_trade_plan_analysis_context(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+
+        watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+        request_payload = self._normalize_trade_plan_request(payload)
+        cache_context = self._load_trade_plan_cache_context(watch_stock, request_payload['trade_date'])
+        fallback_context = self._build_trade_plan_fallback_context(watch_stock, request_payload['trade_date'])
+        data_source = self._resolve_trade_plan_data_source(cache_context)
+        return {
+            'watch_stock': watch_stock,
+            'request': request_payload,
+            'template_markdown': self._load_trade_plan_template_markdown(),
+            'cache_context': cache_context,
+            'fallback_context': fallback_context,
+            'data_source': data_source,
+            'role_instruction': self.trade_plan_role_instruction,
+        }
+
+    def build_trade_plan_response_context(self, trade_plan_context: dict[str, Any]) -> dict[str, Any]:
+        watch_stock = trade_plan_context.get('watch_stock') or {}
+        request_payload = trade_plan_context.get('request') or {}
+        cache_context = trade_plan_context.get('cache_context') or {}
+        return {
+            'watch_stock_id': watch_stock.get('id', ''),
+            'stock_code': watch_stock.get('stock_code', ''),
+            'stock_name': watch_stock.get('stock_name', ''),
+            'market': watch_stock.get('market', ''),
+            'trade_date': request_payload.get('trade_date', ''),
+            'plan_type': request_payload.get('plan_type', ''),
+            'risk_preference': request_payload.get('risk_preference', ''),
+            'analysis_depth': request_payload.get('analysis_depth', 'standard'),
+            'template_name': self.trade_plan_template_name,
+            'data_source': trade_plan_context.get('data_source', 'fallback_only'),
+            'cache_hits': cache_context.get('cache_hits', []),
+        }
+
+    def _normalize_trade_plan_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'trade_date': (payload.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d'),
+            'plan_type': (payload.get('plan_type') or '三笔计划').strip() or '三笔计划',
+            'risk_preference': (payload.get('risk_preference') or '中高风险').strip() or '中高风险',
+            'analysis_depth': (payload.get('analysis_depth') or 'standard').strip() or 'standard',
+            'client_id': (payload.get('client_id') or '').strip() or None,
+        }
+
+    def _resolve_trade_plan_data_source(self, cache_context: dict[str, Any]) -> str:
+        hit_types = set(cache_context.get('hit_types') or [])
+        if {'entry_decision', 'stock_analysis'}.issubset(hit_types):
+            return 'cache_first'
+        if hit_types:
+            return 'partial_cache_fallback'
+        return 'fallback_only'
+
+    def _load_trade_plan_template_markdown(self) -> str:
+        try:
+            return self.trade_plan_template_path.read_text(encoding='utf-8').strip()
+        except Exception:
+            return ''
+
+    def save_result_markdown_cache(self, result_type: str, result: dict[str, Any], watch_stock: dict[str, Any] | None = None) -> str | None:
+        cache_payload = self._build_result_cache_payload(result_type, result, watch_stock)
+        if not cache_payload:
+            return None
+        self.trade_plan_cache_dir.mkdir(parents=True, exist_ok=True)
+        file_path = self.trade_plan_cache_dir / self._build_trade_plan_cache_filename(
+            cache_payload['market'],
+            cache_payload['stock_code'],
+            cache_payload['stock_name'],
+            cache_payload['biz'],
+            cache_payload['trade_date'],
+        )
+        file_path.write_text(cache_payload['markdown'], encoding='utf-8')
+        return str(file_path)
+
+    def _build_result_cache_payload(self, result_type: str, result: dict[str, Any], watch_stock: dict[str, Any] | None = None) -> dict[str, str] | None:
+        if not isinstance(result, dict) or not result.get('success'):
+            return None
+        data = result.get('data') or {}
+        if not isinstance(data, dict):
+            return None
+        watch_stock = watch_stock or {}
+        market = str(data.get('market') or watch_stock.get('market') or '').strip()
+        stock_code = str(data.get('stock_code') or watch_stock.get('stock_code') or '').strip()
+        stock_name = str(data.get('stock_name') or watch_stock.get('stock_name') or '').strip()
+        trade_date = str(data.get('trade_date') or datetime.now().strftime('%Y-%m-%d')).strip()
+        biz = self.trade_plan_cache_biz_markers.get(result_type)
+        if not (market and stock_code and stock_name and trade_date and biz):
+            return None
+        if result_type == 'entry_decision':
+            markdown = self._build_entry_decision_cache_markdown(result)
+        elif result_type == 'trade_plan':
+            markdown = self._build_trade_plan_cache_markdown(result)
+        elif result_type == 'stock_analysis':
+            markdown = self._build_stock_analysis_cache_markdown(result)
+        else:
+            return None
+        markdown = markdown.strip()
+        if not markdown:
+            return None
+        return {
+            'market': market,
+            'stock_code': stock_code,
+            'stock_name': stock_name,
+            'trade_date': trade_date,
+            'biz': biz,
+            'markdown': markdown,
+        }
+
+    def _build_trade_plan_cache_filename(self, market: str, stock_code: str, stock_name: str, biz: str, trade_date: str) -> str:
+        normalized_date = re.sub(r'[^0-9]', '', trade_date or '') or datetime.now().strftime('%Y%m%d')
+        safe_market = self._sanitize_trade_plan_cache_part(market)
+        safe_stock_code = self._sanitize_trade_plan_cache_part(stock_code)
+        safe_stock_name = self._sanitize_trade_plan_cache_part(stock_name)
+        safe_biz = self._sanitize_trade_plan_cache_part(biz)
+        return f'{safe_market}_{safe_stock_code}_{safe_stock_name}_{safe_biz}_{normalized_date}_.md'
+
+    def find_daily_result_cache(self, *, market: str, stock_code: str, stock_name: str, trade_date: str, result_type: str) -> dict[str, Any]:
+        biz = self.trade_plan_cache_biz_markers.get(result_type)
+        if not biz or not self.trade_plan_cache_dir.exists():
+            return {'hit': False, 'result_source': 'live'}
+        file_name = self._build_trade_plan_cache_filename(market, stock_code, stock_name, biz, trade_date)
+        file_path = self.trade_plan_cache_dir / file_name
+        if not file_path.exists() or not file_path.is_file():
+            return {'hit': False, 'result_source': 'live'}
+        markdown = self._read_text_file(file_path)
+        return {
+            'hit': bool(markdown),
+            'result_source': 'cache' if markdown else 'live',
+            'file_path': str(file_path),
+            'file_name': file_name,
+            'markdown': markdown,
+            'biz': biz,
+        }
+
+    def build_cached_stock_analysis_result(self, *, market: str, stock_code: str, stock_name: str, trade_date: str) -> dict[str, Any] | None:
+        cache = self.find_daily_result_cache(
+            market=market,
+            stock_code=stock_code,
+            stock_name=stock_name,
+            trade_date=trade_date,
+            result_type='stock_analysis',
+        )
+        if not cache.get('hit'):
+            return None
+        markdown = str(cache.get('markdown') or '').strip()
+        return {
+            'success': True,
+            'data': {
+                'stock_code': stock_code,
+                'stock_name': stock_name,
+                'market': market,
+                'trade_date': trade_date,
+                'analysis_mode': 'agentic',
+                'decision': {
+                    'summary': '复用当天股票分析缓存。',
+                    'logic': markdown,
+                    'risk_level': 'medium',
+                },
+                'scores': {
+                    'technical': 0,
+                    'fundamental': 0,
+                    'sentiment': 0,
+                    'composite': 0,
+                },
+                'signals': [],
+                'risks': [],
+                'evidence': [],
+                'stance': 'cache',
+                'logic': markdown,
+                'position_suggestion': None,
+                'time_horizon': '',
+                'meta': {
+                    'result_source': 'cache',
+                    'cache_file': cache.get('file_name') or '',
+                },
+                'snapshot': {},
+                'cached_markdown': markdown,
+                'result_source': 'cache',
+                'cache_file': cache.get('file_name') or '',
+            },
+        }
+
+    def build_cached_entry_decision_result(self, *, watch_stock: dict[str, Any], trade_date: str) -> dict[str, Any] | None:
+        market = str(watch_stock.get('market') or '').strip()
+        stock_code = str(watch_stock.get('stock_code') or '').strip()
+        stock_name = str(watch_stock.get('stock_name') or '').strip()
+        cache = self.find_daily_result_cache(
+            market=market,
+            stock_code=stock_code,
+            stock_name=stock_name,
+            trade_date=trade_date,
+            result_type='entry_decision',
+        )
+        if not cache.get('hit'):
+            return None
+        markdown = str(cache.get('markdown') or '').strip()
+        summary_fields = {
+            'current_stage': watch_stock.get('current_stage') or '待确认',
+            'current_price_zone': watch_stock.get('current_price_zone') or '待确认',
+            'suggested_action': watch_stock.get('suggested_action') or '继续观察',
+            'execution_summary': watch_stock.get('last_conclusion_summary') or '复用当天进场策略缓存。',
+        }
+        return {
+            'success': True,
+            'data': {
+                'watch_stock_id': watch_stock.get('id', ''),
+                'stock_code': stock_code,
+                'stock_name': stock_name,
+                'market': market,
+                'trade_date': trade_date,
+                'basic_info': {
+                    'stock_code': stock_code,
+                    'stock_name': stock_name,
+                    'market': market,
+                    'industry': watch_stock.get('industry') or '',
+                    'asset_type': watch_stock.get('asset_type') or '',
+                    'current_price': watch_stock.get('current_price'),
+                    'pe': watch_stock.get('pe'),
+                    'investment_horizon': '',
+                },
+                'macro_analysis': {},
+                'asset_classification': {},
+                'value_stage_analysis': {
+                    'current_stage': summary_fields['current_stage'],
+                },
+                'price_zone_analysis': {
+                    'price_zone': summary_fields['current_price_zone'],
+                },
+                'buy_plan_analysis': {
+                    'suggested_action': summary_fields['suggested_action'],
+                },
+                'risk_control_analysis': {
+                    'conclusion_summary': summary_fields['execution_summary'],
+                },
+                'decision_card': summary_fields,
+                'entry_decision_summary_markdown': markdown,
+                'entry_decision_summary_template': '进场决策模板_空白实战版',
+                'snapshot': {},
+                'manual_inputs': {},
+                'meta': {
+                    'status': 'completed',
+                    'current_role': 'summary',
+                    'completed_roles': [],
+                    'timeline': [],
+                    'duration_ms': 0,
+                    'errors': [],
+                    'result_source': 'cache',
+                    'cache_file': cache.get('file_name') or '',
+                },
+                'result_source': 'cache',
+                'cache_file': cache.get('file_name') or '',
+            },
+        }
+
+    def annotate_result_source(self, result: dict[str, Any], *, result_source: str, cache_file: str = '') -> dict[str, Any]:
+        if not isinstance(result, dict):
+            return result
+        data = result.get('data')
+        if not isinstance(data, dict):
+            return result
+        meta = data.get('meta')
+        if not isinstance(meta, dict):
+            meta = {}
+            data['meta'] = meta
+        meta['result_source'] = result_source
+        if cache_file:
+            meta['cache_file'] = cache_file
+        data['result_source'] = result_source
+        if cache_file:
+            data['cache_file'] = cache_file
+        return result
+
+    def build_entry_decision_cached_response_payload(self, *, watch_stock: dict[str, Any], result: dict[str, Any], trade_date: str, client_id: str) -> dict[str, Any]:
+        return {
+            'status': 'completed',
+            'task_mode': 'cache',
+            'client_id': client_id,
+            'final_result': result,
+            'entry_decision_context': {
+                'watch_stock_id': watch_stock.get('id', ''),
+                'stock_code': watch_stock.get('stock_code', ''),
+                'stock_name': watch_stock.get('stock_name', ''),
+                'market': watch_stock.get('market', ''),
+                'trade_date': trade_date,
+                'analysis_depth': 'cache',
+                'session_status': 'completed',
+                'pending_save_fields': {
+                    'current_stage': watch_stock.get('current_stage', ''),
+                    'current_price_zone': watch_stock.get('current_price_zone', ''),
+                    'suggested_action': watch_stock.get('suggested_action', ''),
+                    'last_conclusion_summary': watch_stock.get('last_conclusion_summary', ''),
+                },
+                'generated_summary_fields': self._build_entry_decision_summary_fields_from_result(result, trade_date),
+            },
+        }
+
+    def _build_entry_decision_summary_fields_from_result(self, result: dict[str, Any], trade_date: str) -> dict[str, Any]:
+        data = result.get('data') or {}
+        decision_card = data.get('decision_card') or {}
+        risk_control = data.get('risk_control_analysis') or {}
+        buy_plan = data.get('buy_plan_analysis') or {}
+        value_stage = data.get('value_stage_analysis') or {}
+        price_zone = data.get('price_zone_analysis') or {}
+        return {
+            'current_stage': str(decision_card.get('current_stage') or value_stage.get('current_stage') or '').strip(),
+            'current_price_zone': str(decision_card.get('current_price_zone') or price_zone.get('price_zone') or '').strip(),
+            'suggested_action': str(decision_card.get('suggested_action') or buy_plan.get('suggested_action') or '').strip(),
+            'last_conclusion_summary': str(risk_control.get('conclusion_summary') or decision_card.get('execution_summary') or '').strip(),
+            'last_analysis_at': trade_date or data.get('trade_date') or '',
+        }
+
+    def _sanitize_trade_plan_cache_part(self, value: str) -> str:
+        text = str(value or '').strip()
+        if not text:
+            return 'unknown'
+        return re.sub(r'[\\/:*?"<>|\s]+', '_', text)
+
+    def _build_entry_decision_cache_markdown(self, result: dict[str, Any]) -> str:
+        data = result.get('data') or {}
+        markdown = str(data.get('entry_decision_summary_markdown') or '').strip()
+        if markdown:
+            return markdown
+        return self._build_generic_result_cache_markdown('entry_decision', result)
+
+    def _build_trade_plan_cache_markdown(self, result: dict[str, Any]) -> str:
+        data = result.get('data') or {}
+        markdown = str(data.get('trade_plan_markdown') or '').strip()
+        if markdown:
+            return markdown
+        return self._build_generic_result_cache_markdown('trade_plan', result)
+
+    def _build_stock_analysis_cache_markdown(self, result: dict[str, Any]) -> str:
+        return self._build_generic_result_cache_markdown('stock_analysis', result)
+
+
+    def _build_generic_result_cache_markdown(self, result_type: str, result: dict[str, Any]) -> str:
+        data = result.get('data') or {}
+        decision = data.get('decision') or {}
+        meta = data.get('meta') or {}
+        snapshot = data.get('snapshot') or {}
+        title = self.trade_plan_cache_display_labels.get(result_type, result_type)
+        sections = [
+            f'# {title}',
+            '',
+            f'- 标的代码：{data.get("stock_code") or "待确认"}',
+            f'- 标的名称：{data.get("stock_name") or "待确认"}',
+            f'- 市场：{data.get("market") or "待确认"}',
+            f'- 交易日期：{data.get("trade_date") or "待确认"}',
+        ]
+        if result_type == 'stock_analysis':
+            scores = data.get('scores') or {}
+            sections.extend(
+                [
+                    '',
+                    '## 分析结论',
+                    '',
+                    f'- 立场：{decision.get("stance") or data.get("stance") or "待确认"}',
+                    f'- 时间周期：{data.get("time_horizon") or "待确认"}',
+                    f'- 逻辑：{data.get("logic") or decision.get("logic") or "待确认"}',
+                    '',
+                    '## 风险提示',
+                    '',
+                ]
+            )
+            risks = data.get('risks') or []
+            if isinstance(risks, list) and risks:
+                sections.extend([f'- {str(item).strip()}' for item in risks if str(item).strip()])
+            else:
+                sections.append('- 待确认')
+            sections.extend(
+                [
+                    '',
+                    '## 评分概览',
+                    '',
+                    f'- technical: {scores.get("technical", 0)}',
+                    f'- fundamental: {scores.get("fundamental", 0)}',
+                    f'- sentiment: {scores.get("sentiment", 0)}',
+                    f'- composite: {scores.get("composite", 0)}',
+                ]
+            )
+        sections.extend(
+            [
+                '',
+                '## 原始结果 JSON',
+                '',
+                '```json',
+                json.dumps(result, ensure_ascii=False, indent=2, default=str),
+                '```',
+            ]
+        )
+        if meta or snapshot:
+            sections.extend(['', '<!-- metadata retained for cache replay -->'])
+        return '\n'.join(sections).strip()
+
+    def _load_trade_plan_cache_context(self, watch_stock: dict[str, Any], trade_date: str) -> dict[str, Any]:
+        matched_files = self._find_trade_plan_cache_files(watch_stock, trade_date)
+        files = []
+        hit_types = []
+        entry_decision_markdown = ''
+        stock_analysis_markdown = ''
+        for path in matched_files:
+            content = self._read_text_file(path)
+            file_type = self._classify_trade_plan_cache_file(path.name, content)
+            files.append({'name': path.name, 'path': str(path), 'type': file_type, 'content': content})
+            if file_type == 'entry_decision' and not entry_decision_markdown:
+                entry_decision_markdown = content
+                hit_types.append(file_type)
+            elif file_type == 'stock_analysis' and not stock_analysis_markdown:
+                stock_analysis_markdown = content
+                hit_types.append(file_type)
+        return {
+            'cache_dir': str(self.trade_plan_cache_dir),
+            'cache_hits': [item['name'] for item in files],
+            'files': files,
+            'entry_decision_markdown': entry_decision_markdown,
+            'stock_analysis_markdown': stock_analysis_markdown,
+            'hit_types': list(dict.fromkeys(hit_types)),
+        }
+
+    def _find_trade_plan_cache_files(self, watch_stock: dict[str, Any], trade_date: str) -> list[Path]:
+        if not self.trade_plan_cache_dir.exists():
+            return []
+        stock_code = (watch_stock.get('stock_code') or '').strip()
+        stock_name = (watch_stock.get('stock_name') or '').strip()
+        market = (watch_stock.get('market') or '').strip()
+        normalized_date = trade_date.replace('-', '')
+        patterns = [
+            f'{market}_{stock_code}_{stock_name}_*_{normalized_date}*.md',
+            f'{market}_{stock_code}_*_{normalized_date}*.md',
+            f'*_{stock_code}_*_{normalized_date}*.md',
+        ]
+        results: list[Path] = []
+        seen: set[str] = set()
+        for pattern in patterns:
+            for path in sorted(self.trade_plan_cache_dir.glob(pattern)):
+                key = str(path)
+                if key in seen or not path.is_file():
+                    continue
+                seen.add(key)
+                results.append(path)
+        return results
+
+    def _classify_trade_plan_cache_file(self, file_name: str, content: str) -> str:
+        lowered_name = file_name.lower()
+        for file_type, keywords in self.trade_plan_cache_keywords.items():
+            if any(keyword.lower() in lowered_name for keyword in keywords):
+                return file_type
+        lowered_content = content.lower()
+        for file_type, keywords in self.trade_plan_cache_keywords.items():
+            if any(keyword.lower() in lowered_content for keyword in keywords):
+                return file_type
+        return 'unknown'
+
+    def _build_trade_plan_fallback_context(self, watch_stock: dict[str, Any], trade_date: str) -> dict[str, Any]:
+        market = self._normalize_lookup_market(watch_stock.get('market') or '')
+        stock_code = (watch_stock.get('stock_code') or '').strip()
+        try:
+            snapshot = self.data_facade.build_snapshot(stock_code=stock_code, market=market, trade_date=trade_date)
+        except Exception:
+            snapshot = {
+                'stock_code': stock_code,
+                'market': market,
+                'trade_date': trade_date,
+                'company_profile': [],
+                'market_context': {},
+                'news': [],
+                'financial_indicators': [],
+                'reports': {},
+                'technical': {'score': 0, 'summary': {}},
+                'sentiment': {},
+            }
+        company_profile = snapshot.get('company_profile')
+        return {
+            'snapshot': snapshot,
+            'basic_info': {
+                'stock_code': watch_stock.get('stock_code', ''),
+                'stock_name': watch_stock.get('stock_name', ''),
+                'market': watch_stock.get('market', ''),
+                'industry': watch_stock.get('industry', ''),
+                'asset_type': watch_stock.get('asset_type', ''),
+                'current_price': watch_stock.get('current_price'),
+                'pe': watch_stock.get('pe'),
+                'company_profile': self._simplify_records(company_profile, limit=5),
+            },
+            'technical': snapshot.get('technical') or {},
+            'sentiment': snapshot.get('sentiment') or {},
+            'financial_indicators': self._simplify_records(snapshot.get('financial_indicators'), limit=5),
+            'reports': snapshot.get('reports') or {},
+            'market_context': snapshot.get('market_context') or {},
+            'news': self._simplify_records(snapshot.get('news'), limit=5),
+        }
+
+    def _simplify_records(self, value: Any, *, limit: int) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value[:limit]
+        if hasattr(value, 'head') and hasattr(value, 'to_dict'):
+            try:
+                return value.head(limit).to_dict('records')
+            except Exception:
+                return []
+        if isinstance(value, dict):
+            return value
+        return value
+
+    def _read_text_file(self, path: Path) -> str:
+        try:
+            return path.read_text(encoding='utf-8').strip()
+        except Exception:
+            return ''
 
     def save_trade_plan_analysis_record(self, payload: dict[str, Any]) -> dict[str, Any]:
         watch_stock_id = (payload.get('watch_stock_id') or '').strip()
@@ -350,6 +4081,35 @@ class TradingDecisionService:
         )
         return formatted
 
+
+    def build_stock_analysis_record_payload(self, raw_result: dict[str, Any], watch_stock: dict[str, Any], request_payload: dict[str, Any]) -> dict[str, Any]:
+        data = raw_result.get('data') or {}
+        decision = data.get('decision') or {}
+        trade_date = (request_payload.get('trade_date') or '').strip() or str(data.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d')
+        conclusion_summary = (
+            (request_payload.get('conclusion_summary') or '').strip()
+            or str(decision.get('summary') or '').strip()
+            or str(data.get('logic') or '').strip()
+            or str(decision.get('logic') or '').strip()
+        )
+        return {
+            'watch_stock_id': watch_stock['id'],
+            'stock_code': watch_stock.get('stock_code', ''),
+            'stock_name': watch_stock.get('stock_name', ''),
+            'market': watch_stock.get('market', ''),
+            'trade_date': trade_date,
+            'analysis_mode': str(data.get('analysis_mode') or 'agentic').strip(),
+            'stance': str(data.get('stance') or decision.get('stance') or '').strip(),
+            'time_horizon': str(data.get('time_horizon') or decision.get('time_horizon') or '').strip(),
+            'conclusion_summary': conclusion_summary,
+            'risk_level': str(decision.get('risk_level') or '').strip(),
+            'scores_json': data.get('scores') or {},
+            'signals_json': data.get('signals') or [],
+            'risks_json': data.get('risks') or [],
+            'evidence_json': data.get('evidence') or [],
+            'raw_result_json': raw_result,
+        }
+
     def list_trade_plan_analysis_records(self, watch_stock_id: str, limit: int = 10) -> list[dict[str, Any]]:
         rows = self.trade_plan_repository.list_by_watch_stock(watch_stock_id, limit=limit)
         return [self._format_trade_plan_record(row) for row in rows]
@@ -362,6 +4122,7 @@ class TradingDecisionService:
         data = raw_result.get('data') or {}
         decision = data.get('decision') or {}
         scores = data.get('scores') or {}
+        meta = data.get('meta') or {}
         position_suggestion = decision.get('position_suggestion') or {}
         if not isinstance(position_suggestion, dict):
             position_suggestion = {}
@@ -372,7 +4133,7 @@ class TradingDecisionService:
         plan_type = (request_payload.get('plan_type') or '').strip() or '三笔计划'
         risk_preference = (request_payload.get('risk_preference') or '').strip() or '中高风险'
         max_target_position = (request_payload.get('max_target_position') or '').strip() or str(position_suggestion.get('target_position') or '').strip()
-        position_limit = (request_payload.get('position_limit') or '').strip() or str(position_suggestion.get('target_position') or '').strip()
+        position_limit = (request_payload.get('position_limit') or '').strip() or str(position_suggestion.get('position_limit') or position_suggestion.get('target_position') or '').strip()
         add_position_rules = str(position_suggestion.get('add_condition') or '').strip()
         reduce_position_rules = str(position_suggestion.get('reduce_condition') or '').strip()
         sell_rules = str(position_suggestion.get('stop_loss_reference') or '').strip()
@@ -407,6 +4168,8 @@ class TradingDecisionService:
                 'plan_steps': plan_steps,
                 'scores': scores,
                 'time_horizon': decision.get('time_horizon') or '',
+                'trade_plan_markdown': data.get('trade_plan_markdown') or '',
+                'meta': meta,
             },
             'add_position_rules': add_position_rules,
             'reduce_position_rules': reduce_position_rules,
@@ -465,9 +4228,58 @@ class TradingDecisionService:
             entry_plan_json = self._safe_json_loads(entry_plan_json)
         if isinstance(raw_result_json, str):
             raw_result_json = self._safe_json_loads(raw_result_json)
+        entry_plan_json = entry_plan_json if isinstance(entry_plan_json, dict) else {}
+        raw_result_json = raw_result_json if isinstance(raw_result_json, dict) else {}
+        decision = raw_result_json.get('data', {}).get('decision', {}) if isinstance(raw_result_json.get('data'), dict) else {}
+        trade_plan_markdown = str(entry_plan_json.get('trade_plan_markdown') or '').strip()
+        if not trade_plan_markdown and isinstance(raw_result_json.get('data'), dict):
+            trade_plan_markdown = str(raw_result_json.get('data', {}).get('trade_plan_markdown') or '').strip()
+        decision_action = str(decision.get('action') or '').strip()
         return {
             **row,
-            'entry_plan_json': entry_plan_json if isinstance(entry_plan_json, dict) else {},
+            'entry_plan_json': entry_plan_json,
+            'raw_result_json': raw_result_json,
+            'decision_action': decision_action,
+            'decision_action_label': self._map_ai_decision_action_to_label(decision_action),
+            'trade_plan_markdown': trade_plan_markdown,
+        }
+
+    def _format_watch_stock_item(self, row: dict[str, Any]) -> dict[str, Any]:
+        latest_trade_plan = None
+        watch_stock_id = (row.get('id') or '').strip()
+        if watch_stock_id:
+            records = self.list_trade_plan_analysis_records(watch_stock_id, limit=1)
+            latest_trade_plan = records[0] if records else None
+        return {
+            **row,
+            'last_trade_plan_at': (latest_trade_plan or {}).get('trade_date', ''),
+            'trade_plan_status': '已有计划' if latest_trade_plan else '',
+            'trade_plan_action': (latest_trade_plan or {}).get('decision_action_label', ''),
+            'trade_plan_record_id': (latest_trade_plan or {}).get('id', ''),
+            'last_risk_level': (latest_trade_plan or {}).get('risk_level', ''),
+            'last_plan_type': (latest_trade_plan or {}).get('plan_type', ''),
+            'last_risk_preference': (latest_trade_plan or {}).get('risk_preference', ''),
+            'last_trade_plan_markdown': (latest_trade_plan or {}).get('trade_plan_markdown', ''),
+        }
+
+    def _format_stock_analysis_record(self, row: dict[str, Any]) -> dict[str, Any]:
+        scores_json = row.get('scores_json') or {}
+        signals_json = row.get('signals_json') or []
+        risks_json = row.get('risks_json') or []
+        evidence_json = row.get('evidence_json') or []
+        raw_result_json = row.get('raw_result_json') or {}
+        if isinstance(scores_json, str):
+            scores_json = self._safe_json_loads(scores_json)
+        if isinstance(raw_result_json, str):
+            raw_result_json = self._safe_json_loads(raw_result_json)
+        return {
+            **row,
+            'analysis_scene': (row.get('analysis_scene') or '').strip(),
+            'holding_stock_id': (row.get('holding_stock_id') or '').strip(),
+            'scores_json': scores_json if isinstance(scores_json, dict) else {},
+            'signals_json': signals_json if isinstance(signals_json, list) else [],
+            'risks_json': risks_json if isinstance(risks_json, list) else [],
+            'evidence_json': evidence_json if isinstance(evidence_json, list) else [],
             'raw_result_json': raw_result_json if isinstance(raw_result_json, dict) else {},
         }
 
@@ -495,6 +4307,39 @@ class TradingDecisionService:
             **row,
             'decision_card_json': decision_card_json if isinstance(decision_card_json, dict) else {},
             'full_result_json': full_result_json if isinstance(full_result_json, dict) else {},
+        }
+
+    def _format_holding_review_record(self, row: dict[str, Any]) -> dict[str, Any]:
+        tabs_json = row.get('tabs_json') or []
+        evidence_json = row.get('evidence_json') or []
+        context_snapshot_json = row.get('context_snapshot_json') or {}
+        raw_result_json = row.get('raw_result_json') or {}
+        if isinstance(context_snapshot_json, str):
+            context_snapshot_json = self._safe_json_loads(context_snapshot_json)
+        if isinstance(raw_result_json, str):
+            raw_result_json = self._safe_json_loads(raw_result_json)
+        return {
+            **row,
+            'tabs_json': tabs_json if isinstance(tabs_json, list) else [],
+            'evidence_json': evidence_json if isinstance(evidence_json, list) else [],
+            'context_snapshot_json': context_snapshot_json if isinstance(context_snapshot_json, dict) else {},
+            'raw_result_json': raw_result_json if isinstance(raw_result_json, dict) else {},
+            'review_type_label': self._map_review_type_label(row.get('review_type') or ''),
+            'conclusion_tag_label': self._map_holding_review_tag_label(row.get('conclusion_tag') or ''),
+        }
+
+    def _format_position_decision_record(self, row: dict[str, Any]) -> dict[str, Any]:
+        tabs_json = row.get('tabs_json') or []
+        evidence_json = row.get('evidence_json') or []
+        raw_result_json = row.get('raw_result_json') or {}
+        if isinstance(raw_result_json, str):
+            raw_result_json = self._safe_json_loads(raw_result_json)
+        return {
+            **row,
+            'tabs_json': tabs_json if isinstance(tabs_json, list) else [],
+            'evidence_json': evidence_json if isinstance(evidence_json, list) else [],
+            'raw_result_json': raw_result_json if isinstance(raw_result_json, dict) else {},
+            'decision_type_label': self._map_position_decision_action_to_label(row.get('decision_type') or ''),
         }
 
     def _extract_entry_decision_meta(self, session: dict[str, Any]) -> dict[str, Any]:
@@ -559,6 +4404,7 @@ class TradingDecisionService:
             'source': (payload.get('source') or '').strip(),
             'note': (payload.get('note') or '').strip(),
             'status': (payload.get('status') or '').strip(),
+            'linked_holding_stock_id': (payload.get('linked_holding_stock_id') or '').strip(),
             'current_price': payload.get('current_price'),
             'pe': payload.get('pe'),
             'current_stage': (payload.get('current_stage') or '').strip(),
@@ -659,6 +4505,39 @@ class TradingDecisionService:
         normalized = (action or '').strip().lower()
         mapping = {'buy': '适合买入', 'hold': '继续观察', 'watch': '继续观察', 'sell': '不适合买入'}
         return mapping.get(normalized, action or '')
+
+    def _map_position_decision_action_to_label(self, action: str | None) -> str:
+        normalized = (action or '').strip().lower()
+        mapping = {
+            'buy': '适合买入',
+            'reduce': '适合减仓',
+            'sell': '适合卖出',
+            'watch': '继续观察',
+            'hold': '继续观察',
+        }
+        return mapping.get(normalized, action or '')
+
+    def _map_review_type_label(self, review_type: str | None) -> str:
+        normalized = (review_type or '').strip().lower()
+        mapping = {
+            'general': '通用复盘',
+            'weekly': '周复盘',
+            'monthly': '月复盘',
+            'quarterly': '季度复盘',
+        }
+        return mapping.get(normalized, review_type or '')
+
+    def _map_holding_review_tag_label(self, tag: str | None) -> str:
+        normalized = (tag or '').strip().lower()
+        mapping = {
+            'logic_ok': '逻辑仍成立',
+            'need_recheck': '需要重新核查',
+            'execution_issue': '执行存在问题',
+            'risk_rising': '风险上升',
+            'prepare_reduce': '准备减仓',
+            'prepare_sell': '准备卖出',
+        }
+        return mapping.get(normalized, tag or '')
 
     def _resolve_pe_column(self, dataframe: Any, market: str) -> str | None:
         if market == 'SH':

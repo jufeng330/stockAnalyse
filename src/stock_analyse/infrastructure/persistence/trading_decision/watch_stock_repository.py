@@ -70,6 +70,7 @@ class WatchStockRepository:
             'source': (payload.get('source') or '').strip(),
             'note': (payload.get('note') or '').strip(),
             'status': payload.get('status') or DEFAULT_STATUS,
+            'linked_holding_stock_id': (payload.get('linked_holding_stock_id') or '').strip(),
             'current_price': self._to_float(payload.get('current_price')),
             'pe': self._to_float(payload.get('pe')),
             'current_stage': (payload.get('current_stage') or '').strip(),
@@ -86,10 +87,10 @@ class WatchStockRepository:
                 '''
                 INSERT INTO watch_stocks (
                     id, stock_code, stock_name, market, industry, asset_type, source, note,
-                    status, current_price, pe, current_stage, current_price_zone,
+                    status, linked_holding_stock_id, current_price, pe, current_stage, current_price_zone,
                     suggested_action, last_conclusion_summary, last_analysis_at,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
                 [
                     watch_stock['id'],
@@ -101,6 +102,7 @@ class WatchStockRepository:
                     watch_stock['source'],
                     watch_stock['note'],
                     watch_stock['status'],
+                    watch_stock['linked_holding_stock_id'],
                     watch_stock['current_price'],
                     watch_stock['pe'],
                     watch_stock['current_stage'],
@@ -137,6 +139,7 @@ class WatchStockRepository:
             'asset_type': (payload.get('asset_type', existing['asset_type']) or '').strip(),
             'source': (payload.get('source', existing['source']) or '').strip(),
             'note': (payload.get('note', existing['note']) or '').strip(),
+            'linked_holding_stock_id': (payload.get('linked_holding_stock_id', existing['linked_holding_stock_id']) or '').strip(),
             'current_price': self._to_float(payload.get('current_price', existing['current_price'])),
             'pe': self._to_float(payload.get('pe', existing['pe'])),
             'current_stage': (payload.get('current_stage', existing['current_stage']) or '').strip(),
@@ -152,7 +155,7 @@ class WatchStockRepository:
                 '''
                 UPDATE watch_stocks
                 SET stock_code = ?, stock_name = ?, market = ?, industry = ?, asset_type = ?,
-                    source = ?, note = ?, current_price = ?, pe = ?, current_stage = ?,
+                    source = ?, note = ?, linked_holding_stock_id = ?, current_price = ?, pe = ?, current_stage = ?,
                     current_price_zone = ?, suggested_action = ?, last_conclusion_summary = ?,
                     last_analysis_at = ?, updated_at = ?
                 WHERE id = ?
@@ -165,6 +168,7 @@ class WatchStockRepository:
                     updated['asset_type'],
                     updated['source'],
                     updated['note'],
+                    updated['linked_holding_stock_id'],
                     updated['current_price'],
                     updated['pe'],
                     updated['current_stage'],

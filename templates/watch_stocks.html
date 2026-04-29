@@ -445,7 +445,66 @@
     .row-link.primary { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
     .row-link.secondary { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
     .row-link.ghost { color: #7c3aed; background: #f5f3ff; border: 1px solid #ddd6fe; }
-    .pagination { display: flex; justify-content: flex-end; margin-top: 14px; font-size: 13px; color: #6b7280; }
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .pagination-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .pagination-actions .disabled {
+      pointer-events: none;
+      opacity: 0.5;
+    }
+    .history-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .history-filter-form {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    .history-filter-form .form-group {
+      min-width: 180px;
+    }
+    .history-pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .history-pagination-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .history-pagination-actions .disabled {
+      pointer-events: none;
+      opacity: 0.5;
+    }
+    .history-summary {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
     .tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
     .tab { padding: 10px 14px; border-radius: 10px; background: #f3f4f6; color: #475569; font-size: 13px; font-weight: 700; }
     .tab.active { background: #eef2ff; color: #4338ca; }
@@ -639,7 +698,8 @@
                   <td>
                     <div class="action-group">
                       <a class="row-link primary" href="/entry-decision?watch_stock_id={{ item.id }}">进场决策</a>
-                      <a class="row-link secondary" href="/stock-analysis-record?watch_stock_id={{ item.id }}">股票分析</a>
+                      <a class="row-link secondary" href="/holding-stocks?watch_stock_id={{ item.id }}">买入</a>
+                      <a class="row-link secondary" href="/stock-analysis-record?watch_stock_id={{ item.id }}&code={{ item.stock_code }}&market={{ item.market }}">股票分析</a>
                       <a class="row-link secondary" href="/trade-plan-analysis?watch_stock_id={{ item.id }}">持仓计划分析</a>
                       <button class="row-link ghost" type="button" onclick="openEditDrawer('{{ item.id }}')">编辑</button>
                       <button class="row-link secondary" type="button" onclick="archiveWatchStock('{{ item.id }}')">归档</button>
@@ -662,25 +722,119 @@
             </tbody>
           </table>
         </div>
-        <div class="pagination">第 {{ pagination.page }} 页 · 每页 {{ pagination.page_size }} 条 · 共 {{ pagination.total }} 条</div>
+        <div class="pagination">
+          <div>第 {{ pagination.page }} 页 · 每页 {{ pagination.page_size }} 条 · 共 {{ pagination.total }} 条</div>
+          <div class="pagination-actions">
+            <a class="btn-light {% if pagination.page <= 1 %}disabled{% endif %}" href="{{ pagination_links.prev }}">上一页</a>
+            <a class="btn-light {% if pagination.page >= pagination.total_pages %}disabled{% endif %}" href="{{ pagination_links.next }}">下一页</a>
+          </div>
+        </div>
       </section>
 
       <section class="panel" id="watch-records">
         <div class="panel-header">
           <div>
             <h3>同级历史记录列表</h3>
-            <p class="panel-desc">下半区先保留布局与占位说明，不提前接入未完成子流程的数据模型。</p>
+            <p class="panel-desc">进场决策、股票分析与持仓计划分析都会在这里汇总展示最近历史。</p>
+          </div>
+          <div class="toolbar">
+            <a class="btn-light" href="/history-center">进入历史记录中心</a>
           </div>
         </div>
-        <div class="tabs">
-          <div class="tab active">进场决策记录</div>
-          <div class="tab">股票分析记录</div>
-          <div class="tab">持仓计划分析记录</div>
+        <div class="history-toolbar">
+          <form class="history-filter-form" method="get" action="/watch-stocks">
+            <input type="hidden" name="keyword" value="{{ filters.keyword }}">
+            <input type="hidden" name="market" value="{{ filters.market }}">
+            <input type="hidden" name="asset_type" value="{{ filters.asset_type }}">
+            <input type="hidden" name="stage" value="{{ filters.stage }}">
+            <input type="hidden" name="price_zone" value="{{ filters.price_zone }}">
+            <input type="hidden" name="page" value="{{ filters.page }}">
+            <input type="hidden" name="page_size" value="{{ filters.page_size }}">
+            <input type="hidden" name="history_page" value="1">
+            <div class="form-group">
+              <label for="history_type">历史类型</label>
+              <select id="history_type" class="form-control" name="history_type">
+                {% for option in history_filter_options %}
+                <option value="{{ option.value }}" {% if history_filters.history_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="history_page_size">每页条数</label>
+              <select id="history_page_size" class="form-control" name="history_page_size">
+                {% for option in [3, 5, 10] %}
+                <option value="{{ option }}" {% if history_filters.history_page_size == option %}selected{% endif %}>{{ option }} 条</option>
+                {% endfor %}
+              </select>
+            </div>
+            <button class="btn" type="submit">应用历史筛选</button>
+          </form>
+          <div class="history-summary">{{ history_filter_summary }}</div>
         </div>
+        {% if history_items %}
+        <div class="record-grid" style="grid-template-columns: 1fr; gap: 16px;">
+          {% for history in history_items %}
+          <div class="record-card">
+            <h4>{{ history.watch_stock.stock_code }} - {{ history.watch_stock.stock_name }} <span class="muted">({{ history.watch_stock.market }})</span></h4>
+            <div class="record-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px;">
+              <div class="record-card">
+                <h4>进场决策记录</h4>
+                {% if history.entry_decision_records %}
+                  {% for record in history.entry_decision_records %}
+                  <div style="margin-bottom: 10px;">
+                    <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.suggested_action or '未给出动作' }}</div>
+                    <div class="muted">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    <a class="row-link primary" href="{{ record.detail_url }}">查看记录</a>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="muted">暂无进场决策记录</p>
+                {% endif %}
+              </div>
+              <div class="record-card">
+                <h4>股票分析记录</h4>
+                {% if history.stock_analysis_records %}
+                  {% for record in history.stock_analysis_records %}
+                  <div style="margin-bottom: 10px;">
+                    <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.stance or '待确认立场' }}</div>
+                    <div class="muted">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    <a class="row-link primary" href="{{ record.detail_url }}">查看记录</a>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="muted">暂无股票分析记录</p>
+                  <a class="row-link secondary" href="/stock-analysis-record?watch_stock_id={{ history.watch_stock.id }}&code={{ history.watch_stock.stock_code }}&market={{ history.watch_stock.market }}">进入股票分析</a>
+                {% endif %}
+              </div>
+              <div class="record-card">
+                <h4>持仓计划分析记录</h4>
+                {% if history.trade_plan_records %}
+                  {% for record in history.trade_plan_records %}
+                  <div style="margin-bottom: 10px;">
+                    <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.suggested_action or '未给出动作' }}</div>
+                    <div class="muted">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    <a class="row-link primary" href="{{ record.detail_url }}">查看记录</a>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="muted">暂无持仓计划分析记录</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
         <div class="record-grid">
-          <div class="record-card"><h4>Phase 1 占位</h4><p class="muted">{{ history_placeholder }}</p></div>
-          <div class="record-card"><h4>已完成范围</h4><p class="muted">当前仅接入关注股票列表、筛选、创建、编辑与归档 API。</p></div>
-          <div class="record-card"><h4>后续接入方向</h4><p class="muted">后续会按技术方案逐步补齐进场决策、股票分析与持仓计划分析记录。</p></div>
+          <div class="record-card"><h4>暂无关注股票</h4><p class="muted">请先新增关注股票后再查看历史记录。</p></div>
+        </div>
+        {% endif %}
+        <div class="history-pagination">
+          <div>第 {{ history_pagination.page }} 页 · 每页 {{ history_pagination.page_size }} 组 · 共 {{ history_pagination.total }} 组</div>
+          <div class="history-pagination-actions">
+            <a class="btn-light {% if history_pagination.page <= 1 %}disabled{% endif %}" href="{{ history_pagination_links.prev }}">上一页</a>
+            <a class="btn-light {% if history_pagination.page >= history_pagination.total_pages %}disabled{% endif %}" href="{{ history_pagination_links.next }}">下一页</a>
+          </div>
         </div>
       </section>
     </main>

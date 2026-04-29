@@ -138,29 +138,36 @@
         }
 
         .panel {
-            padding: 20px;
+            padding: 18px;
         }
 
         .panel h2 {
-            margin: 0 0 16px;
+            margin: 0 0 14px;
             font-size: 20px;
             color: #111827;
         }
 
+        .compact-form-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+        }
+
         .form-group {
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }
 
         .form-group label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
+            font-size: 13px;
             font-weight: 600;
             color: #374151;
         }
 
         .form-control {
             width: 100%;
-            padding: 12px 14px;
+            padding: 10px 12px;
             border: 1px solid #d1d5db;
             border-radius: 10px;
             font-size: 14px;
@@ -200,8 +207,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 16px;
-            gap: 12px;
+            margin-top: 12px;
+            gap: 10px;
             flex-wrap: wrap;
         }
 
@@ -230,7 +237,7 @@
 
         .progress-wrapper {
             display: none;
-            margin-top: 16px;
+            margin-top: 12px;
         }
 
         .progress-text {
@@ -406,6 +413,26 @@
             font-size: 13px;
         }
 
+        .source-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .source-badge.cache {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .source-badge.live {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
         .tab-list {
             display: flex;
             gap: 10px;
@@ -452,7 +479,8 @@
 
         @media (max-width: 1080px) {
             .score-grid,
-            .role-section {
+            .role-section,
+            .compact-form-grid {
                 grid-template-columns: 1fr 1fr;
             }
         }
@@ -465,7 +493,8 @@
 
             .grid-2,
             .score-grid,
-            .role-section {
+            .role-section,
+            .compact-form-grid {
                 grid-template-columns: 1fr;
             }
         }
@@ -473,19 +502,23 @@
 </head>
 <body>
     <div class="app-shell">
-        <aside class="sidebar" data-page="stock-analysis-record"></aside>
+        <aside class="sidebar" data-page="{% if page_mode == 'holding_reanalysis' %}holding-reanalysis{% else %}stock-analysis-record{% endif %}"></aside>
         <main>
             <div class="header">
                 <div class="header-top">
                     <div>
-                        <h1>股票分析记录</h1>
-                        <p>该页面复用单股 AI 分析链路发起研究型分析，并将后台返回结果按真实数据结构动态拆分为多个结果标签页。</p>
+                        <h1>{{ page_title or '股票分析记录' }}</h1>
+                        <p>{{ page_description or '该页面复用单股 AI 分析链路发起研究型分析，并将后台返回结果按真实数据结构动态拆分为多个结果标签页。' }}</p>
                         <div id="watchStockContext" class="context-hint" style="display: none;">关联关注股票：<span id="watchStockIdText"></span></div>
+                        <div id="holdingStockContext" class="context-hint" style="display: none; margin-left: 8px; background: #ecfccb; color: #3f6212;">关联持仓：<span id="holdingStockIdText"></span></div>
+                        {% if selected_record %}
+                        <div class="context-hint" style="margin-top: 12px; background: #ecfeff; color: #155e75;">已加载历史分析记录：{{ selected_record.id }}{% if selected_record.stance %} · {{ selected_record.stance }}{% endif %}{% if selected_record.conclusion_summary %} · {{ selected_record.conclusion_summary }}{% endif %}</div>
+                        {% endif %}
                     </div>
                     <div class="nav-links">
                         <a href="/single-stock-analysis">单股分析</a>
                         <a href="/watch-stocks">关注股票</a>
-                        <a href="/history">历史记录</a>
+                        <a href="/holding-stocks">持仓列表</a>
                     </div>
                 </div>
             </div>
@@ -501,39 +534,24 @@
                 <div class="panel">
                     <h2>分析参数</h2>
 
-                    <div class="form-group">
-                        <label for="stockCode">股票代码</label>
-                        <input id="stockCode" class="form-control" type="text" placeholder="如 600519 / 000001 / AAPL">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="market">股票市场</label>
-                        <select id="market" class="form-control">
-                            <option value="SH">上海</option>
-                            <option value="SZ">深圳</option>
-                            <option value="usa">美国</option>
-                            <option value="H">香港</option>
-                            <option value="zq">债券</option>
-                            <option value="cy">创业板</option>
-                        </select>
-                    </div>
-
-                    <div class="grid-2">
+                    <div class="compact-form-grid">
                         <div class="form-group">
-                            <label for="startDate">开始日期</label>
-                            <input id="startDate" class="form-control" type="date">
+                            <label for="stockCode">股票代码</label>
+                            <input id="stockCode" class="form-control" type="text" placeholder="如 600519 / 000001 / AAPL">
                         </div>
-                        <div class="form-group">
-                            <label for="endDate">结束日期</label>
-                            <input id="endDate" class="form-control" type="date">
-                        </div>
-                    </div>
 
-                    <div class="grid-2">
                         <div class="form-group">
-                            <label for="tradeDate">交易日期</label>
-                            <input id="tradeDate" class="form-control" type="date">
+                            <label for="market">股票市场</label>
+                            <select id="market" class="form-control">
+                                <option value="SH">上海</option>
+                                <option value="SZ">深圳</option>
+                                <option value="usa">美国</option>
+                                <option value="H">香港</option>
+                                <option value="zq">债券</option>
+                                <option value="cy">创业板</option>
+                            </select>
                         </div>
+
                         <div class="form-group">
                             <label for="analysisDepth">分析深度</label>
                             <select id="analysisDepth" class="form-control">
@@ -541,9 +559,24 @@
                                 <option value="deep">deep</option>
                             </select>
                         </div>
+
+                        <div class="form-group">
+                            <label for="startDate">开始日期</label>
+                            <input id="startDate" class="form-control" type="date">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="endDate">结束日期</label>
+                            <input id="endDate" class="form-control" type="date">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="tradeDate">交易日期</label>
+                            <input id="tradeDate" class="form-control" type="date">
+                        </div>
                     </div>
 
-                    <button id="analyzeBtn" class="btn" onclick="analyzeStockAI()">开始股票分析</button>
+                    <button id="analyzeBtn" class="btn" onclick="analyzeStockAI()">{{ analyze_button_text or '开始股票分析' }}</button>
 
                     <div class="status-row">
                         <div class="status-pill">
@@ -561,11 +594,26 @@
                     </div>
                 </div>
 
-                <div class="panel log-panel">
-                    <h2>分析日志</h2>
-                    <div id="logBox" class="log-box">
-                        <div class="log-entry log-info">[系统] 等待发起股票分析记录任务...</div>
+                <div class="panel">
+                    <h2>{% if page_mode == 'holding_reanalysis' %}历史再评估记录{% else %}历史分析记录{% endif %}</h2>
+                    {% if history_items %}
+                    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
+                        {% for item in history_items %}
+                        <a href="{% if page_mode == 'holding_reanalysis' %}/holding-reanalysis?holding_stock_id={{ holding_stock.id }}&record_id={{ item.id }}{% else %}/stock-analysis-record?watch_stock_id={{ watch_stock.id }}&record_id={{ item.id }}{% endif %}" style="text-decoration:none;color:inherit;">
+                            <div class="summary-box" style="border:{% if selected_record and selected_record.id == item.id %}2px solid #0891b2{% else %}1px solid #e5e7eb{% endif %};">
+                                <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                                    <div style="font-weight:700;color:#111827;">{{ item.trade_date or '-' }} · {{ item.stance or '待确认立场' }}</div>
+                                    <div class="helper-text">{{ item.id }}</div>
+                                </div>
+                                <div class="helper-text" style="margin-top:6px;">{{ item.time_horizon or '待确认周期' }} · 风险 {{ item.risk_level or '待确认' }}</div>
+                                <div style="margin-top:8px;line-height:1.7;color:#374151;">{{ item.conclusion_summary or '暂无结论摘要' }}</div>
+                            </div>
+                        </a>
+                        {% endfor %}
                     </div>
+                    {% else %}
+                    <div class="helper-text" style="margin-bottom:18px;">{% if page_mode == 'holding_reanalysis' %}暂无历史持仓再评估记录。{% else %}暂无历史股票分析记录。{% endif %}</div>
+                    {% endif %}
                 </div>
 
                 <div class="panel">
@@ -578,9 +626,16 @@
                     <div id="resultsContent">
                         <div class="empty-state">
                             <div style="font-size: 48px;">📘</div>
-                            <div>请输入股票参数后发起股票分析记录任务。</div>
+                            <div>{% if page_mode == 'holding_reanalysis' %}请输入股票参数后发起持仓再评估任务。{% else %}请输入股票参数后发起股票分析记录任务。{% endif %}</div>
                             <div style="font-size: 13px; color: #9ca3af;">该页面直接复用 /api/analyze_stock_ai 与 /api/sse。</div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="panel log-panel">
+                    <h2>分析日志</h2>
+                    <div id="logBox" class="log-box">
+                        <div class="log-entry log-info">[系统] 等待发起股票分析记录任务...</div>
                     </div>
                 </div>
             </div>
@@ -589,10 +644,14 @@
 
     <script src="/static/ui/nav.js"></script>
     <script>
+        const PAGE_MODE = {{ page_mode | default('watch_stock_analysis') | tojson }};
+        const WATCH_STOCK = {{ watch_stock | default(None) | tojson }};
+        const HOLDING_STOCK = {{ holding_stock | default(None) | tojson }};
+        const SELECTED_RECORD = {{ selected_record | default(None) | tojson }};
         let sseConnection = null;
         let currentClientId = null;
         let isAnalyzing = false;
-        let currentResult = null;
+        let currentResult = SELECTED_RECORD ? (SELECTED_RECORD.raw_result_json || null) : null;
         const API_BASE = '';
 
         function generateClientId() {
@@ -775,6 +834,9 @@
                         end_date: endDate,
                         trade_date: tradeDate,
                         analysis_depth: analysisDepth,
+                        watch_stock_id: (WATCH_STOCK || {}).id || '',
+                        holding_stock_id: (HOLDING_STOCK || {}).id || '',
+                        analysis_scene: PAGE_MODE === 'holding_reanalysis' ? 'holding_reanalysis' : 'watch_stock_analysis',
                         client_id: currentClientId
                     })
                 });
@@ -837,6 +899,9 @@
             const normalized = normalizeAnalysisRecordResult(result);
             const resultsContent = document.getElementById('resultsContent');
             resultsContent.innerHTML = `
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 14px;">
+                    ${renderSourceBadge(normalized.resultSource, normalized.cacheFile)}
+                </div>
                 <div id="scoreGrid" class="score-grid">
                     ${renderScoreCard('综合评分', normalized.scoreCards.composite, 'composite')}
                     ${renderScoreCard('技术面', normalized.scoreCards.technical, 'technical')}
@@ -853,6 +918,116 @@
             setSystemStatus('分析完成');
         }
 
+        function renderObjectSummaryBlock(title, value, labelMap = {}) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                return '';
+            }
+            const entries = Object.entries(value).filter(([, item]) => item != null && item !== '');
+            if (!entries.length) {
+                return '';
+            }
+            return `
+                <div class="kv" style="margin-top: 12px;">
+                    <div class="label">${escapeHtml(title)}</div>
+                    <div class="snapshot-grid" style="margin-top: 10px;">
+                        ${entries.map(([key, item]) => renderKV(labelMap[key] || humanizeFieldName(key), formatDisplayValue(item))).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderWideInfoRow(label, value) {
+            return `
+                <div class="kv" style="margin-top: 12px;">
+                    <div class="label">${escapeHtml(label)}</div>
+                    <div class="value" style="font-weight: 600; line-height: 1.6;">${escapeHtml(value == null ? '-' : String(value))}</div>
+                </div>
+            `;
+        }
+
+        function formatDisplayValue(value) {
+            if (value == null || value === '') {
+                return '-';
+            }
+            if (typeof value === 'number') {
+                return String(value);
+            }
+            if (Array.isArray(value)) {
+                return value.map(item => typeof item === 'object' ? JSON.stringify(item) : String(item)).join(' / ');
+            }
+            if (typeof value === 'object') {
+                return JSON.stringify(value, null, 0);
+            }
+            return String(value);
+        }
+
+        function humanizeFieldName(name) {
+            const mapping = {
+                stock_code: '股票代码',
+                trade_date: '交易日期',
+                overall_risk_level: '总体风险等级',
+                overall_judgement: '总体判断',
+                max_total_position: '最大总仓位',
+                max_initial_position: '最大初始仓位',
+                max_add_on_position: '最大加仓仓位',
+                max_single_day_increment: '单日最大增仓',
+                execution_rule: '执行规则',
+                action: '动作',
+                stance: '操作立场',
+                execution_plan: '执行计划',
+                rationale: '决策依据',
+                target_total_position: '目标总仓位',
+                initial_position: '初始仓位',
+                add_on_position: '单次加仓仓位',
+                position_advice: '仓位建议',
+                position_constraint: '仓位约束',
+                summary: '摘要',
+            };
+            return mapping[name] || String(name || '').replace(/_/g, ' ');
+        }
+
+        function formatRiskLevel(value) {
+            const mapping = {
+                low: '低',
+                medium: '中',
+                medium_high: '中高',
+                high: '高',
+            };
+            return mapping[value] || value || '-';
+        }
+
+        function renderRoleSummaryBlock(roleName, summary) {
+            if (summary == null || summary === '') {
+                return '';
+            }
+            if (typeof summary !== 'object' || Array.isArray(summary)) {
+                return renderWideInfoRow('摘要', summary);
+            }
+            if (roleName === 'risk_manager') {
+                return `
+                    ${renderObjectSummaryBlock('风控摘要', {
+                        stock_code: summary.stock_code,
+                        trade_date: summary.trade_date,
+                        overall_risk_level: formatRiskLevel(summary.overall_risk_level),
+                    })}
+                    ${renderWideInfoRow('总体判断', summary.overall_judgement || '-')}
+                    ${renderObjectSummaryBlock('仓位约束', summary.position_constraint || {})}
+                `;
+            }
+            if (roleName === 'trader_agent') {
+                return `
+                    ${renderObjectSummaryBlock('交易摘要', {
+                        action: summary.action,
+                        stance: summary.stance,
+                    })}
+                    ${renderObjectSummaryBlock('仓位建议', summary.position_advice || {})}
+                    ${renderWideInfoRow('执行计划', summary.execution_plan || '-')}
+                    ${renderWideInfoRow('决策依据', summary.rationale || '-')}
+                `;
+            }
+            return renderObjectSummaryBlock('摘要', summary);
+        }
+
         function normalizeAnalysisRecordResult(result) {
             const data = result.data || {};
             const decision = data.decision || {};
@@ -866,105 +1041,37 @@
             const traderOutput = finalState.trader_output || {};
             const tabs = [];
 
-            if (hasDecisionContent(data, decision)) {
-                tabs.push({
-                    id: 'decision',
-                    label: '结论/决策',
-                    content: `
-                        <div class="result-block">
-                            <h3>最终决策</h3>
-                            <div class="decision-grid">
-                                ${renderKV('动作', decision.action || '-')}
-                                ${renderKV('置信度', formatConfidence(decision.confidence))}
-                                ${renderKV('风险等级', decision.risk_level || '-')}
-                                ${renderKV('仓位建议', decision.position_suggestion || '-')}
-                                ${renderKV('时间周期', decision.time_horizon || '-')}
-                                ${renderKV('分析模式', data.analysis_mode || 'agentic')}
+            if (PAGE_MODE === 'holding_reanalysis' && Array.isArray(data.holding_reanalysis_tabs) && data.holding_reanalysis_tabs.length) {
+                data.holding_reanalysis_tabs.forEach(tab => {
+                    tabs.push({
+                        id: tab.id || 'holding-tab',
+                        label: tab.label || '未命名标签',
+                        content: `
+                            <div class="result-block">
+                                <h3>${escapeHtml(tab.label || '未命名标签')}</h3>
+                                <pre>${escapeHtml(typeof tab.content === 'string' ? tab.content : JSON.stringify(tab.content || {}, null, 2))}</pre>
                             </div>
-                            <div class="kv" style="margin-top: 12px;">
-                                <div class="label">结论摘要</div>
-                                <div class="value" style="font-weight: 600; line-height: 1.6;">${escapeHtml(decision.summary || '-')}</div>
-                            </div>
-                        </div>
-                    `
+                        `,
+                    });
                 });
-            }
+            } else {
+                const summarySections = [
+                    renderSummaryDecisionSection(data, decision),
+                    renderSummaryScoresSection(scores),
+                    renderSummarySnapshotSection(data, snapshot, scores),
+                    renderSummaryMetaSection(meta),
+                ].filter(Boolean).join('');
 
-            if (hasScores(scores)) {
-                tabs.push({
-                    id: 'scores',
-                    label: '评分概览',
-                    content: `
-                        <div class="result-block">
-                            <h3>评分拆解</h3>
-                            <div class="snapshot-grid">
-                                ${renderKV('综合评分', formatScore(scores.composite ?? scores.comprehensive))}
-                                ${renderKV('技术面', formatScore(scores.technical))}
-                                ${renderKV('基本面', formatScore(scores.fundamental))}
-                                ${renderKV('情绪面', formatScore(scores.sentiment))}
-                            </div>
-                        </div>
-                    `
-                });
-            }
+                if (summarySections) {
+                    tabs.push({
+                        id: 'summary',
+                        label: '总结',
+                        content: summarySections,
+                    });
+                }
 
-            if (hasRoleOutputs(analystOutputs, researchOutputs, managerOutputs, traderOutput)) {
-                tabs.push({
-                    id: 'roles',
-                    label: '多角色分析',
-                    content: `
-                        <div class="result-block">
-                            <h3>多角色输出</h3>
-                            <div class="role-section">
-                                ${renderRoleGroup('分析师', analystOutputs)}
-                                ${renderRoleGroup('研究员', researchOutputs)}
-                                ${renderRoleGroup('管理层', managerOutputs)}
-                                ${renderRoleGroup('交易员', traderOutput && Object.keys(traderOutput).length ? { trader_agent: traderOutput } : {})}
-                            </div>
-                        </div>
-                    `
-                });
-            }
-
-            if (Object.keys(snapshot).length || data.stock_code || data.market || data.trade_date) {
-                tabs.push({
-                    id: 'snapshot',
-                    label: '数据快照',
-                    content: `
-                        <div class="result-block">
-                            <h3>数据快照摘要</h3>
-                            <div class="snapshot-grid">
-                                ${renderKV('股票代码', data.stock_code || snapshot.stock_code || '-')}
-                                ${renderKV('市场', data.market || snapshot.market || '-')}
-                                ${renderKV('交易日期', data.trade_date || snapshot.trade_date || '-')}
-                                ${renderKV('公司名称', snapshot.company_name || '-')}
-                                ${renderKV('行业', snapshot.industry || '-')}
-                                ${renderKV('概念板块', normalizeConcepts(snapshot.concepts))}
-                                ${renderKV('新闻条数', String((snapshot.news || []).length))}
-                                ${renderKV('技术分', formatScore(scores.technical))}
-                            </div>
-                        </div>
-                    `
-                });
-            }
-
-            if (Object.keys(meta).length) {
-                tabs.push({
-                    id: 'meta',
-                    label: '执行信息',
-                    content: `
-                        <div class="result-block">
-                            <h3>执行元信息</h3>
-                            <div class="snapshot-grid">
-                                ${renderKV('耗时(ms)', String(meta.duration_ms ?? '-'))}
-                                ${renderKV('阶段数', String((meta.stages || []).length))}
-                                ${renderKV('错误数', String((meta.errors || []).length))}
-                            </div>
-                            ${renderListBlock('阶段列表', meta.stages || [])}
-                            ${renderListBlock('错误列表', meta.errors || [])}
-                        </div>
-                    `
-                });
+                buildRoleTabs(analystOutputs, researchOutputs, managerOutputs, traderOutput)
+                    .forEach(tab => tabs.push(tab));
             }
 
             tabs.push({
@@ -991,6 +1098,8 @@
 
             return {
                 stockCode: data.stock_code || snapshot.stock_code || '',
+                resultSource: data.result_source || meta.result_source || 'live',
+                cacheFile: data.cache_file || meta.cache_file || '',
                 scoreCards: {
                     composite: scores.composite ?? scores.comprehensive ?? 0,
                     technical: scores.technical ?? 0,
@@ -999,6 +1108,157 @@
                 },
                 tabs,
             };
+        }
+
+        function renderSummaryDecisionSection(data, decision) {
+            if (!hasDecisionContent(data, decision)) {
+                return '';
+            }
+            return `
+                <div class="result-block">
+                    <h3>结论/决策</h3>
+                    <div class="decision-grid">
+                        ${renderKV('动作', decision.action || '-')}
+                        ${renderKV('置信度', formatConfidence(decision.confidence))}
+                        ${renderKV('风险等级', decision.risk_level || '-')}
+                        ${renderKV('时间周期', decision.time_horizon || '-')}
+                    </div>
+                    ${renderObjectSummaryBlock('仓位建议', decision.position_suggestion || {}, {
+                        target_total_position: '目标总仓位',
+                        max_total_position: '最大总仓位',
+                        initial_position: '初始仓位',
+                        add_on_position: '单次加仓仓位',
+                        max_single_day_increment: '单日最大增仓',
+                    })}
+                    ${renderWideInfoRow('分析模式', data.analysis_mode || 'agentic')}
+                    ${renderWideInfoRow('结论摘要', decision.summary || '-')}
+                </div>
+            `;
+        }
+
+        function buildRoleTabs(analystOutputs, researchOutputs, managerOutputs, traderOutput) {
+            const groups = [
+                { prefix: '分析师', outputs: analystOutputs },
+                { prefix: '研究员', outputs: researchOutputs },
+                { prefix: '管理层', outputs: managerOutputs },
+                { prefix: '交易员', outputs: traderOutput && Object.keys(traderOutput).length ? { trader_agent: traderOutput } : {} },
+            ];
+            const tabs = [];
+
+            groups.forEach(group => {
+                Object.entries(group.outputs || {}).forEach(([name, payload]) => {
+                    if (!hasRenderableRolePayload(payload)) {
+                        return;
+                    }
+                    const roleLabel = humanizeRoleName(name, group.prefix);
+                    tabs.push({
+                        id: `role-${group.prefix}-${name}`,
+                        label: roleLabel,
+                        content: `
+                            <div class="result-block">
+                                <h3>${escapeHtml(roleLabel)}</h3>
+                                ${renderRoleCard(name, payload, true)}
+                            </div>
+                        `,
+                    });
+                });
+            });
+
+            return tabs;
+        }
+
+        function hasRenderableRolePayload(payload) {
+            return Boolean(payload && Object.keys(payload).length);
+        }
+
+        function humanizeRoleName(name, fallbackPrefix = '角色') {
+            const mapping = {
+                market_analyst: '市场分析师',
+                market_researcher: '市场分析师',
+                technical_analyst: '技术分析师',
+                fundamentals_analyst: '基本面分析师',
+                fundamental_analyst: '基本面分析师',
+                news_analyst: '情绪分析师',
+                sentiment_analyst: '情绪分析师',
+                bull_researcher: '多头研究员',
+                bear_researcher: '空头研究员',
+                macro_researcher: '宏观研究员',
+                industry_researcher: '行业研究员',
+                research_manager: '研究经理',
+                manager_agent: '研究经理',
+                portfolio_manager: '组合经理',
+                risk_analyst: '风险分析师',
+                risk_manager: '风控经理',
+                trader_agent: '交易员',
+            };
+            if (mapping[name]) {
+                return mapping[name];
+            }
+            const normalized = String(name || '').replace(/[_-]+/g, ' ').trim();
+            return normalized ? normalized : fallbackPrefix;
+        }
+
+        function renderSummaryScoresSection(scores) {
+            if (!hasScores(scores)) {
+                return '';
+            }
+            return `
+                <div class="result-block">
+                    <h3>评分概览</h3>
+                    <div class="snapshot-grid">
+                        ${renderKV('综合评分', formatScore(scores.composite ?? scores.comprehensive))}
+                        ${renderKV('技术面', formatScore(scores.technical))}
+                        ${renderKV('基本面', formatScore(scores.fundamental))}
+                        ${renderKV('情绪面', formatScore(scores.sentiment))}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderSummarySnapshotSection(data, snapshot, scores) {
+            if (!(Object.keys(snapshot).length || data.stock_code || data.market || data.trade_date)) {
+                return '';
+            }
+            return `
+                <div class="result-block">
+                    <h3>数据快照</h3>
+                    <div class="snapshot-grid">
+                        ${renderKV('股票代码', data.stock_code || snapshot.stock_code || '-')}
+                        ${renderKV('市场', data.market || snapshot.market || '-')}
+                        ${renderKV('交易日期', data.trade_date || snapshot.trade_date || '-')}
+                        ${renderKV('公司名称', snapshot.company_name || '-')}
+                        ${renderKV('行业', snapshot.industry || '-')}
+                        ${renderKV('概念板块', normalizeConcepts(snapshot.concepts))}
+                        ${renderKV('新闻条数', String((snapshot.news || []).length))}
+                        ${renderKV('技术分', formatScore(scores.technical))}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderSummaryMetaSection(meta) {
+            if (!Object.keys(meta).length) {
+                return '';
+            }
+            return `
+                <div class="result-block">
+                    <h3>执行信息</h3>
+                    <div class="snapshot-grid">
+                        ${renderKV('耗时(ms)', String(meta.duration_ms ?? '-'))}
+                        ${renderKV('阶段数', String((meta.stages || []).length))}
+                        ${renderKV('错误数', String((meta.errors || []).length))}
+                    </div>
+                    ${renderListBlock('阶段列表', meta.stages || [])}
+                    ${renderListBlock('错误列表', meta.errors || [])}
+                </div>
+            `;
+        }
+
+        function renderSourceBadge(resultSource, cacheFile) {
+            const source = resultSource === 'cache' ? 'cache' : 'live';
+            const label = source === 'cache' ? '来自缓存' : '实时生成';
+            const fileText = cacheFile ? ` · ${escapeHtml(cacheFile)}` : '';
+            return `<div class="source-badge ${source}">${label}${fileText}</div>`;
         }
 
         function hasDecisionContent(data, decision) {
@@ -1108,21 +1368,108 @@
             `;
         }
 
-        function renderRoleCard(name, payload) {
-            const summary = payload?.summary || '-';
+        function renderRoleCard(name, payload, hideTitle = false) {
+            const summary = payload?.summary;
             const confidence = payload?.confidence;
-            const signals = Array.isArray(payload?.signals) ? payload.signals : [];
-            const risks = Array.isArray(payload?.risks) ? payload.risks : [];
             const evidence = Array.isArray(payload?.evidence) ? payload.evidence : [];
+            const detailBlocks = Object.entries(payload || {})
+                .filter(([key]) => !['summary', 'confidence', 'signals', 'risk', 'risks', 'evidence'].includes(key))
+                .map(([key, value]) => renderRoleField(key, value))
+                .filter(Boolean)
+                .join('');
 
             return `
                 <div style="border-top: 1px solid #e5e7eb; padding-top: 12px; margin-top: 12px;">
-                    <div style="font-weight: 700; color: #4338ca; margin-bottom: 8px;">${escapeHtml(name)}</div>
-                    <p>${escapeHtml(summary)}</p>
-                    <div style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">置信度: ${formatConfidence(confidence)}</div>
-                    ${renderInlineList('signals', signals)}
-                    ${renderInlineList('risks', risks)}
+                    ${hideTitle ? '' : `<div style="font-weight: 700; color: #4338ca; margin-bottom: 8px;">${escapeHtml(name)}</div>`}
+                    ${renderRoleSummaryBlock(name, summary)}
+                    ${confidence != null ? `<div style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">置信度: ${formatConfidence(confidence)}</div>` : ''}
+                    ${renderStructuredInsightList('signals', payload?.signals || [])}
+                    ${renderStructuredInsightList('risk', payload?.risk || [])}
+                    ${renderStructuredInsightList('risks', payload?.risks || [])}
                     ${renderInlineList('evidence', evidence)}
+                    ${detailBlocks}
+                </div>
+            `;
+        }
+
+        function renderRoleField(title, value) {
+            if (title === 'summary') {
+                return '';
+            }
+            if (title === 'overall_judgement' || title === 'execution_plan' || title === 'rationale') {
+                return renderWideInfoRow(humanizeFieldName(title), value);
+            }
+            if (title === 'overall_risk_level') {
+                return renderKV(humanizeFieldName(title), formatRiskLevel(value));
+            }
+            if (value == null || value === '') {
+                return '';
+            }
+            if (Array.isArray(value)) {
+                if (!value.length) {
+                    return '';
+                }
+                if (value.every(item => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean')) {
+                    return renderInlineList(humanizeFieldName(title), value);
+                }
+                return renderObjectArrayBlock(humanizeFieldName(title), value);
+            }
+            if (typeof value === 'object') {
+                return renderObjectSummaryBlock(humanizeFieldName(title), value);
+            }
+            return `
+                <div class="kv" style="margin-bottom: 10px;">
+                    <div class="label">${escapeHtml(humanizeFieldName(title))}</div>
+                    <div class="value">${escapeHtml(String(value))}</div>
+                </div>
+            `;
+        }
+
+
+        function renderStructuredInsightList(title, items) {
+            if (!Array.isArray(items) || !items.length) {
+                return '';
+            }
+            if (items.every(item => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean')) {
+                return renderInlineList(title, items);
+            }
+            return `
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size: 13px; font-weight: 700; color: #374151; margin-bottom: 6px;">${escapeHtml(title)}</div>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        ${items.map(item => renderInsightItem(title, item)).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderInsightItem(title, item) {
+            if (!item || typeof item !== 'object') {
+                return `<div class="kv"><div class="value">${escapeHtml(String(item))}</div></div>`;
+            }
+            const primaryText = title === 'signals'
+                ? (item.signal || item.type || '-')
+                : (item.risk || item.type || '-');
+            return `
+                <div class="kv">
+                    <div class="label">${escapeHtml(item.type || title)}</div>
+                    <div class="value">${escapeHtml(String(primaryText))}</div>
+                    ${item.detail ? `<div style="margin-top: 8px; color: #4b5563; line-height: 1.6;">${escapeHtml(String(item.detail))}</div>` : ''}
+                </div>
+            `;
+        }
+
+        function renderObjectArrayBlock(title, items) {
+            return `
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size: 13px; font-weight: 700; color: #374151; margin-bottom: 6px;">${escapeHtml(title)}</div>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        ${items.map(item => `
+                            <div class="kv">
+                                <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             `;
         }
@@ -1195,26 +1542,61 @@
 
         function applyQueryContext() {
             const params = new URLSearchParams(window.location.search);
-            const watchStockId = (params.get('watch_stock_id') || '').trim();
-            const stockCode = (params.get('stock_code') || params.get('code') || '').trim();
-            const market = (params.get('market') || '').trim();
+            const watchStockId = (params.get('watch_stock_id') || '').trim() || ((WATCH_STOCK || {}).id || '');
+            const holdingStockId = (params.get('holding_stock_id') || '').trim() || ((HOLDING_STOCK || {}).id || '');
+            const stockCode = (params.get('stock_code') || params.get('code') || '').trim() || ((HOLDING_STOCK || {}).stock_code || (WATCH_STOCK || {}).stock_code || '');
+            const market = (params.get('market') || '').trim() || ((HOLDING_STOCK || {}).market || (WATCH_STOCK || {}).market || '');
+            const tradeDate = ((SELECTED_RECORD || {}).trade_date || '').trim();
             if (watchStockId) {
                 document.getElementById('watchStockContext').style.display = 'inline-flex';
                 document.getElementById('watchStockIdText').textContent = watchStockId;
             }
+            if (holdingStockId) {
+                document.getElementById('holdingStockContext').style.display = 'inline-flex';
+                document.getElementById('holdingStockIdText').textContent = holdingStockId;
+            }
             if (stockCode) {
                 document.getElementById('stockCode').value = stockCode;
             }
-            if (market) {
-                const marketSelect = document.getElementById('market');
-                const normalizedMarket = market.toLowerCase();
-                const matchedOption = Array.from(marketSelect.options).find(option => {
-                    const value = option.value;
-                    return value === market || value.toLowerCase() === normalizedMarket;
-                });
-                if (matchedOption) {
-                    marketSelect.value = matchedOption.value;
+            if (tradeDate) {
+                document.getElementById('tradeDate').value = tradeDate;
+            }
+            applyMarketValue(market);
+            if (watchStockId && !stockCode) {
+                hydrateWatchStockContext(watchStockId);
+            }
+        }
+
+        function applyMarketValue(market) {
+            if (!market) {
+                return;
+            }
+            const marketSelect = document.getElementById('market');
+            const normalizedMarket = market.toLowerCase();
+            const matchedOption = Array.from(marketSelect.options).find(option => {
+                const value = option.value;
+                return value === market || value.toLowerCase() === normalizedMarket;
+            });
+            if (matchedOption) {
+                marketSelect.value = matchedOption.value;
+            }
+        }
+
+        async function hydrateWatchStockContext(watchStockId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/trading-decision/watch-stocks/${encodeURIComponent(watchStockId)}`);
+                const result = await response.json();
+                if (!response.ok || !result.success || !result.data) {
+                    return;
                 }
+                if (!document.getElementById('stockCode').value && result.data.stock_code) {
+                    document.getElementById('stockCode').value = result.data.stock_code;
+                }
+                if (result.data.market) {
+                    applyMarketValue(result.data.market);
+                }
+            } catch (error) {
+                console.warn('hydrateWatchStockContext failed', error);
             }
         }
 
@@ -1222,7 +1604,12 @@
             setDefaultDates();
             applyQueryContext();
             initSSE();
-            addLog('股票分析记录页已加载', 'success');
+            if (currentResult && currentResult.success === true) {
+                renderResult(currentResult);
+                addLog(PAGE_MODE === 'holding_reanalysis' ? '已加载历史持仓再评估记录' : '已加载历史股票分析记录', 'success');
+            } else {
+                addLog(PAGE_MODE === 'holding_reanalysis' ? '持仓再评估页已加载' : '股票分析记录页已加载', 'success');
+            }
             addLog('该页面复用 /api/analyze_stock_ai', 'info');
         });
 
