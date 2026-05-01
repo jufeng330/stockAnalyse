@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from stock_analyse.application.dto.entry_decision_state import EntryDecisionState
+from stock_analyse.application.graphs.trading_decision import run_entry_decision_role_graph, run_entry_decision_summary_graph
 from stock_analyse.application.services.ai_stock_data_facade import AIStockDataFacade
 from stock_analyse.infrastructure.llm.stock_ai_analyzer import StockAiAnalyzer
 
@@ -59,12 +60,18 @@ ROLE_CONFIG = {
 
 
 class EntryDecisionOrchestrator:
+    """进场决策多角色编排器。
+
+    负责组织宏观、资产分类、价值阶段、价格区间、买卖计划和风险控制等角色串行产出结果。
+    """
+
     def __init__(
         self,
         *,
         data_facade: AIStockDataFacade | None = None,
         analyzer_factory: Any | None = None,
     ) -> None:
+        """初始化数据快照门面与统一 AI 调用工厂。"""
         self.data_facade = data_facade or AIStockDataFacade()
         self.analyzer_factory = analyzer_factory or (lambda **kwargs: StockAiAnalyzer(**kwargs))
 
@@ -78,6 +85,7 @@ class EntryDecisionOrchestrator:
         system_prompt: str | None = None,
         callbacks: dict[str, Any] | None = None,
     ) -> EntryDecisionState:
+        """按角色顺序推进进场决策，并支持暂停后继续。"""
         callbacks = callbacks or {}
         started_at = time.time()
         send_log = callbacks.get('send_log')
@@ -133,7 +141,15 @@ class EntryDecisionOrchestrator:
                 return state
 
             try:
-                role_output = self._run_role(analyzer, role_name, state)
+                role_output = self._run_role(
+                    analyzer,
+                    role_name,
+                    state,
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                    api_code=api_code,
+                    system_prompt=system_prompt,
+                )
             except Exception as exc:
                 state.status = 'failed'
                 state.current_role = role_name
@@ -158,7 +174,14 @@ class EntryDecisionOrchestrator:
         state.current_role = ROLE_SEQUENCE[-1]
         state.missing_fields = []
         state.pause_prompt = ''
-        summary_markdown = self._build_entry_decision_summary_markdown(analyzer, state)
+        summary_markdown = self._build_entry_decision_summary_markdown(
+            analyzer,
+            state,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_code=api_code,
+            system_prompt=system_prompt,
+        )
         state.final_result = self._build_final_result(
             state,
             duration_ms=int((time.time() - started_at) * 1000),
@@ -197,15 +220,26 @@ class EntryDecisionOrchestrator:
             'snapshot': snapshot,
         }
 
-    def _run_role(self, analyzer: Any, role_name: str, state: EntryDecisionState) -> dict[str, Any]:
-        config = ROLE_CONFIG[role_name]
-        prompt = self._build_prompt(role_name, state)
-        raw_response = analyzer.openai_api_call(
-            symbol=state.watch_stock.get('stock_code', ''),
-            message=prompt,
-            instruction=config['prompt'],
+    def _run_role(
+        self,
+        analyzer: Any,
+        role_name: str,
+        state: EntryDecisionState,
+        *,
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+        api_code: str | None = None,
+        system_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        _ = analyzer
+        return run_entry_decision_role_graph(
+            role_name=role_name,
+            state=state,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_code=api_code,
+            system_prompt=system_prompt,
         )
-        return self._parse_json_response(raw_response, role_name)
 
     def _build_prompt(self, role_name: str, state: EntryDecisionState) -> str:
         payload = {
@@ -292,75 +326,28 @@ class EntryDecisionOrchestrator:
             },
         }
 
-    def _build_entry_decision_summary_markdown(self, analyzer: Any, state: EntryDecisionState) -> str:
+    def _build_entry_decision_summary_markdown(
+        self,
+        analyzer: Any,
+        state: EntryDecisionState,
+        *,
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+        api_code: str | None = None,
+        system_prompt: str | None = None,
+    ) -> str:
+        _ = analyzer
         template_markdown = self._load_entry_decision_template_markdown()
         if not template_markdown:
             return ''
-        payload = {
-            'template_markdown': template_markdown,
-            'watch_stock': state.watch_stock,
-            'auto_context': state.auto_context,
-            'manual_inputs': state.manual_inputs,
-            'role_outputs': state.role_outputs,
-        }
-        prompt = (
-            '请根据提供的进场决策模板、6个分析师输出和自动提取数据，生成一份“进场决策实战版” markdown。\n\n'
-            '你的目标不是泛泛总结，而是产出一份可以直接给用户执行的买前决策卡，风格必须接近“/mnt/github/stock/进场决策_600900.md”。\n\n'
-            '硬性要求：\n'
-            '1. 严格保留模板原有章节标题、顺序、编号体系，不允许删节章节，不允许重命名标题。\n'
-            '2. 输出必须是完整 markdown 正文，不要输出代码块，不要输出前言，不要输出“以下是结果”这类说明。\n'
-            '3. 风格必须像实战版，不像空白表单：\n'
-            '   - 不是只保留空字段，而是尽量把每一项填成明确结论；\n'
-            '   - 每个结论尽量短句、可执行、像交易记录；\n'
-            '   - 原模板里的列表、复选框、引用块、分隔线必须保留；\n'
-            '   - 复选框必须在互斥选项中做明确取舍，优先输出 [x] / [ ] 形式；\n'
-            '   - 对“Step 3/4/5/6/7/9/10”这些核心章节，不要只写抽象判断，要写动作。\n'
-            '4. 能明确判断的字段必须直接填写，禁止模糊空话，例如“视情况而定”“综合判断后决定”“需进一步观察”之类空洞表达。\n'
-            '5. 如果信息不足：\n'
-            '   - 优先根据已有 analyst outputs、snapshot、manual_inputs 推断；\n'
-            '   - 仍无法确定时写“待确认”或“不适用”；\n'
-            '   - 严禁编造不存在的财务数字、价格区间、事件催化。\n'
-            '6. 数值表达规则：\n'
-            '   - 百分比、仓位、价格区间、阶段判断要尽量具体；\n'
-            '   - 如果原始数据没有精确值，不要虚构小数，可以写“约”“附近”“区间”。\n'
-            '7. 决策导向规则：\n'
-            '   - Step 1 要回答“现在是否值得研究”；\n'
-            '   - Step 2 要回答“这是什么资产，用什么打法”；\n'
-            '   - Step 3 要回答“当前价值阶段是什么”；\n'
-            '   - Step 4 要回答“现在价格属于哪一区，能不能买”；\n'
-            '   - Step 5 要给出三笔计划、触发条件、失败应对；\n'
-            '   - Step 6/7 要区分“涨了怎么办”和“跌了怎么办”；\n'
-            '   - Step 9 要明确证伪、估值透支、技术转弱时怎么卖；\n'
-            '   - Step 10 必须浓缩成一页决策卡，方便用户快速执行。\n'
-            '8. 语言风格规则：\n'
-            '   - 用中文；\n'
-            '   - 句子偏短；\n'
-            '   - 少废话，少形容词；\n'
-            '   - 强调“为什么这么做”和“接下来怎么做”；\n'
-            '   - 读起来像资深交易者给出的执行卡，而不是研究报告。\n'
-            '9. 对以下章节采用更强约束：\n'
-            '   - “### 3.2 四维判断”下的 基本面 / 预期 / 估值 / 价格行为，都要逐项填；\n'
-            '   - “### 4.2 当前价格结论”中的动作信号要明确勾选；\n'
-            '   - “### 5.2/5.3/5.4”三笔计划要写触发条件、买入理由、失败后的处理；\n'
-            '   - “### 10.1/10.2/10.3”必须写得最凝练，适合作为最终执行摘要。\n'
-            '10. 如果 analyst outputs 之间有冲突：\n'
-            '   - 优先采用风险更保守、动作更可执行的结论；\n'
-            '   - 在“我为什么这么判断”或“原因”字段里体现冲突的取舍逻辑。\n\n'
-            '请特别模仿实战版示例的这些特征：\n'
-            '- 章节之间使用 --- 分隔；\n'
-            '- 每个小节都尽量填满；\n'
-            '- 勾选项明确；\n'
-            '- 原因字段不是空泛口号，而是把分析师结论翻译成动作逻辑；\n'
-            '- 最终一页决策卡要让用户一眼看到：当前阶段、当前价格区、建议动作、今天买第几笔、今天买多少、如果不买看什么、涨跌后如何处理。\n\n'
-            f'输入数据:\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}'
+        return run_entry_decision_summary_graph(
+            template_markdown=template_markdown,
+            state=state,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_code=api_code,
+            system_prompt=system_prompt,
         )
-        instruction = '你是进场决策总结AI，也是把研究结论压缩成交易执行卡的编辑器。你的职责不是解释过程，而是基于模板产出一份接近“进场决策_600900.md”风格的完整实战版 markdown。必须严格遵守模板结构，必须把多个分析师输出整合成具体、保守、可执行的结论。'
-        response = analyzer.openai_api_call(
-            symbol=state.watch_stock.get('stock_code', ''),
-            message=prompt,
-            instruction=instruction,
-        )
-        return self._normalize_markdown_response(response, template_markdown)
 
     def _load_entry_decision_template_markdown(self) -> str:
         try:

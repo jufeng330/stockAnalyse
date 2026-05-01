@@ -17,10 +17,16 @@ def _trading_decision_service() -> TradingDecisionService:
     return getattr(_context(), 'trading_decision_service', None) or TradingDecisionService()
 
 
+def _stock_ai_lock_name(payload: dict) -> str:
+    stock_code = payload['stock_code']
+    analysis_scene = payload.get('analysis_scene') or 'stock_analysis'
+    return f'ai_{analysis_scene}_{stock_code}'
+
+
 def _send_cached_stock_analysis_result(context, payload: dict, cached_result: dict) -> None:
     client_id = payload['client_id']
     stock_code = payload['stock_code']
-    lock_name = f'ai_{stock_code}'
+    lock_name = _stock_ai_lock_name(payload)
     streamer = StreamingAnalyzer(client_id, context.sse_manager)
     try:
         streamer.send_log(f"🚀 命中当天缓存，直接复用股票分析: {stock_code}", 'header')
@@ -104,11 +110,13 @@ def _start_stock_ai_analysis_task(context, payload: dict):
     analysis_depth = payload['analysis_depth']
     start_date_str = payload['start_date'] or (datetime.now() - timedelta(days=100)).strftime('%Y-%m-%d')
     end_date_str = payload['end_date'] or datetime.now().strftime('%Y-%m-%d')
-    lock_name = f'ai_{stock_code}'
+    lock_name = _stock_ai_lock_name(payload)
+    scene_label = payload.get('analysis_scene') or 'stock_analysis'
+
 
     with context.task_lock:
         if lock_name in context.analysis_tasks:
-            return jsonify({'success': False, 'error': f'股票 {stock_code} 正在AI分析中，请稍候'}), 429
+            return jsonify({'success': False, 'error': f'股票 {stock_code} 正在进行 {scene_label} AI分析中，请稍候'}), 429
         context.analysis_tasks[lock_name] = {
             'start_time': datetime.now(),
             'status': 'analyzing',

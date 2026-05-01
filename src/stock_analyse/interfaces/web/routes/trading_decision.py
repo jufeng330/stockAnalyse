@@ -1,3 +1,8 @@
+"""交易决策 Web 路由层。
+
+负责承接进场决策、持仓计划、买卖决策和持仓复盘等页面请求与异步运行请求。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -797,7 +802,7 @@ def register_trading_decision_routes(app):
                     'review_type': request_payload.get('review_type', 'general'),
                     'period_key': request_payload.get('period_key', ''),
                     'analysis_depth': request_payload.get('analysis_depth', 'standard'),
-                    'role': holding_review_context.get('role_instruction') or '交易专家',
+                    'role': '交易专家',
                     'data_sources': ['trade_history_context', 'entry_context', 'reanalysis_context', 'position_decision_context', 'financial_context', 'market_context'],
                 },
             },
@@ -837,7 +842,7 @@ def register_trading_decision_routes(app):
                     'market': holding_stock.get('market', ''),
                     'trade_date': request_payload.get('trade_date', ''),
                     'analysis_depth': request_payload.get('analysis_depth', 'standard'),
-                    'role': position_context.get('role_instruction') or '股票分析师',
+                    'role': '股票分析师',
                     'data_sources': ['financial_context', 'trade_history_context', 'holding_plan_context'],
                 },
             },

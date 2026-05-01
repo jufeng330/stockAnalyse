@@ -1,3 +1,8 @@
+"""SSE 连接管理组件。
+
+负责维护浏览器连接，并把 AI 主链路中的事件安全地序列化后推送给指定客户端。
+"""
+
 from __future__ import annotations
 
 import json
@@ -11,9 +16,13 @@ import pandas as pd
 
 
 class SSEManager:
-    """SSE连接管理器"""
+    """管理 SSE 客户端与消息分发。
+
+    负责注册连接、移除失效连接，并在发送前把复杂对象清洗为可序列化数据。
+    """
 
     def __init__(self):
+        """初始化连接池、线程锁与日志器。"""
         self.clients = {}
         self.lock = threading.Lock()
         self.logger = logging.getLogger(__name__)

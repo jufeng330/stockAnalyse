@@ -1,19 +1,28 @@
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 from typing import Any
 
-from stock_analyse.infrastructure.llm.stock_ai_analyzer import StockAiAnalyzer
+from stock_analyse.application.graphs.trading_decision import run_trade_plan_analysis_graph
 
 
 TRADE_PLAN_TEMPLATE_PATH = Path('/mnt/github/stock/stockAnalyse/doc/持仓计划.md')
 
 
+def _legacy_analyzer_factory(**kwargs):
+    return kwargs
+
+
 class TradePlanAnalysisOrchestrator:
+    """持仓计划分析 AI 编排器。
+
+    负责把模板、缓存与回退数据整理为一份可执行的持仓计划草案及决策摘要。
+    """
+
     def __init__(self, *, analyzer_factory: Any | None = None) -> None:
-        self.analyzer_factory = analyzer_factory or (lambda **kwargs: StockAiAnalyzer(**kwargs))
+        """初始化持仓计划分析兼容参数。"""
+        self.analyzer_factory = analyzer_factory or _legacy_analyzer_factory
 
     def run(
         self,
@@ -25,6 +34,7 @@ class TradePlanAnalysisOrchestrator:
         system_prompt: str | None = None,
         callbacks: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """执行持仓计划生成，并返回 markdown 与决策摘要。"""
         callbacks = callbacks or {}
         started_at = time.time()
         send_log = callbacks.get('send_log')
@@ -38,7 +48,7 @@ class TradePlanAnalysisOrchestrator:
             if send_progress:
                 send_progress('singleProgress', percent, message)
 
-        analyzer = self.analyzer_factory(
+        self.analyzer_factory(
             ai_platform=llm_provider,
             model=llm_model,
             api_token=api_code,
@@ -47,64 +57,21 @@ class TradePlanAnalysisOrchestrator:
 
         log('🚀 开始准备持仓计划上下文', 'header')
         progress(15, '正在整理缓存与回退数据...')
-        response = self._run_trading_expert(analyzer, context)
+        response = run_trade_plan_analysis_graph(
+            context=context,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_code=api_code,
+            system_prompt=system_prompt,
+        )
         progress(85, '正在生成持仓计划草案...')
-        final_result = self._build_final_result(context, response, duration_ms=int((time.time() - started_at) * 1000))
+        final_result = self._build_final_result(
+            context,
+            response.model_dump(mode='json'),
+            duration_ms=int((time.time() - started_at) * 1000),
+        )
         progress(100, '持仓计划草案生成完成')
         return final_result
-
-    def _run_trading_expert(self, analyzer: Any, context: dict[str, Any]) -> dict[str, Any]:
-        payload = {
-            'template_markdown': context.get('template_markdown') or self._load_trade_plan_template_markdown(),
-            'watch_stock': context.get('watch_stock') or {},
-            'request': context.get('request') or {},
-            'cache_context': context.get('cache_context') or {},
-            'fallback_context': context.get('fallback_context') or {},
-            'data_source': context.get('data_source') or 'fallback_only',
-        }
-        instruction = (
-            '你是一名股票交易专家，擅长把研究结论转化为可执行的仓位、价格、下单和失败预案。'
-            '请输出严格 JSON，不要输出 markdown 代码块，不要输出额外解释。'
-        )
-        message = (
-            '请根据给定的模板、缓存文件内容和补充数据，生成一份专业的持仓计划草案。\n\n'
-            '硬性要求：\n'
-            '1. 必须严格按模板章节顺序输出 `trade_plan_markdown`，不要删改章节标题。\n'
-            '2. 输出必须可执行，优先给出明确动作、仓位和条件，不要空话。\n'
-            '3. 若缓存中已有进场决策或股票分析结论，应优先复用这些结论。\n'
-            '4. 若信息不足，可以结合 fallback 数据补足；仍无法确定的字段写“待确认”，不要编造。\n'
-            '5. 返回 JSON 结构必须包含：\n'
-            '{\n'
-            '  "trade_plan_markdown": "完整 markdown 正文",\n'
-            '  "decision": {\n'
-            '    "action": "buy|hold|watch|sell",\n'
-            '    "summary": "一句话总结",\n'
-            '    "logic": "核心逻辑",\n'
-            '    "risk_level": "low|medium|high",\n'
-            '    "risks": ["风险1", "风险2"],\n'
-            '    "time_horizon": "执行周期",\n'
-            '    "position_suggestion": {\n'
-            '      "target_position": "最大目标仓位",\n'
-            '      "position_limit": "单票仓位上限",\n'
-            '      "add_condition": "加仓条件",\n'
-            '      "reduce_condition": "减仓条件",\n'
-            '      "stop_loss_reference": "止损或退出参考"\n'
-            '    }\n'
-            '  },\n'
-            '  "plan_metadata": {\n'
-            '    "template_name": "持仓计划模板（买前执行版）",\n'
-            '    "data_source": "cache_first|partial_cache_fallback|fallback_only",\n'
-            '    "cache_hits": ["命中文件名"]\n'
-            '  }\n'
-            '}\n\n'
-            f'输入上下文：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}'
-        )
-        raw_response = analyzer.openai_api_call(
-            symbol=(context.get('watch_stock') or {}).get('stock_code', ''),
-            message=message,
-            instruction=instruction,
-        )
-        return self._parse_json_response(raw_response)
 
     def _build_final_result(self, context: dict[str, Any], response: dict[str, Any], *, duration_ms: int) -> dict[str, Any]:
         watch_stock = context.get('watch_stock') or {}
@@ -152,30 +119,6 @@ class TradePlanAnalysisOrchestrator:
                 'fallback_context': context.get('fallback_context') or {},
             },
         }
-
-    def _parse_json_response(self, raw_response: Any) -> dict[str, Any]:
-        if isinstance(raw_response, dict):
-            return raw_response
-        text = str(raw_response or '').strip()
-        if not text:
-            return {}
-        if text.startswith('```'):
-            text = text.strip('`')
-            if text.lower().startswith('json'):
-                text = text[4:].strip()
-        try:
-            parsed = json.loads(text)
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            start = text.find('{')
-            end = text.rfind('}')
-            if start != -1 and end != -1 and end > start:
-                try:
-                    parsed = json.loads(text[start : end + 1])
-                    return parsed if isinstance(parsed, dict) else {}
-                except Exception:
-                    return {}
-            return {}
 
     def _fallback_markdown(self, context: dict[str, Any], decision: dict[str, Any]) -> str:
         watch_stock = context.get('watch_stock') or {}

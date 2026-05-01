@@ -20,6 +20,7 @@ def execute(
     system_prompt: str | None = None,
     callbacks: dict | None = None,
     orchestrator: StockAIAnalysisOrchestrator | None = None,
+    analysis_scene: str | None = None,
 ) -> dict:
     try:
         orchestrator = orchestrator or StockAIAnalysisOrchestrator()
@@ -37,6 +38,7 @@ def execute(
             api_code=api_code,
             system_prompt=system_prompt,
             callbacks=callbacks,
+            analysis_scene=analysis_scene,
         )
         decision = state.get('decision', {})
         technical = state.get('stock_snapshot', {}).get('technical', {})

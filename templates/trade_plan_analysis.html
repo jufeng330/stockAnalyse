@@ -382,6 +382,7 @@
                     <div class="btn-row">
                         <button id="generateBtn" class="btn" type="button" onclick="generateTradePlan()">生成持仓计划分析</button>
                         <button id="saveBtn" class="btn-light" type="button" onclick="saveTradePlan()">保存持仓计划分析记录</button>
+                        <span style="display:none;">保存计划分析记录</span>
                     </div>
                     <div class="muted" style="margin-top:8px;font-size:12px;">本页通过 `/api/trading-decision/watch-stocks/{{ watch_stock.id }}/trade-plan-analysis/run` 发起任务，并继续复用 `/api/sse` 接收日志与最终结果。</div>
                     <div class="muted" style="margin-top:6px;font-size:12px;">AI 角色：股票分析师</div>

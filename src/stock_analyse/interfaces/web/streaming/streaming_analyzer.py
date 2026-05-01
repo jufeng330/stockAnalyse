@@ -1,3 +1,8 @@
+"""SSE 事件发送包装器。
+
+负责把服务层和编排层的日志、进度、阶段结果与最终结果映射为统一事件类型。
+"""
+
 from __future__ import annotations
 
 import json
@@ -9,9 +14,13 @@ import pandas as pd
 
 
 class StreamingAnalyzer:
-    """流式分析器"""
+    """面向单个客户端发送 AI 运行事件。
+
+    负责把编排层的通用回调映射为前端可识别的 SSE 事件名称。
+    """
 
     def __init__(self, client_id, sse_manager):
+        """绑定当前客户端和底层 SSE 管理器。"""
         self.client_id = client_id
         self.sse_manager = sse_manager
 

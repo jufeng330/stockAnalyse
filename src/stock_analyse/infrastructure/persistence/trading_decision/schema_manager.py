@@ -1,10 +1,21 @@
+"""交易决策持久化结构管理器。
+
+负责初始化 AI 主链路所依赖的 SQLite 表结构与索引，包括关注、持仓、会话和分析结果记录。
+"""
+
 from __future__ import annotations
 
 from stock_analyse.infrastructure.persistence.trading_decision.sqlite_connection import TradingDecisionSQLiteConnection
 
 
 class TradingDecisionSchemaManager:
+    """管理交易决策数据库表结构。
+
+    负责在应用启动或仓储初始化时补齐主链路需要的表、字段和索引。
+    """
+
     def __init__(self, connection_factory: TradingDecisionSQLiteConnection) -> None:
+        """保存数据库连接工厂以便后续建表。"""
         self.connection_factory = connection_factory
 
     def ensure_schema(self) -> None:

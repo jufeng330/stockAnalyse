@@ -1,3 +1,8 @@
+"""传统股票分析的 LLM 适配器。
+
+负责并行组织公司摘要、技术指标解读和财报解读三个 AI 子请求。
+"""
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -6,7 +11,13 @@ from stock_analyse.infrastructure.llm.client import StockAiClient
 
 
 class StockAiAdapter:
+    """组合多个 AI 子能力的并发适配层。
+
+    负责为传统个股分析统一收集摘要、技术和财报三类文本结果。
+    """
+
     def __init__(self, system_prompt: str, prompt_template: str, ai_platform: str, ai_model: str, api_code: str) -> None:
+        """为不同分析子任务创建可复用的 AI 客户端。"""
         self.analysis_client = StockAiClient(
             system_prompt=system_prompt,
             prompt_template=prompt_template,

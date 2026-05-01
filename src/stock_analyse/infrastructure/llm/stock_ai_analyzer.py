@@ -1,3 +1,8 @@
+"""统一 AI 访问与 JSON 重整入口。
+
+负责向兼容 OpenAI 的模型发送请求，并在结构化输出场景中执行本地解析与二次 JSON 重整。
+"""
+
 import datetime
 import json
 import os
@@ -22,7 +27,13 @@ def debug_log(message):
 
 
 class StockAiAnalyzer:
+    """统一的模型请求与结构化输出处理器。
+
+    负责构建模型配置、发起请求、保存原始响应，并在 JSON 场景中完成解析与重整。
+    """
+
     def __init__(self, system_prompt=None, prompt_template=None, model=None, ai_platform=None, api_token=None):
+        """根据运行配置初始化模型、平台和提示模板。"""
         settings = get_settings()
         self.model = "qwen-plus"
         resolved_platform = ai_platform or settings.ai.platform
@@ -253,6 +264,7 @@ class StockAiAnalyzer:
         response_format=None,
         require_tool_call=False,
     ):
+        """调用兼容 OpenAI 的模型接口，并优先返回可解析的 JSON 结果。"""
         current_date = datetime.datetime.now()
         stock_name = symbol
         raw_response = ''

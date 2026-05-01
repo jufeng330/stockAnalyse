@@ -53,3 +53,6 @@ pywavelets
 mpld3
 sqlalchemy
 apscheduler
+langchain
+langchain-openai
+langgraph

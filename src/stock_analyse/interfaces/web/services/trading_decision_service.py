@@ -34,7 +34,13 @@ from stock_analyse.infrastructure.services.market_data_service import stockBorde
 
 
 class TradingDecisionService:
+    """交易决策服务门面。
+
+    负责在 Web 层与仓储、数据快照、AI 编排之间组装上下文、归一化结果并保存业务记录。
+    """
+
     def __init__(self, db_path: str | Path | None = None, *, data_facade: AIStockDataFacade | None = None) -> None:
+        """初始化交易决策主链路依赖的仓储、缓存目录和数据门面。"""
         resolved_db_path = db_path or self._default_db_path()
         self.repository = WatchStockRepository(resolved_db_path)
         self.holding_repository = HoldingStockRepository(resolved_db_path)
@@ -3030,7 +3036,6 @@ class TradingDecisionService:
                 'last_review_at': holding_stock.get('last_review_at') or '',
             },
             'data_source': 'holding_snapshot',
-            'role_instruction': '交易专家',
         }
 
     def build_position_decision_context(self, holding_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3080,7 +3085,6 @@ class TradingDecisionService:
                 'entry_decision_history': entry_decision_records,
             },
             'data_source': 'holding_snapshot',
-            'role_instruction': '股票分析师',
         }
 
     def build_holding_review_request(self, payload: dict[str, Any]) -> dict[str, Any]:

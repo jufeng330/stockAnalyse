@@ -1,3 +1,8 @@
+"""Web 接口层应用入口。
+
+负责创建 Flask 应用、装配共享上下文，并注册 AI 分析与交易决策相关路由。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -31,7 +36,13 @@ matplotlib.use('Agg')
 
 
 class WebAppContext:
+    """Web 应用共享运行上下文。
+
+    负责集中持有设置、SSE 管理器、线程池和主链路服务实例，供各路由模块复用。
+    """
+
     def __init__(self) -> None:
+        """初始化 Web 主链路依赖的共享对象。"""
         self.settings = get_settings()
         self.sse_manager = SSEManager()
         self.analyzer = StockAnalyzerService()
@@ -54,6 +65,7 @@ web_app_context = WebAppContext()
 
 
 def create_app() -> Flask:
+    """创建并注册当前打包版 Web 应用。"""
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..'))
     app = Flask(
         __name__,

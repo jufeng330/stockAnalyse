@@ -361,6 +361,7 @@ class StockAnalyzerService:
             api_code=self.api_code,
             system_prompt=self.system_prompt,
             callbacks=callbacks,
+            analysis_scene=analysis_scene,
         )
 
         if json_result.get('success'):
