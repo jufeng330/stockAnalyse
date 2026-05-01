@@ -19,6 +19,11 @@ from stock_analyse.infrastructure.services.market_data_service import stockBorde
 
 @dataclass
 class FullMarketScanRuntime:
+    """全市场扫描运行时依赖集合。
+
+    用于封装一次全市场扫描批次中的技术分析器、选股器、文件输出和日志依赖，避免在扫描过程中重复组装对象。
+    """
+
     market: str
     strategy_type: int
     analyzer: TechnicalAnalysisWorkflow
@@ -30,6 +35,11 @@ class FullMarketScanRuntime:
 
 
 class FullMarketScanWorkflow:
+    """全市场批量扫描工作流。
+
+    用于选股、技术分析和高分结果落盘场景，负责按市场批量拉取股票列表、筛选候选并并发执行单票分析。
+    """
+
     def __init__(self, max_workers: int = 20, min_score: float = 30) -> None:
         self.max_workers = max_workers
         self.min_score = min_score

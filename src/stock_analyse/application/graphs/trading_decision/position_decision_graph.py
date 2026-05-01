@@ -6,6 +6,11 @@ from stock_analyse.application.agents.position_decision import PositionDecisionA
 
 
 class PositionDecisionGraph:
+    """买卖决策 graph 封装。
+
+    用于持仓股票的买卖决策场景，负责把持仓、财务与计划上下文整理成结构化 agent 输入。
+    """
+
     def __init__(self, *, agent: PositionDecisionAgent | None = None) -> None:
         self.agent = agent or PositionDecisionAgent()
 

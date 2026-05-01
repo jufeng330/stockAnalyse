@@ -10,6 +10,11 @@ from stock_analyse.application.agents.trade_plan_analysis import (
 
 
 class TradePlanAnalysisGraph:
+    """持仓计划分析 graph 封装。
+
+    用于关注股票的持仓计划分析场景，负责把页面/服务层上下文归一化为 agent 可消费的结构化输入。
+    """
+
     def __init__(self, *, agent: TradePlanAnalysisAgent | None = None) -> None:
         self.agent = agent or TradePlanAnalysisAgent()
 

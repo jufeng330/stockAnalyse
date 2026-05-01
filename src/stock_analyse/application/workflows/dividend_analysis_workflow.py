@@ -13,6 +13,11 @@ from stock_analyse.shared.stock_utils import StockUtils
 
 
 class StockFenHengAnalyser:
+    """分红/股息率筛选工作流。
+
+    用于按连续分红或平均股息率筛选候选股票，属于历史风格 workflow，当前仍服务于分红筛选类场景，先保留并补清用途说明。
+    """
+
     def __init__(self, max_workers: int = 20, min_score: float = 30, market='SH'):
         self.max_workers = max_workers
         self.min_score = min_score

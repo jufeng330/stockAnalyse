@@ -10,6 +10,11 @@ from .prompts import TRADE_PLAN_ANALYSIS_SYSTEM_PROMPT, build_trade_plan_analysi
 
 
 class TradePlanAnalysisAgent:
+    """持仓计划分析链路的 AI 访问器。
+
+    用于关注股票列表的持仓计划分析场景，负责根据模板、缓存与补充上下文生成结构化计划结果。
+    """
+
     def run(
         self,
         *,

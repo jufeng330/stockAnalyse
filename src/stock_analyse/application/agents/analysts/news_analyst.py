@@ -4,6 +4,11 @@ from stock_analyse.application.agents.base_agent import BaseStockAnalysisAgent
 
 
 class NewsAnalyst(BaseStockAnalysisAgent):
+    """消息面分析师角色。
+
+    用于股票分析与持仓二次分析流程的事件扫描阶段，负责整理短期催化、利空与舆情方向，辅助判断消息驱动是否可靠。
+    """
+
     def __init__(self, **kwargs) -> None:
         super().__init__(
             role_name='news_analyst',

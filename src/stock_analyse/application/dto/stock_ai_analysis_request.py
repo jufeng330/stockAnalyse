@@ -5,6 +5,11 @@ from dataclasses import dataclass
 
 @dataclass
 class StockAIAnalysisRequest:
+    """股票 AI 分析请求参数。
+
+    用于 `/api/analyze_stock_ai` 相关 use case 与 orchestrator 之间传递基础分析请求字段。
+    """
+
     stock_code: str
     market: str
     trade_date: str | None = None

@@ -7,7 +7,10 @@ from stock_analyse.application.graphs.trading_decision.position_decision_graph i
 
 
 class PositionDecisionOrchestrator:
-    """买卖决策 AI 编排器。"""
+    """买卖决策 AI 编排器。
+
+    用于持仓股票列表的买卖决策场景，负责承接持仓上下文、调用 position decision graph，并映射为页面与落库兼容结构。
+    """
 
     def run(
         self,

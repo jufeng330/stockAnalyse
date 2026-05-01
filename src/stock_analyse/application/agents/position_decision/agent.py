@@ -10,6 +10,11 @@ from .prompts import POSITION_DECISION_SYSTEM_PROMPT, build_position_decision_us
 
 
 class PositionDecisionAgent:
+    """买卖决策链路的 AI 访问器。
+
+    用于持仓股票列表的买卖决策场景，负责把持仓、财报、交易历史与计划上下文转换为固定 tab 的卖出/减仓建议。
+    """
+
     def run(
         self,
         *,

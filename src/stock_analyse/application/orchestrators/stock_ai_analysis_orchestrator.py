@@ -18,6 +18,11 @@ def _scene_summary_suffix(scene: str) -> str:
 
 
 class StockAIAnalysisOrchestrator:
+    """股票 AI 分析共享编排器。
+
+    用于 `/api/analyze_stock_ai` 背后的普通股票分析与持仓二次分析场景，负责驱动共享 graph 并做最终决策归一化。
+    """
+
     def __init__(self, data_facade: AIStockDataFacade | None = None) -> None:
         self.data_facade = data_facade or AIStockDataFacade()
 

@@ -18,6 +18,11 @@ from .models import StockAnalysisInput
 
 
 class StockAnalysisAgent:
+    """股票分析共享执行器。
+
+    用于普通股票分析与持仓二次分析两个场景，负责驱动快照构建、多角色分析、多空研究与最终交易员输出。
+    """
+
     def __init__(self, data_facade: AIStockDataFacade | None = None) -> None:
         self.data_facade = data_facade or AIStockDataFacade()
 

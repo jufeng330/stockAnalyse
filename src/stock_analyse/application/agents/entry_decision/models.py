@@ -16,6 +16,11 @@ EntryDecisionRoleName = Literal[
 
 
 class EntryDecisionInput(BaseModel):
+    """进场决策单角色执行输入。
+
+    用于进场优化会话中某一角色执行时承载关注股票、自动上下文、人工补充信息与已完成阶段输出。
+    """
+
     model_config = ConfigDict(extra='allow')
 
     session_id: str
@@ -32,10 +37,20 @@ class EntryDecisionInput(BaseModel):
 
 
 class EntryDecisionRoleOutputMap(BaseModel):
+    """进场决策单角色结构化输出容器。
+
+    用于兼容不同角色返回字段差异，作为进场优化多阶段 agent 的宽松结构化协议。
+    """
+
     model_config = ConfigDict(extra='allow')
 
 
 class EntryDecisionSummaryInput(BaseModel):
+    """进场决策摘要 markdown 生成输入。
+
+    用于六阶段角色完成后汇总模板、上下文与角色输出，生成页面主渲染所需的 markdown 内容。
+    """
+
     model_config = ConfigDict(extra='allow')
 
     template_markdown: str = ''

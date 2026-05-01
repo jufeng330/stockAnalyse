@@ -7,6 +7,11 @@ from stock_analyse.application.agents.entry_decision.models import EntryDecision
 
 
 class EntryDecisionGraph:
+    """进场决策 graph 封装。
+
+    用于进场优化会话执行时把状态对象转换成结构化 agent 输入，并分别驱动单角色分析与最终摘要生成。
+    """
+
     def __init__(self, *, agent: EntryDecisionAgent | None = None) -> None:
         self.agent = agent or EntryDecisionAgent()
 

@@ -7,6 +7,11 @@ from typing import Any
 
 @dataclass
 class StockAIAnalysisState:
+    """股票分析共享运行状态。
+
+    用于普通股票分析与持仓二次分析流程，承载快照、多角色输出、最终决策与阶段元信息。
+    """
+
     request: dict[str, Any]
     stock_snapshot: dict[str, Any] = field(default_factory=dict)
     analyst_outputs: dict[str, Any] = field(default_factory=dict)

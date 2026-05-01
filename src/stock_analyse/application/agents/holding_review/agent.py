@@ -10,6 +10,11 @@ from .prompts import HOLDING_REVIEW_SYSTEM_PROMPT, build_holding_review_user_pro
 
 
 class HoldingReviewAgent:
+    """持仓复盘链路的 AI 访问器。
+
+    用于持仓股票列表的复盘场景，负责把成交、计划、二次分析等上下文整合后生成固定 tab 结构的复盘结果。
+    """
+
     def run(
         self,
         *,

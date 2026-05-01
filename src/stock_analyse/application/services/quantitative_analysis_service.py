@@ -22,6 +22,11 @@ from stock_analyse.infrastructure.services.company_data_service import stockComp
 
 
 class stockIndicatorQuantitative:
+    """历史技术指标与行情加工服务。
+
+    这是旧风格的 application 层量化分析类，当前仍被传统股票分析与图形绘制流程调用，属于兼容保留实现，不应在未迁移完成前直接删除。
+    """
+
     def __init__(self):
         # 获取当前日期
         current_date = datetime.datetime.now()

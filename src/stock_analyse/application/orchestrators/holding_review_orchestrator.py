@@ -7,7 +7,10 @@ from stock_analyse.application.graphs.trading_decision.holding_review_graph impo
 
 
 class HoldingReviewOrchestrator:
-    """持仓复盘 AI 编排器。"""
+    """持仓复盘 AI 编排器。
+
+    用于持仓股票列表的复盘场景，负责承接页面/服务层上下文、调用 holding review graph，并输出前端兼容结果结构。
+    """
 
     def run(
         self,

@@ -6,6 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TradePlanPositionSuggestion(BaseModel):
+    """持仓计划分析中的仓位建议结构。
+
+    用于描述计划执行时的目标仓位、加减仓条件与止损参考，供页面摘要卡和历史记录复用。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     target_position: str = ''
@@ -16,6 +21,11 @@ class TradePlanPositionSuggestion(BaseModel):
 
 
 class TradePlanDecision(BaseModel):
+    """持仓计划分析的核心决策结构。
+
+    用于约束 action、逻辑、风险等级、时间周期和仓位建议，是持仓计划页面摘要与落库的主协议。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     action: Literal['buy', 'hold', 'watch', 'sell']
@@ -41,6 +51,11 @@ class TradePlanDecision(BaseModel):
 
 
 class TradePlanMetadata(BaseModel):
+    """持仓计划分析的元信息结构。
+
+    用于标记模板名称、缓存命中来源和本次数据来源类型，方便页面展示与排查生成路径。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     template_name: str = Field(min_length=1)
@@ -62,6 +77,11 @@ class TradePlanMetadata(BaseModel):
 
 
 class TradePlanAnalysisOutput(BaseModel):
+    """持仓计划分析的标准输出。
+
+    用于承载页面主 markdown、决策摘要与元信息，是 trade plan agent 到 orchestrator 的固定协议。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     trade_plan_markdown: str = ''
@@ -70,6 +90,11 @@ class TradePlanAnalysisOutput(BaseModel):
 
 
 class TradePlanAnalysisInput(BaseModel):
+    """持仓计划分析输入。
+
+    用于承载模板正文、关注股票、请求参数、缓存命中结果与回退上下文，供单次计划分析调用使用。
+    """
+
     model_config = ConfigDict(extra='allow')
 
     template_markdown: str = ''

@@ -8,6 +8,11 @@ from stock_analyse.infrastructure.services.company_data_service import stockComp
 
 
 class BacktestStocksWorkflow:
+    """候选股票短周期回测工作流。
+
+    用于全市场选股后的结果验证场景，按分析日期向后观察 1-3 天收益表现并生成统计报告。
+    """
+
     def __init__(self) -> None:
         pass
 

@@ -12,6 +12,11 @@ from stock_analyse.application.services.quantitative_analysis_service import sto
 
 
 class StockAnalysisOrchestrator:
+    """传统单股票分析编排器。
+
+    用于旧版图形化股票分析页面场景，负责串联技术指标绘图、情绪分析与单次 AI 总结，属于 legacy 但仍在使用的入口。
+    """
+
     def __init__(self, technical_analysis_workflow: Any | None = None) -> None:
         self._technical_analysis_workflow = technical_analysis_workflow
 

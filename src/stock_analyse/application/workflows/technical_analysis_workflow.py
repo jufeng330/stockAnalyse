@@ -17,6 +17,11 @@ from stock_analyse.shared.report_date_utils import ReportDateUtils
 
 
 class TechnicalAnalysisWorkflow:
+    """技术分析工作流。
+
+    用于单只股票技术评分、指标计算与全市场扫描中的单票分析，是传统量化流程与 AI 快照构建都会复用的应用层工作流。
+    """
+
     def __init__(self, params: Optional[TechnicalParams] = None, market: str = 'SH') -> None:
         self._setup_logging()
         self.params = params or TechnicalParams.default()

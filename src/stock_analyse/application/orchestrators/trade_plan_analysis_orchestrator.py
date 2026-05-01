@@ -11,6 +11,10 @@ TRADE_PLAN_TEMPLATE_PATH = Path('/mnt/github/stock/stockAnalyse/doc/持仓计划
 
 
 def _legacy_analyzer_factory(**kwargs):
+    """兼容保留的历史 analyzer 注入入口。
+
+    当前仅用于维持旧构造参数形态，实际持仓计划分析已切到 graph + agent 流程，后续在外部调用全部迁移后可删除。
+    """
     return kwargs
 
 

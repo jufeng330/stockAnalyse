@@ -6,6 +6,11 @@ from stock_analyse.application.agents.holding_review import HoldingReviewAgent, 
 
 
 class HoldingReviewGraph:
+    """持仓复盘 graph 封装。
+
+    用于持仓复盘接口与页面场景，负责把持仓、计划、再分析等上下文整理成单次复盘 agent 输入。
+    """
+
     def __init__(self, *, agent: HoldingReviewAgent | None = None) -> None:
         self.agent = agent or HoldingReviewAgent()
 

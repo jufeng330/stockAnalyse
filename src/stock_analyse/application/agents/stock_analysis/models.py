@@ -6,6 +6,11 @@ from pydantic import BaseModel, ConfigDict
 
 
 class StockAnalysisInput(BaseModel):
+    """股票分析共享输入模型。
+
+    用于普通股票分析和持仓二次分析两个场景，统一承载行情区间、快照开关、模型参数和分析场景标记。
+    """
+
     model_config = ConfigDict(extra='allow')
 
     stock_code: str

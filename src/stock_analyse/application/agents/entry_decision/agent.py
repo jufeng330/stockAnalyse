@@ -15,6 +15,11 @@ from .prompts import (
 
 
 class EntryDecisionAgent:
+    """进场决策链路的 AI 访问器。
+
+    用于关注股票列表的进场优化场景，负责执行单个角色分析和最终 markdown 汇总，不处理会话、暂停或持久化。
+    """
+
     def run_role(
         self,
         *,

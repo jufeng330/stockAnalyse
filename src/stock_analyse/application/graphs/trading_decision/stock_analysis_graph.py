@@ -8,6 +8,11 @@ from stock_analyse.application.dto.stock_ai_analysis_state import StockAIAnalysi
 
 
 class StockAnalysisGraph:
+    """股票分析共享 graph。
+
+    用于 `/api/analyze_stock_ai` 背后的普通股票分析与持仓二次分析场景，负责把请求上下文归一化为共享状态机输入。
+    """
+
     def __init__(self, *, agent: StockAnalysisAgent | None = None) -> None:
         self.agent = agent or StockAnalysisAgent()
 

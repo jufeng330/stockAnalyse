@@ -8,6 +8,11 @@ DEFAULT_AGENT_SYSTEM_PROMPT = '你是严谨的中文股票分析师，请基于�
 
 
 class BaseStockAnalysisAgent:
+    """股票多角色分析链路的通用 AI 访问基类。
+
+    用于普通股票分析与持仓二次分析场景下的 analyst / researcher / manager / trader 角色，统一封装 prompt 构造、LLM 调用与结构化解析。
+    """
+
     def __init__(
         self,
         *,

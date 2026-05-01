@@ -6,6 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class PositionDecisionTab(BaseModel):
+    """买卖决策页面 tab 结构。
+
+    用于约束持仓买卖决策页面的五个固定标签页，保证前端和历史记录都能按固定顺序展示。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     id: Literal['trigger', 'reason', 'execution', 'risk', 'conclusion']
@@ -31,6 +36,11 @@ class PositionDecisionTab(BaseModel):
 
 
 class PositionDecisionOutput(BaseModel):
+    """买卖决策标准输出。
+
+    用于承载推荐动作、状态、结论摘要与五个固定 tab，是持仓买卖决策链路的主输出协议。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     recommended_action: Literal['buy', 'reduce', 'sell', 'watch']
@@ -67,6 +77,11 @@ class PositionDecisionOutput(BaseModel):
 
 
 class PositionDecisionInput(BaseModel):
+    """买卖决策输入。
+
+    用于承载持仓、财务、交易历史与持仓计划等上下文，供持仓股票的减仓/卖出判断单次调用使用。
+    """
+
     model_config = ConfigDict(extra='allow')
 
     holding_stock: dict[str, Any] = Field(default_factory=dict)

@@ -6,6 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class HoldingReviewTab(BaseModel):
+    """持仓复盘页面 tab 结构。
+
+    用于约束复盘页面四个固定标签页的标题、摘要和证据列表，保证前端渲染顺序稳定。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     id: Literal['execution_review', 'result_review', 'discipline_review', 'next_action']
@@ -31,6 +36,11 @@ class HoldingReviewTab(BaseModel):
 
 
 class HoldingReviewOutput(BaseModel):
+    """持仓复盘标准输出。
+
+    用于承载复盘摘要、结论标签与四个固定 tab，是持仓复盘 agent 到 orchestrator 的输出协议。
+    """
+
     model_config = ConfigDict(extra='forbid')
 
     performance_summary: str = Field(min_length=1)
@@ -68,6 +78,11 @@ class HoldingReviewOutput(BaseModel):
 
 
 class HoldingReviewInput(BaseModel):
+    """持仓复盘输入。
+
+    用于承载持仓本身、历史交易、进场决策、二次分析和市场/财务补充上下文，供复盘单次调用使用。
+    """
+
     model_config = ConfigDict(extra='allow')
 
     holding_stock: dict[str, Any] = Field(default_factory=dict)

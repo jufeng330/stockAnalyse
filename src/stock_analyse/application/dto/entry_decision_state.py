@@ -7,6 +7,11 @@ from typing import Any
 
 @dataclass
 class EntryDecisionState:
+    """进场决策会话状态。
+
+    用于进场优化的暂停/继续执行场景，承载会话级上下文、阶段产物、缺失字段与最终结果。
+    """
+
     session_id: str
     watch_stock_id: str
     request: dict[str, Any]

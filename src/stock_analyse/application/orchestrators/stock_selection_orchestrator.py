@@ -6,6 +6,11 @@ from stock_analyse.application.use_cases import select_stock_strategy as select_
 
 
 class StockSelectionOrchestrator:
+    """选股编排器。
+
+    用于选股页面、全市场扫描和回测场景，负责在 application 层协调扫描、技术分析、策略筛选与回测 workflow。
+    """
+
     def __init__(
         self,
         *,
@@ -37,12 +42,6 @@ class StockSelectionOrchestrator:
 
             self._technical_analysis_workflow = TechnicalAnalysisWorkflow()
         return self._technical_analysis_workflow
-
-    def calculate_score(self, market: str, symbol: str):
-        return self._get_technical_analysis_workflow().analyze_stock(
-            {'代码': symbol, 'market': market, '股票代码': symbol},
-            market=market,
-        )
 
     def batch_analyze(self, market: str, min_score: int = 30, strategy_type: int = 1):
         _, high_score_stocks = self._get_full_market_scan_workflow().run(
@@ -79,32 +78,5 @@ class StockSelectionOrchestrator:
             analysis_date=analysis_date,
         )
 
-    def select_candidates(self, market: str, strategy_type: int = 1, strategy_filter: str = 'avg'):
-        file_utils, _ = self._get_full_market_scan_workflow().build_runtime(
-            market=market,
-            strategy_type=strategy_type,
-        )
-        df_stocks_data = self._get_full_market_scan_workflow().get_all_stocks(market=market)
-        _ = file_utils
-        return select_stock_strategy_use_case.execute(
-            df_stock=df_stocks_data,
-            market=market,
-            strategy_type=strategy_type,
-            strategy_filter=strategy_filter,
-        )
-
     def get_strategy_name(self, strategy_type: int | str) -> str:
         return select_stock_strategy_use_case.get_strategy_name(strategy_type)
-
-    def create_strategy_selector(self, market: str, strategy_type: int = 1):
-        from stock_analyse.domain.strategies.stock_select_strategy import StockSelectStrategy
-
-        return StockSelectStrategy(market=market, strategy_type=strategy_type)
-
-    def run_strategy_selection(self, df_stock, market: str, strategy_type: int = 1, strategy_filter: str = 'avg'):
-        return select_stock_strategy_use_case.execute(
-            df_stock=df_stock,
-            market=market,
-            strategy_type=strategy_type,
-            strategy_filter=strategy_filter,
-        )

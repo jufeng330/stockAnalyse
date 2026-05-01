@@ -5,6 +5,11 @@ from typing import Any
 
 
 class AIStockDataFacade:
+    """AI 分析前置数据快照门面。
+
+    用于股票分析、进场决策等 AI 场景，在 application 层统一聚合公司资料、技术面、情绪面、市场快照与财报摘要。
+    """
+
     def __init__(
         self,
         *,
