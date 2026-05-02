@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
+import logging
 import time
 from typing import Any
 
 from stock_analyse.application.graphs.trading_decision.holding_review_graph import run_holding_review_graph
+
+
+logger = logging.getLogger(__name__)
 
 
 class HoldingReviewOrchestrator:
@@ -44,12 +49,19 @@ class HoldingReviewOrchestrator:
             api_code=api_code,
             system_prompt=system_prompt,
         )
+        response_payload = response.model_dump(mode='json')
+        response_preview = self._build_response_preview(response_payload)
+        logger.info('持仓复盘 AI 原始应答摘要: %s', response_preview)
+        log(f'AI 应答摘要: {response_preview}', 'info')
         progress(85, '正在生成持仓复盘草案...')
         result = self._build_final_result(
             context,
-            response.model_dump(mode='json'),
+            response_payload,
             duration_ms=int((time.time() - started_at) * 1000),
         )
+        result_summary = self._build_result_summary(result)
+        logger.info('持仓复盘归一化结果摘要: %s', result_summary)
+        log(f'复盘结果摘要: {result_summary}', 'info')
         progress(100, '持仓复盘草案生成完成')
         return result
 
@@ -99,6 +111,30 @@ class HoldingReviewOrchestrator:
             },
         }
 
+    def _build_response_preview(self, response: dict[str, Any]) -> str:
+        preview = {
+            'performance_summary': str(response.get('performance_summary') or '').strip(),
+            'execution_summary': str(response.get('execution_summary') or '').strip(),
+            'risk_summary': str(response.get('risk_summary') or '').strip(),
+            'discipline_summary': str(response.get('discipline_summary') or '').strip(),
+            'next_action_summary': str(response.get('next_action_summary') or '').strip(),
+            'conclusion_tag': str(response.get('conclusion_tag') or '').strip(),
+            'tabs_count': len(response.get('tabs') or []) if isinstance(response.get('tabs'), list) else 0,
+        }
+        return json.dumps(preview, ensure_ascii=False)
+
+    def _build_result_summary(self, result: dict[str, Any]) -> str:
+        data = result.get('data') or {}
+        summary = {
+            'stock_code': str(data.get('stock_code') or '').strip(),
+            'trade_date': str(data.get('trade_date') or '').strip(),
+            'review_type': str(data.get('review_type') or '').strip(),
+            'conclusion_tag': str(data.get('conclusion_tag') or '').strip(),
+            'next_action_summary': str(data.get('next_action_summary') or '').strip(),
+            'tabs_count': len(data.get('tabs') or []) if isinstance(data.get('tabs'), list) else 0,
+        }
+        return json.dumps(summary, ensure_ascii=False)
+
     def _normalize_tabs(self, value: Any) -> list[dict[str, Any]]:
         expected = [
             ('execution_review', '执行与卖出复盘'),
@@ -106,10 +142,18 @@ class HoldingReviewOrchestrator:
             ('discipline_review', '方法与纪律'),
             ('next_action', '后续动作'),
         ]
-        source = value if isinstance(value, list) else []
+        source = [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
         normalized: list[dict[str, Any]] = []
         for index, (default_id, default_title) in enumerate(expected):
-            item = source[index] if index < len(source) and isinstance(source[index], dict) else {}
+            item = next(
+                (
+                    candidate
+                    for candidate in source
+                    if str(candidate.get('id') or '').strip().lower() == default_id
+                    or str(candidate.get('title') or '').strip() == default_title
+                ),
+                source[index] if index < len(source) else {},
+            )
             evidence = item.get('evidence') if isinstance(item.get('evidence'), list) else []
             normalized.append(
                 {

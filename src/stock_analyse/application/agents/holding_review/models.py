@@ -5,6 +5,28 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def _json_safe(value: Any) -> Any:
+    if hasattr(value, 'to_dict'):
+        try:
+            if hasattr(value, 'head'):
+                return value.head(20).to_dict('records')
+            return value.to_dict()
+        except Exception:
+            pass
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+class _JsonSafeBaseModel(BaseModel):
+    model_config = ConfigDict(extra='allow')
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        return _json_safe(self.model_dump())
+
+
 class HoldingReviewTab(BaseModel):
     """持仓复盘页面 tab 结构。
 
@@ -77,13 +99,11 @@ class HoldingReviewOutput(BaseModel):
         return value
 
 
-class HoldingReviewInput(BaseModel):
+class HoldingReviewInput(_JsonSafeBaseModel):
     """持仓复盘输入。
 
     用于承载持仓本身、历史交易、进场决策、二次分析和市场/财务补充上下文，供复盘单次调用使用。
     """
-
-    model_config = ConfigDict(extra='allow')
 
     holding_stock: dict[str, Any] = Field(default_factory=dict)
     watch_stock: dict[str, Any] = Field(default_factory=dict)
@@ -96,6 +116,3 @@ class HoldingReviewInput(BaseModel):
     market_context: dict[str, Any] = Field(default_factory=dict)
     review_focus_context: dict[str, Any] = Field(default_factory=dict)
     data_source: str = 'holding_snapshot'
-
-    def to_prompt_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode='json')

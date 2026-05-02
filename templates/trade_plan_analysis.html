@@ -338,18 +338,14 @@
 
             <div class="content-stack">
                 <div class="panel">
-                    <h2>标的上下文</h2>
+                    <h2>分析参数</h2>
                     <div class="context-grid">
                         <div class="kv"><div class="label">股票名称</div><div class="value">{{ watch_stock.stock_name }}</div></div>
                         <div class="kv"><div class="label">股票代码</div><div class="value">{{ watch_stock.stock_code }}</div></div>
                         <div class="kv"><div class="label">行业</div><div class="value">{{ watch_stock.industry or '未填写行业' }}</div></div>
                         <div class="kv"><div class="label">价格 / PE</div><div class="value">{{ '%.2f'|format(watch_stock.current_price) if watch_stock.current_price is not none else '--' }} / {{ '%.2f'|format(watch_stock.pe) if watch_stock.pe is not none else '--' }}</div></div>
                     </div>
-                </div>
-
-                <div class="panel">
-                    <h2>计划参数</h2>
-                    <div class="grid-2">
+                    <div class="grid-2" style="margin-top:16px;">
                         <div class="form-group">
                             <label for="tradeDate">交易日期</label>
                             <input id="tradeDate" class="form-control" type="date" value="{{ form_defaults.trade_date }}">
@@ -397,12 +393,7 @@
                 </div>
 
                 <div class="panel">
-                    <h2>运行日志</h2>
-                    <div id="logBox" class="log-box"><div class="log-entry log-info">[系统] 等待发起持仓计划分析任务...</div></div>
-                </div>
-
-                <div class="panel">
-                    <h2>计划草案结果</h2>
+                    <h2>分析结果</h2>
                     <div id="resultsContent">
                         {% if selected_record %}
                         {% set selected_data = (selected_record.raw_result_json or {}).get('data', {}) %}
@@ -460,6 +451,11 @@
                         {% endif %}
                     </div>
                     </div>
+                </div>
+
+                <div class="panel">
+                    <h2>分析日志</h2>
+                    <div id="logBox" class="log-box"><div class="log-entry log-info">[系统] 等待发起持仓计划分析任务...</div></div>
                 </div>
 
                 <div class="panel">
@@ -555,8 +551,10 @@
             });
             sseConnection.addEventListener('error', (event) => {
                 const payload = JSON.parse(event.data || '{}');
-                addLog(payload.message || '任务失败', 'error');
+                const errorMessage = payload.error || payload.message || '任务失败';
+                addLog(errorMessage, 'error');
                 setSystemStatus('分析失败');
+                renderResultError(errorMessage);
             });
         }
 
@@ -584,8 +582,10 @@
             });
             const body = await response.json();
             if (!response.ok || body.success !== true) {
-                addLog(body.message || body.error || '启动失败', 'error');
+                const errorMessage = body.message || body.error || '启动失败';
+                addLog(errorMessage, 'error');
                 setSystemStatus('启动失败');
+                renderResultError(errorMessage);
                 return;
             }
             addLog(body.message || '任务已启动', 'success');
@@ -667,6 +667,16 @@
             }
             addLog('持仓计划分析记录保存成功', 'success');
             window.location.href = `/trade-plan-analysis?watch_stock_id=${encodeURIComponent(WATCH_STOCK_ID)}&record_id=${encodeURIComponent(body.data.id)}`;
+        }
+
+        function renderResultError(message) {
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="empty-state">
+                    <div style="font-size:22px;font-weight:700;color:#b91c1c;">持仓计划分析失败</div>
+                    <div>${escapeHtml(message || '任务失败')}</div>
+                    <div style="font-size:13px;color:#9ca3af;">请查看分析日志定位问题后重试。</div>
+                </div>
+            `;
         }
 
         function escapeHtml(value) {

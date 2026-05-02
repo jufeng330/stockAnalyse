@@ -307,7 +307,7 @@
 
             <div class="content-stack">
                 <div class="panel">
-                    <h2>持仓上下文</h2>
+                    <h2>分析参数</h2>
                     <div class="context-grid">
                         <div class="kv"><div class="label">股票名称</div><div class="value">{{ holding_stock.stock_name }}</div></div>
                         <div class="kv"><div class="label">股票代码</div><div class="value">{{ holding_stock.stock_code }}</div></div>
@@ -320,11 +320,7 @@
                         <div class="kv"><div class="label">关联关注股票</div><div class="value">{{ watch_stock.stock_name if watch_stock else '暂无关联' }}</div></div>
                         <div class="kv"><div class="label">当前价格</div><div class="value">{{ '%.2f'|format(holding_stock.current_price) if holding_stock.current_price is not none else '--' }}</div></div>
                     </div>
-                </div>
-
-                <div class="panel">
-                    <h2>复盘参数</h2>
-                    <div class="grid-3">
+                    <div class="grid-3" style="margin-top:16px;">
                         <div class="form-group">
                             <label for="tradeDate">复盘日期</label>
                             <input id="tradeDate" class="form-control" type="date" value="{{ form_defaults.trade_date }}">
@@ -366,12 +362,7 @@
                 </div>
 
                 <div class="panel">
-                    <h2>运行日志</h2>
-                    <div id="logBox" class="log-box"><div class="log-entry log-info">[系统] 等待发起持仓复盘任务...</div></div>
-                </div>
-
-                <div class="panel">
-                    <h2>持仓复盘结果</h2>
+                    <h2>分析结果</h2>
                     <div id="resultsContent">
                         {% if selected_record %}
                         <div id="holdingReviewPrefill" data-result='{{ selected_record.raw_result_json | tojson | forceescape }}'></div>
@@ -383,6 +374,11 @@
                         </div>
                         {% endif %}
                     </div>
+                </div>
+
+                <div class="panel">
+                    <h2>分析日志</h2>
+                    <div id="logBox" class="log-box"><div class="log-entry log-info">[系统] 等待发起持仓复盘任务...</div></div>
                 </div>
 
                 <div class="panel">
@@ -444,6 +440,24 @@
             document.getElementById('progressText').textContent = text;
         }
 
+        function unpackSsePayload(event) {
+            const payload = JSON.parse(event.data || '{}');
+            if (payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object') {
+                return payload.data;
+            }
+            return payload && typeof payload === 'object' ? payload : {};
+        }
+
+        function handleProgressEvent(event) {
+            const payload = unpackSsePayload(event);
+            const percent = Number(payload.percent ?? payload.progress ?? 0) || 0;
+            const message = payload.message || '处理中...';
+            setProgress(percent, message);
+            if (message) {
+                addLog(message, percent >= 100 ? 'success' : 'info');
+            }
+        }
+
         function connectSSE(clientId) {
             if (sseConnection) {
                 sseConnection.close();
@@ -458,40 +472,81 @@
                 document.getElementById('sseStatus').textContent = 'SSE 连接异常';
             };
             sseConnection.addEventListener('log', (event) => {
-                const payload = JSON.parse(event.data || '{}');
+                const payload = unpackSsePayload(event);
                 addLog(payload.message || '', payload.type || 'info');
             });
-            sseConnection.addEventListener('singleProgress', (event) => {
-                const payload = JSON.parse(event.data || '{}');
-                setProgress(payload.progress || 0, payload.message || '处理中...');
-            });
+            sseConnection.addEventListener('progress', handleProgressEvent);
+            sseConnection.addEventListener('singleProgress', handleProgressEvent);
             sseConnection.addEventListener('final_result', (event) => {
-                const payload = JSON.parse(event.data || '{}');
-                currentResult = payload;
-                renderHoldingReviewResult(payload);
+                try {
+                    const payload = unpackSsePayload(event);
+                    currentResult = payload;
+                    renderHoldingReviewResult(payload);
+                    setProgress(100, '持仓复盘结果已生成');
+                    setSystemStatus('持仓复盘结果已生成');
+                    addLog('已收到持仓复盘 final_result 并完成渲染', 'success');
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error || '持仓复盘结果渲染失败');
+                    addLog(`持仓复盘结果渲染失败: ${message}`, 'error');
+                    setSystemStatus('持仓复盘结果渲染失败');
+                    renderResultError(`持仓复盘结果渲染失败：${message}`);
+                }
             });
             sseConnection.addEventListener('analysis_complete', (event) => {
-                const payload = JSON.parse(event.data || '{}');
+                const payload = unpackSsePayload(event);
                 addLog(payload.message || '任务完成', 'success');
                 setSystemStatus(payload.message || '分析完成');
+                setProgress(100, payload.message || '分析完成');
             });
             sseConnection.addEventListener('analysis_error', (event) => {
-                const payload = JSON.parse(event.data || '{}');
+                const payload = unpackSsePayload(event);
                 const errorMessage = payload.error || payload.message || '任务失败';
                 addLog(errorMessage, 'error');
                 setSystemStatus(errorMessage);
+                renderResultError(errorMessage);
             });
             sseConnection.addEventListener('completion', (event) => {
-                const payload = JSON.parse(event.data || '{}');
+                const payload = unpackSsePayload(event);
                 addLog(payload.message || '任务完成', 'success');
                 setSystemStatus(payload.message || '分析完成');
+                setProgress(100, payload.message || '分析完成');
             });
             sseConnection.addEventListener('error', (event) => {
-                const payload = JSON.parse(event.data || '{}');
+                const payload = unpackSsePayload(event);
                 const errorMessage = payload.error || payload.message || '任务失败';
                 addLog(errorMessage, 'error');
                 setSystemStatus(errorMessage);
+                renderResultError(errorMessage);
             });
+            sseConnection.onmessage = (event) => {
+                try {
+                    const payload = JSON.parse(event.data || '{}');
+                    const eventName = String(payload.event || '').trim();
+                    const detail = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+                    if (eventName === 'log') {
+                        addLog(detail.message || '', detail.type || 'info');
+                    } else if (eventName === 'progress') {
+                        handleProgressEvent({ data: JSON.stringify(detail) });
+                    } else if (eventName === 'final_result') {
+                        currentResult = detail;
+                        renderHoldingReviewResult(detail);
+                        setProgress(100, '持仓复盘结果已生成');
+                        setSystemStatus('持仓复盘结果已生成');
+                        addLog('已通过通用 SSE 消息收到持仓复盘结果', 'success');
+                    } else if (eventName === 'analysis_complete' || eventName === 'completion') {
+                        addLog(detail.message || '任务完成', 'success');
+                        setSystemStatus(detail.message || '分析完成');
+                        setProgress(100, detail.message || '分析完成');
+                    } else if (eventName === 'analysis_error' || eventName === 'error') {
+                        const errorMessage = detail.error || detail.message || '任务失败';
+                        addLog(errorMessage, 'error');
+                        setSystemStatus(errorMessage);
+                        renderResultError(errorMessage);
+                    }
+                } catch (error) {
+                    addLog(`SSE 通用消息处理失败: ${error instanceof Error ? error.message : String(error)}`, 'error');
+                }
+            };
         }
 
         function buildClientId() {
@@ -552,54 +607,61 @@
         }
 
         function renderHoldingReviewResult(result) {
-            const normalizedResult = normalizeHoldingReviewResult(result || {});
-            const data = normalizedResult.data || {};
-            const tabs = normalizeTabs(data.tabs || []);
-            const navHtml = TAB_ORDER.map((tab, index) => `
-                <button class="tab-button ${index === 0 ? 'active' : ''}" data-tab-target="${escapeHtml(tab.id)}" type="button">${escapeHtml(tab.title)}</button>
-            `).join('');
-            const panelsHtml = TAB_ORDER.map((tab, index) => {
-                const item = tabs.find((candidate) => candidate.id === tab.id) || { id: tab.id, title: tab.title, summary: '待确认', evidence: ['待确认'] };
-                const evidenceHtml = (Array.isArray(item.evidence) ? item.evidence : []).map((detail, evidenceIndex) => `
-                    <div class="evidence-item">
-                        <div class="evidence-label">理由 ${evidenceIndex + 1}</div>
-                        <div>${escapeHtml(detail)}</div>
-                    </div>
+            try {
+                const normalizedResult = normalizeHoldingReviewResult(result || {});
+                const data = normalizedResult && typeof normalizedResult === 'object' && normalizedResult.data && typeof normalizedResult.data === 'object'
+                    ? normalizedResult.data
+                    : {};
+                const tabs = normalizeTabs(data.tabs || []);
+                const navHtml = TAB_ORDER.map((tab, index) => `
+                    <button class="tab-button ${index === 0 ? 'active' : ''}" data-tab-target="${escapeHtml(tab.id)}" type="button">${escapeHtml(tab.title)}</button>
                 `).join('');
-                const tabBanner = tab.id === 'next_action' ? `
-                    <div class="decision-banner">
-                        <div class="decision-chip">结论标签：${escapeHtml(mapConclusionTagLabel(data.conclusion_tag || ''))}</div>
-                        <div class="decision-chip">动作摘要：${escapeHtml(data.next_action_summary || '--')}</div>
-                    </div>
-                ` : '';
-                return `
-                    <div class="tab-panel ${index === 0 ? 'active' : ''}" data-tab-panel="${escapeHtml(tab.id)}">
-                        ${tabBanner}
-                        <div class="summary-card">
-                            <h3>${escapeHtml(item.title)}结论</h3>
-                            <p>${escapeHtml(item.summary || '待确认')}</p>
+                const panelsHtml = TAB_ORDER.map((tab, index) => {
+                    const item = tabs.find((candidate) => candidate.id === tab.id) || { id: tab.id, title: tab.title, summary: '待确认', evidence: ['待确认'] };
+                    const evidenceHtml = (Array.isArray(item.evidence) ? item.evidence : []).map((detail, evidenceIndex) => `
+                        <div class="evidence-item">
+                            <div class="evidence-label">理由 ${evidenceIndex + 1}</div>
+                            <div>${escapeHtml(detail)}</div>
                         </div>
-                        <div class="evidence-list">${evidenceHtml || '<div class="evidence-item">待确认</div>'}</div>
+                    `).join('');
+                    const tabBanner = tab.id === 'next_action' ? `
+                        <div class="decision-banner">
+                            <div class="decision-chip">结论标签：${escapeHtml(mapConclusionTagLabel(data.conclusion_tag || ''))}</div>
+                            <div class="decision-chip">动作摘要：${escapeHtml(data.next_action_summary || '--')}</div>
+                        </div>
+                    ` : '';
+                    return `
+                        <div class="tab-panel ${index === 0 ? 'active' : ''}" data-tab-panel="${escapeHtml(tab.id)}">
+                            ${tabBanner}
+                            <div class="summary-card">
+                                <h3>${escapeHtml(item.title)}结论</h3>
+                                <p>${escapeHtml(item.summary || '待确认')}</p>
+                            </div>
+                            <div class="evidence-list">${evidenceHtml || '<div class="evidence-item">待确认</div>'}</div>
+                        </div>
+                    `;
+                }).join('');
+                document.getElementById('resultsContent').innerHTML = `
+                    <div class="decision-banner">
+                        <div class="decision-chip">AI 角色：${escapeHtml((data.meta || {}).role || '交易专家')}</div>
+                        <div class="decision-chip">复盘类型：${escapeHtml(mapReviewTypeLabel(data.review_type || 'general'))}</div>
+                        <div class="decision-chip">结论标签：${escapeHtml(mapConclusionTagLabel(data.conclusion_tag || ''))}</div>
+                        <div class="decision-chip">后续动作：${escapeHtml(data.next_action_summary || '--')}</div>
                     </div>
+                    <div class="tabs-nav">${navHtml}</div>
+                    ${panelsHtml}
+                    <details>
+                        <summary>查看原始 JSON</summary>
+                        <pre id="rawResultJson">${escapeHtml(JSON.stringify(normalizedResult, null, 2))}</pre>
+                    </details>
                 `;
-            }).join('');
-            document.getElementById('resultsContent').innerHTML = `
-                <div class="decision-banner">
-                    <div class="decision-chip">AI 角色：${escapeHtml((data.meta || {}).role || '交易专家')}</div>
-                    <div class="decision-chip">复盘类型：${escapeHtml(mapReviewTypeLabel(data.review_type || 'general'))}</div>
-                    <div class="decision-chip">结论标签：${escapeHtml(mapConclusionTagLabel(data.conclusion_tag || ''))}</div>
-                    <div class="decision-chip">后续动作：${escapeHtml(data.next_action_summary || '--')}</div>
-                </div>
-                <div class="tabs-nav">${navHtml}</div>
-                ${panelsHtml}
-                <details>
-                    <summary>查看原始 JSON</summary>
-                    <pre id="rawResultJson">${escapeHtml(JSON.stringify(normalizedResult, null, 2))}</pre>
-                </details>
-            `;
-            bindTabEvents();
+                bindTabEvents();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error || '持仓复盘结果渲染失败');
+                addLog(`持仓复盘结果渲染失败: ${message}`, 'error');
+                renderResultError(`持仓复盘结果渲染失败：${message}`);
+            }
         }
-
         function normalizeTabs(tabs) {
             const source = Array.isArray(tabs) ? tabs.filter((item) => item && typeof item === 'object') : [];
             return TAB_ORDER.map((expected, index) => {
@@ -623,7 +685,7 @@
                 return result;
             }
             const source = result && typeof result === 'object' ? result : {};
-            const tabs = Array.isArray(source.tabs) ? source.tabs : [];
+            const tabs = buildLegacyHoldingReviewTabs(source);
             const evidence = [];
             tabs.forEach((tab) => {
                 if (!tab || typeof tab !== 'object') {
@@ -656,6 +718,29 @@
                     context_snapshot: source.context_snapshot && typeof source.context_snapshot === 'object' ? source.context_snapshot : {},
                 },
             };
+        }
+
+        function buildLegacyHoldingReviewTabs(source) {
+            const tabs = Array.isArray(source.tabs) ? source.tabs.filter((item) => item && typeof item === 'object') : [];
+            if (tabs.length) {
+                return tabs;
+            }
+            return [
+                { id: 'execution_review', title: '执行与卖出复盘', summary: String(source.execution_summary || '').trim(), evidence: ['待确认'] },
+                { id: 'result_review', title: '结果复盘', summary: String(source.performance_summary || source.risk_summary || '').trim(), evidence: ['待确认'] },
+                { id: 'discipline_review', title: '方法与纪律', summary: String(source.discipline_summary || '').trim(), evidence: ['待确认'] },
+                { id: 'next_action', title: '后续动作', summary: String(source.next_action_summary || '').trim(), evidence: ['待确认'] },
+            ];
+        }
+
+        function renderResultError(message) {
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="empty-state">
+                    <div style="font-size:22px;font-weight:700;color:#b91c1c;">持仓复盘执行失败</div>
+                    <div>${escapeHtml(message || '任务失败')}</div>
+                    <div style="font-size:13px;color:#9ca3af;">请查看分析日志定位问题后重试。</div>
+                </div>
+            `;
         }
 
         function bindTabEvents() {

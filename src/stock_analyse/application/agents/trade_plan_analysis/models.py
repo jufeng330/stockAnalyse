@@ -5,6 +5,28 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def _json_safe(value: Any) -> Any:
+    if hasattr(value, 'to_dict'):
+        try:
+            if hasattr(value, 'head'):
+                return value.head(20).to_dict('records')
+            return value.to_dict()
+        except Exception:
+            pass
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+class _JsonSafeBaseModel(BaseModel):
+    model_config = ConfigDict(extra='allow')
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        return _json_safe(self.model_dump())
+
+
 class TradePlanPositionSuggestion(BaseModel):
     """持仓计划分析中的仓位建议结构。
 
@@ -89,13 +111,11 @@ class TradePlanAnalysisOutput(BaseModel):
     plan_metadata: TradePlanMetadata
 
 
-class TradePlanAnalysisInput(BaseModel):
+class TradePlanAnalysisInput(_JsonSafeBaseModel):
     """持仓计划分析输入。
 
     用于承载模板正文、关注股票、请求参数、缓存命中结果与回退上下文，供单次计划分析调用使用。
     """
-
-    model_config = ConfigDict(extra='allow')
 
     template_markdown: str = ''
     watch_stock: dict[str, Any] = Field(default_factory=dict)
@@ -103,6 +123,3 @@ class TradePlanAnalysisInput(BaseModel):
     cache_context: dict[str, Any] = Field(default_factory=dict)
     fallback_context: dict[str, Any] = Field(default_factory=dict)
     data_source: str = 'fallback_only'
-
-    def to_prompt_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode='json')

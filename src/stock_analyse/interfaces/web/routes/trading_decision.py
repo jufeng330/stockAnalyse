@@ -11,10 +11,10 @@ from uuid import uuid4
 
 from flask import current_app, jsonify, render_template, request
 
-from stock_analyse.application.orchestrators.entry_decision_orchestrator import EntryDecisionOrchestrator
+from stock_analyse.application.orchestrators.entry_decision_orchestrator import FocusEntryDecisionOrchestrator
 from stock_analyse.application.orchestrators.holding_review_orchestrator import HoldingReviewOrchestrator
-from stock_analyse.application.orchestrators.position_decision_orchestrator import PositionDecisionOrchestrator
-from stock_analyse.application.orchestrators.trade_plan_analysis_orchestrator import TradePlanAnalysisOrchestrator
+from stock_analyse.application.orchestrators.position_decision_orchestrator import HoldingPositionDecisionOrchestrator
+from stock_analyse.application.orchestrators.trade_plan_analysis_orchestrator import FocusTradePlanAnalysisOrchestrator
 from stock_analyse.interfaces.web.streaming.streaming_analyzer import StreamingAnalyzer
 from stock_analyse.interfaces.web.services.trading_decision_service import TradingDecisionService
 
@@ -74,16 +74,16 @@ def _build_entry_decision_summary_fields(result: dict, trade_date: str) -> dict:
     }
 
 
-def _build_entry_decision_orchestrator() -> EntryDecisionOrchestrator:
-    return EntryDecisionOrchestrator()
+def _build_entry_decision_orchestrator() -> FocusEntryDecisionOrchestrator:
+    return FocusEntryDecisionOrchestrator()
 
 
-def _build_trade_plan_analysis_orchestrator() -> TradePlanAnalysisOrchestrator:
-    return TradePlanAnalysisOrchestrator()
+def _build_trade_plan_analysis_orchestrator() -> FocusTradePlanAnalysisOrchestrator:
+    return FocusTradePlanAnalysisOrchestrator()
 
 
-def _build_position_decision_orchestrator() -> PositionDecisionOrchestrator:
-    return PositionDecisionOrchestrator()
+def _build_position_decision_orchestrator() -> HoldingPositionDecisionOrchestrator:
+    return HoldingPositionDecisionOrchestrator()
 
 
 def _build_holding_review_orchestrator() -> HoldingReviewOrchestrator:
@@ -122,6 +122,15 @@ def _run_trade_plan_analysis_task(watch_stock_id: str, client_id: str, context, 
                 'send_log': streamer.send_log,
                 'send_progress': streamer.send_progress,
             },
+        )
+        service.save_trade_plan_analysis_record(
+            {
+                'watch_stock_id': watch_stock_id,
+                'trade_date': trade_plan_context.get('trade_date') or '',
+                'plan_type': trade_plan_context.get('plan_type') or '',
+                'risk_preference': trade_plan_context.get('risk_preference') or '',
+                'raw_result': result,
+            }
         )
         service.save_result_markdown_cache('trade_plan', result, watch_stock)
         streamer.send_final_result(result)
@@ -171,6 +180,23 @@ def _run_position_decision_task(holding_stock_id: str, client_id: str, context, 
             )
         except Exception as save_exc:
             logger.exception('自动保存买卖决策历史记录失败: %s', save_exc)
+        try:
+            service.save_result_markdown_cache('position_decision', result, holding_stock)
+        except Exception as cache_exc:
+            logger.exception('保存买卖决策 markdown 缓存失败: %s', cache_exc)
+        data = result.get('data') or {}
+        decision = data.get('decision') or {}
+        decision_preview = {
+            'stock_code': data.get('stock_code', ''),
+            'trade_date': data.get('trade_date', ''),
+            'action': decision.get('action', ''),
+            'status': decision.get('status', ''),
+            'confidence': decision.get('confidence', ''),
+            'conclusion_summary': decision.get('summary', ''),
+            'tabs_count': len(data.get('tabs') or []) if isinstance(data.get('tabs'), list) else 0,
+        }
+        logger.info('买卖决策发送 final_result 前摘要: %s', decision_preview)
+        streamer.send_log(f'AI 应答输出: {decision_preview}', 'info')
         _update_analysis_task_state(context, lock_name, status='completed', completed_at=datetime.now(), error='')
         streamer.send_final_result(result)
         streamer.send_progress('singleProgress', 100, '买卖决策分析完成')
@@ -222,6 +248,21 @@ def _run_holding_review_task(holding_stock_id: str, client_id: str, context, ser
             )
         except Exception as save_exc:
             logger.exception('自动保存持仓复盘历史记录失败: %s', save_exc)
+        try:
+            service.save_result_markdown_cache('holding_review', result, holding_stock)
+        except Exception as cache_exc:
+            logger.exception('保存持仓复盘 markdown 缓存失败: %s', cache_exc)
+        data = result.get('data') or {}
+        review_preview = {
+            'stock_code': data.get('stock_code', ''),
+            'trade_date': data.get('trade_date', ''),
+            'review_type': data.get('review_type', ''),
+            'conclusion_tag': data.get('conclusion_tag', ''),
+            'next_action_summary': data.get('next_action_summary', ''),
+            'tabs_count': len(data.get('tabs') or []) if isinstance(data.get('tabs'), list) else 0,
+        }
+        logger.info('持仓复盘发送 final_result 前摘要: %s', review_preview)
+        streamer.send_log(f'AI 应答输出: {review_preview}', 'info')
         _update_analysis_task_state(context, lock_name, status='completed', completed_at=datetime.now(), error='')
         streamer.send_final_result(result)
         streamer.send_progress('singleProgress', 100, '持仓复盘分析完成')
@@ -774,6 +815,7 @@ def register_trading_decision_routes(app):
         payload['client_id'] = client_id
         try:
             holding_review_context = _service().build_holding_review_context(holding_stock_id, payload)
+            holding_review_context.setdefault('role_instruction', '交易专家')
         except ValueError as exc:
             message = str(exc)
             code = 'not_found' if '不存在' in message else 'bad_request'
@@ -935,7 +977,10 @@ def register_trading_decision_routes(app):
     def create_stock_analysis_record_api():
         payload = request.get_json(silent=True) or {}
         try:
-            created = _service().save_stock_analysis_record(payload)
+            if (payload.get('analysis_scene') or '').strip() == 'holding_reanalysis' or (payload.get('holding_stock_id') or '').strip():
+                created = _service().save_holding_reanalysis_record(payload)
+            else:
+                created = _service().save_focus_stock_analysis_record(payload)
         except ValueError as exc:
             message = str(exc)
             code = 'not_found' if '不存在' in message else 'bad_request'

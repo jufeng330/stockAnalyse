@@ -5,8 +5,8 @@ from typing import Any
 from stock_analyse.application.agents.position_decision import PositionDecisionAgent, PositionDecisionInput, PositionDecisionOutput
 
 
-class PositionDecisionGraph:
-    """买卖决策 graph 封装。
+class HoldingPositionDecisionGraph:
+    """Holding 买卖决策 graph 封装。
 
     用于持仓股票的买卖决策场景，负责把持仓、财务与计划上下文整理成结构化 agent 输入。
     """
@@ -44,5 +44,15 @@ class PositionDecisionGraph:
         )
 
 
+class PositionDecisionGraph(HoldingPositionDecisionGraph):
+    """兼容保留的旧买卖决策 graph 名称。"""
+
+    pass
+
+
+def run_holding_position_decision_graph(**kwargs) -> PositionDecisionOutput:
+    return HoldingPositionDecisionGraph().run(**kwargs)
+
+
 def run_position_decision_graph(**kwargs) -> PositionDecisionOutput:
-    return PositionDecisionGraph().run(**kwargs)
+    return run_holding_position_decision_graph(**kwargs)

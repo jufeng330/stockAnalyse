@@ -17,9 +17,13 @@ def _trading_decision_service() -> TradingDecisionService:
     return getattr(_context(), 'trading_decision_service', None) or TradingDecisionService()
 
 
+def _normalize_stock_ai_scene(value: str | None) -> str:
+    return 'holding_reanalysis' if str(value or '').strip() == 'holding_reanalysis' else 'stock_analysis'
+
+
 def _stock_ai_lock_name(payload: dict) -> str:
     stock_code = payload['stock_code']
-    analysis_scene = payload.get('analysis_scene') or 'stock_analysis'
+    analysis_scene = _normalize_stock_ai_scene(payload.get('analysis_scene'))
     return f'ai_{analysis_scene}_{stock_code}'
 
 
@@ -93,7 +97,7 @@ def _normalize_analyze_stock_ai_payload(data: dict):
         'market': market,
         'watch_stock_id': _require_scalar_string(data.get('watch_stock_id'), 'watch_stock_id') or None,
         'holding_stock_id': _require_scalar_string(data.get('holding_stock_id'), 'holding_stock_id') or None,
-        'analysis_scene': _require_scalar_string(data.get('analysis_scene'), 'analysis_scene') or None,
+        'analysis_scene': _normalize_stock_ai_scene(_require_scalar_string(data.get('analysis_scene'), 'analysis_scene') or None),
         'client_id': client_id,
         'trade_date': trade_date,
         'analysis_depth': analysis_depth,
@@ -134,7 +138,7 @@ def _start_stock_ai_analysis_task(context, payload: dict):
         )
         if cached_result and payload.get('watch_stock_id'):
             try:
-                service.save_stock_analysis_record(
+                service.save_focus_stock_analysis_record(
                     {
                         'watch_stock_id': payload.get('watch_stock_id'),
                         'trade_date': trade_date or datetime.now().strftime('%Y-%m-%d'),
@@ -151,27 +155,53 @@ def _start_stock_ai_analysis_task(context, payload: dict):
         def run_analysis():
             streamer = StreamingAnalyzer(client_id, context.sse_manager)
             try:
-                streamer.send_log(f"🚀 开始AI个股分析: {stock_code}", 'header')
-                streamer.send_progress('singleProgress', 5, '开始AI个股分析...')
+                scene = _normalize_stock_ai_scene(payload.get('analysis_scene'))
+                scene_label = '持仓二次分析' if scene == 'holding_reanalysis' else '普通股票分析'
+                streamer.send_log(f"🚀 开始{scene_label}: {stock_code}", 'header')
+                streamer.send_progress('singleProgress', 5, f'开始{scene_label}...')
                 context.analyzer.streaming = streamer
-                result = context.analyzer.stock_ai_analysis_process(
-                    stock_code,
-                    market,
-                    start_date_str,
-                    end_date_str,
-                    trade_date=trade_date,
-                    analysis_depth=analysis_depth,
-                    watch_stock_id=payload.get('watch_stock_id'),
-                    stock_name=payload.get('stock_name'),
-                    holding_stock_id=payload.get('holding_stock_id'),
-                    analysis_scene=payload.get('analysis_scene'),
-                )
+                if scene == 'holding_reanalysis' and hasattr(context.analyzer, 'holding_reanalysis_process'):
+                    result = context.analyzer.holding_reanalysis_process(
+                        stock_code,
+                        market,
+                        start_date_str,
+                        end_date_str,
+                        trade_date=trade_date,
+                        analysis_depth=analysis_depth,
+                        watch_stock_id=payload.get('watch_stock_id'),
+                        stock_name=payload.get('stock_name'),
+                        holding_stock_id=payload.get('holding_stock_id'),
+                    )
+                elif scene == 'stock_analysis' and hasattr(context.analyzer, 'focus_stock_ai_analysis_process'):
+                    result = context.analyzer.focus_stock_ai_analysis_process(
+                        stock_code,
+                        market,
+                        start_date_str,
+                        end_date_str,
+                        trade_date=trade_date,
+                        analysis_depth=analysis_depth,
+                        watch_stock_id=payload.get('watch_stock_id'),
+                        stock_name=payload.get('stock_name'),
+                    )
+                else:
+                    result = context.analyzer.stock_ai_analysis_process(
+                        stock_code,
+                        market,
+                        start_date_str,
+                        end_date_str,
+                        trade_date=trade_date,
+                        analysis_depth=analysis_depth,
+                        watch_stock_id=payload.get('watch_stock_id'),
+                        stock_name=payload.get('stock_name'),
+                        holding_stock_id=payload.get('holding_stock_id'),
+                        analysis_scene=scene,
+                    )
                 if isinstance(result, dict) and result.get('success'):
                     service.annotate_result_source(result, result_source='live')
-                logger.info(f'AI个股分析完成: {stock_code}')
-                streamer.send_log(f"🚀 AI个股分析完成: {stock_code}", 'header')
-                streamer.send_progress('singleProgress', 100, 'AI个股分析完成...')
-                streamer.send_completion(f'AI个股分析完成: {stock_code}')
+                logger.info(f'{scene_label}完成: {stock_code}')
+                streamer.send_log(f"🚀 {scene_label}完成: {stock_code}", 'header')
+                streamer.send_progress('singleProgress', 100, f'{scene_label}完成...')
+                streamer.send_completion(f'{scene_label}完成: {stock_code}')
             except Exception as exc:
                 streamer.send_log(f"🚀 AI个股分析失败: {stock_code}", 'header')
                 streamer.send_progress('singleProgress', 100, 'AI个股分析失败...')
@@ -490,6 +520,8 @@ def register_analysis_routes(app):
                         message = client_queue.get(timeout=30)
                         try:
                             json_data = json.dumps(message, ensure_ascii=False)
+                            event_name = str(message.get('event') or 'message').strip() or 'message'
+                            yield f'event: {event_name}\n'
                             yield f'data: {json_data}\n\n'
                         except (TypeError, ValueError) as exc:
                             logger.error(f'SSE消息序列化失败: {exc}, 消息类型: {type(message)}')
@@ -498,9 +530,12 @@ def register_analysis_routes(app):
                                 'data': {'error': f'消息序列化失败: {str(exc)}'},
                                 'timestamp': datetime.now().isoformat(),
                             }
-                            yield f"data: {json.dumps(error_message)}\n\n"
+                            yield 'event: error\n'
+                            yield f"data: {json.dumps(error_message, ensure_ascii=False)}\n\n"
                     except Empty:
-                        yield f"data: {json.dumps({'event': 'heartbeat', 'data': {'timestamp': datetime.now().isoformat()}})}\n\n"
+                        heartbeat = {'event': 'heartbeat', 'data': {'timestamp': datetime.now().isoformat()}}
+                        yield 'event: heartbeat\n'
+                        yield f"data: {json.dumps(heartbeat, ensure_ascii=False)}\n\n"
                     except GeneratorExit:
                         break
                     except Exception as exc:

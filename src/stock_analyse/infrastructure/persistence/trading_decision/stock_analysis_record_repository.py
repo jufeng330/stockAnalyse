@@ -20,18 +20,18 @@ class StockAnalysisRecordRepository:
         now = datetime.now().isoformat(timespec='seconds')
         record = {
             'id': payload.get('id') or self._new_id(),
-            'watch_stock_id': (payload.get('watch_stock_id') or '').strip(),
-            'holding_stock_id': (payload.get('holding_stock_id') or '').strip(),
-            'analysis_scene': (payload.get('analysis_scene') or '').strip(),
-            'stock_code': (payload.get('stock_code') or '').strip(),
-            'stock_name': (payload.get('stock_name') or '').strip(),
-            'market': (payload.get('market') or '').strip(),
-            'trade_date': (payload.get('trade_date') or '').strip(),
-            'analysis_mode': (payload.get('analysis_mode') or '').strip(),
-            'stance': (payload.get('stance') or '').strip(),
-            'time_horizon': (payload.get('time_horizon') or '').strip(),
-            'conclusion_summary': (payload.get('conclusion_summary') or '').strip(),
-            'risk_level': (payload.get('risk_level') or '').strip(),
+            'watch_stock_id': self._stringify_text(payload.get('watch_stock_id')),
+            'holding_stock_id': self._stringify_text(payload.get('holding_stock_id')),
+            'analysis_scene': self._stringify_text(payload.get('analysis_scene')),
+            'stock_code': self._stringify_text(payload.get('stock_code')),
+            'stock_name': self._stringify_text(payload.get('stock_name')),
+            'market': self._stringify_text(payload.get('market')),
+            'trade_date': self._stringify_text(payload.get('trade_date')),
+            'analysis_mode': self._stringify_text(payload.get('analysis_mode')),
+            'stance': self._stringify_text(payload.get('stance')),
+            'time_horizon': self._stringify_text(payload.get('time_horizon')),
+            'conclusion_summary': self._stringify_text(payload.get('conclusion_summary')),
+            'risk_level': self._stringify_text(payload.get('risk_level')),
             'scores_json': self._json_dumps(payload.get('scores_json') or {}),
             'signals_json': self._json_dumps(payload.get('signals_json') or []),
             'risks_json': self._json_dumps(payload.get('risks_json') or []),
@@ -127,7 +127,20 @@ class StockAnalysisRecordRepository:
         return f'SAR-{uuid4().hex[:12].upper()}'
 
     def _json_dumps(self, value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False, default=str)
+
+    def _stringify_text(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in ('summary', 'logic', 'stance', 'detail', 'description', 'text', 'time_horizon', 'action'):
+                nested = value.get(key)
+                if isinstance(nested, str) and nested.strip():
+                    return nested.strip()
+            return json.dumps(value, ensure_ascii=False)
+        if value is None:
+            return ''
+        return str(value).strip()
 
     def _json_loads(self, value: Any, *, default: Any) -> Any:
         if value in (None, ''):

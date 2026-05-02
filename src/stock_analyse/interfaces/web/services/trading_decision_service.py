@@ -57,12 +57,18 @@ class TradingDecisionService:
         self.trade_plan_cache_biz_markers = {
             'entry_decision': 'Strategy',
             'stock_analysis': 'analyse',
+            'holding_reanalysis': 'Reanalysis',
             'trade_plan': 'plan',
+            'position_decision': 'Decision',
+            'holding_review': 'Review',
         }
         self.trade_plan_cache_display_labels = {
             'entry_decision': '进场策略',
             'stock_analysis': '股票分析',
+            'holding_reanalysis': '二次分析',
             'trade_plan': '买入计划',
+            'position_decision': '买卖决策',
+            'holding_review': '持仓复盘',
         }
         self.trade_plan_template_name = '持仓计划模板（买前执行版）'
         self.trade_plan_cache_keywords = {
@@ -72,11 +78,11 @@ class TradingDecisionService:
         }
         self.trade_plan_role_instruction = '股票交易专家'
 
-    def build_watch_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    def build_focus_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         raw_filters = filters or {}
         normalized_filters = self.normalize_filters(raw_filters)
         result = self.repository.list(normalized_filters)
-        all_history_items = self._build_watch_records_history_items(result.items)
+        all_history_items = self._build_focus_records_history_items(result.items)
         history_filters = self.build_watch_history_filters(raw_filters)
         filtered_history_items = self._filter_watch_records_history_items(all_history_items, history_filters['history_type'])
         history_items, history_pagination = self._paginate_items(
@@ -108,6 +114,98 @@ class TradingDecisionService:
                 'next': self.build_watch_stocks_history_href(page=history_pagination.get('page', 1) + 1, filters=normalized_filters, history_filters=history_filters),
             },
         }
+
+    def build_watch_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_focus_stocks_page_data(filters)
+
+    def build_focus_stocks_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_focus_stocks_page_data(filters)
+
+    def build_focus_stocks_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_focus_stocks_page_vm(filters)
+
+    def build_focus_history_center_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_history_center_page_data(filters)
+
+    def build_focus_history_center_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_focus_history_center_page_data(filters)
+
+    def build_focus_history_center_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_focus_history_center_page_vm(filters)
+
+    def build_history_center_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._build_focus_history_center_page_data(filters)
+
+    def _build_focus_history_center_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        raw_filters = filters or {}
+        normalized_filters = self.normalize_filters(raw_filters)
+        active_tab = (raw_filters.get('tab') or 'all').strip() or 'all'
+        if active_tab not in {'all', 'entry-decision', 'stock-analysis', 'trade-plan', 'files'}:
+            active_tab = 'all'
+
+        all_filters = {**normalized_filters, 'page': 1, 'page_size': 1000}
+        all_result = self.repository.list(all_filters)
+        filtered_watch_stocks = all_result.items
+        all_history_items = self._build_focus_records_history_items(filtered_watch_stocks)
+        all_entry_records = self._build_history_center_entry_records(filtered_watch_stocks)
+        all_stock_analysis_records = self._build_history_center_focus_stock_analysis_records(filtered_watch_stocks)
+        all_trade_plan_records = self._build_history_center_trade_plan_records(filtered_watch_stocks)
+
+        page = normalized_filters.get('page', 1)
+        page_size = normalized_filters.get('page_size', 20)
+        history_items, history_pagination = self._paginate_items(all_history_items, page=page, page_size=page_size)
+        entry_records, entry_pagination = self._paginate_items(all_entry_records, page=page, page_size=page_size)
+        stock_analysis_records, stock_analysis_pagination = self._paginate_items(all_stock_analysis_records, page=page, page_size=page_size)
+        trade_plan_records, trade_plan_pagination = self._paginate_items(all_trade_plan_records, page=page, page_size=page_size)
+
+        active_pagination = {
+            'all': history_pagination,
+            'entry-decision': entry_pagination,
+            'stock-analysis': stock_analysis_pagination,
+            'trade-plan': trade_plan_pagination,
+            'files': {'page': 1, 'page_size': page_size, 'total': 0, 'total_pages': 1},
+        }.get(active_tab, history_pagination)
+        view_filters = {**normalized_filters, 'tab': active_tab}
+        pagination_links = {
+            'prev': self.build_history_center_page_href(tab=active_tab, page=max(active_pagination.get('page', 1) - 1, 1), filters=view_filters),
+            'next': self.build_history_center_page_href(tab=active_tab, page=active_pagination.get('page', 1) + 1, filters=view_filters),
+        }
+
+        return {
+            'summary_cards': {
+                'watch_count': len(all_history_items),
+                'entry_decision_record_count': len(all_entry_records),
+                'stock_analysis_record_count': len(all_stock_analysis_records),
+                'trade_plan_record_count': len(all_trade_plan_records),
+            },
+            'filters': view_filters,
+            'filter_form': self.build_history_center_filter_form_state(view_filters),
+            'filter_summary': self.build_history_center_filter_summary(view_filters),
+            'filter_reset_href': self.build_history_center_reset_href(),
+            'filter_options': self._build_filter_options(filtered_watch_stocks),
+            'tab_links': {
+                'all': self.build_history_center_page_href(tab='all', page=1, filters=view_filters),
+                'entry-decision': self.build_history_center_page_href(tab='entry-decision', page=1, filters=view_filters),
+                'stock-analysis': self.build_history_center_page_href(tab='stock-analysis', page=1, filters=view_filters),
+                'trade-plan': self.build_history_center_page_href(tab='trade-plan', page=1, filters=view_filters),
+                'files': self.build_history_center_page_href(tab='files', page=1, filters=view_filters),
+            },
+            'active_tab': active_tab,
+            'history_items': history_items,
+            'entry_decision_records': entry_records,
+            'stock_analysis_records': stock_analysis_records,
+            'trade_plan_records': trade_plan_records,
+            'active_pagination': active_pagination,
+            'pagination_links': pagination_links,
+            'legacy_history_url': '/history',
+        }
+
+    def build_history_center_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_focus_history_center_page_vm(filters)
+
+    def build_history_center_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_focus_history_center_page_context(filters)
+
 
     def build_holding_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         raw_filters = filters or {}
@@ -2272,9 +2370,9 @@ class TradingDecisionService:
         all_filters = {**normalized_filters, 'page': 1, 'page_size': 1000}
         all_result = self.repository.list(all_filters)
         filtered_watch_stocks = all_result.items
-        all_history_items = self._build_watch_records_history_items(filtered_watch_stocks)
+        all_history_items = self._build_focus_records_history_items(filtered_watch_stocks)
         all_entry_records = self._build_history_center_entry_records(filtered_watch_stocks)
-        all_stock_analysis_records = self._build_history_center_stock_analysis_records(filtered_watch_stocks)
+        all_stock_analysis_records = self._build_history_center_focus_stock_analysis_records(filtered_watch_stocks)
         all_trade_plan_records = self._build_history_center_trade_plan_records(filtered_watch_stocks)
 
         page = normalized_filters.get('page', 1)
@@ -2380,7 +2478,7 @@ class TradingDecisionService:
                 labels.append(f'{label}：{value}')
         return ' / '.join(labels) if labels else '当前未应用额外筛选条件。'
 
-    def build_watch_record_detail_url(self, record_type: str, watch_stock: dict[str, Any], record: dict[str, Any]) -> str:
+    def build_focus_record_detail_url(self, record_type: str, watch_stock: dict[str, Any], record: dict[str, Any]) -> str:
         watch_stock_id = watch_stock.get('id', '')
         record_id = record.get('id', '')
         if record_type == 'entry_decision':
@@ -2393,7 +2491,11 @@ class TradingDecisionService:
             return f'/trade-plan-analysis?watch_stock_id={watch_stock_id}&record_id={record_id}'
         return f'/watch-stocks?watch_stock_id={watch_stock_id}'
 
-    def _build_watch_records_history_items(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # 兼容旧 watch 页面调用，真实实现已切到 Focus 命名入口。
+    def build_watch_record_detail_url(self, record_type: str, watch_stock: dict[str, Any], record: dict[str, Any]) -> str:
+        return self.build_focus_record_detail_url(record_type, watch_stock, record)
+
+    def _build_focus_records_history_items(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         history_items: list[dict[str, Any]] = []
         for item in watch_stocks:
             watch_stock_id = item.get('id') or ''
@@ -2406,15 +2508,15 @@ class TradingDecisionService:
                 {
                     'watch_stock': item,
                     'entry_decision_records': [
-                        {**record, 'detail_url': self.build_watch_record_detail_url('entry_decision', item, record)}
+                        {**record, 'detail_url': self.build_focus_record_detail_url('entry_decision', item, record)}
                         for record in entry_records
                     ],
                     'stock_analysis_records': [
-                        {**record, 'detail_url': self.build_watch_record_detail_url('stock_analysis', item, record)}
+                        {**record, 'detail_url': self.build_focus_record_detail_url('stock_analysis', item, record)}
                         for record in stock_analysis_records
                     ],
                     'trade_plan_records': [
-                        {**record, 'detail_url': self.build_watch_record_detail_url('trade_plan', item, record)}
+                        {**record, 'detail_url': self.build_focus_record_detail_url('trade_plan', item, record)}
                         for record in trade_plan_records
                     ],
                     'counts': {
@@ -2423,13 +2525,17 @@ class TradingDecisionService:
                         'trade_plan': len(trade_plan_records),
                     },
                     'latest_records': {
-                        'entry_decision': ({**entry_records[0], 'detail_url': self.build_watch_record_detail_url('entry_decision', item, entry_records[0])} if entry_records else None),
-                        'stock_analysis': ({**stock_analysis_records[0], 'detail_url': self.build_watch_record_detail_url('stock_analysis', item, stock_analysis_records[0])} if stock_analysis_records else None),
-                        'trade_plan': ({**trade_plan_records[0], 'detail_url': self.build_watch_record_detail_url('trade_plan', item, trade_plan_records[0])} if trade_plan_records else None),
+                        'entry_decision': ({**entry_records[0], 'detail_url': self.build_focus_record_detail_url('entry_decision', item, entry_records[0])} if entry_records else None),
+                        'stock_analysis': ({**stock_analysis_records[0], 'detail_url': self.build_focus_record_detail_url('stock_analysis', item, stock_analysis_records[0])} if stock_analysis_records else None),
+                        'trade_plan': ({**trade_plan_records[0], 'detail_url': self.build_focus_record_detail_url('trade_plan', item, trade_plan_records[0])} if trade_plan_records else None),
                     },
                 }
             )
         return history_items
+
+    # 兼容旧 watch 历史聚合入口，真实实现已切到 Focus 命名入口。
+    def _build_watch_records_history_items(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return self._build_focus_records_history_items(watch_stocks)
 
     def _build_history_center_entry_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
@@ -2451,7 +2557,7 @@ class TradingDecisionService:
                 )
         return sorted(records, key=lambda current: (current.get('trade_date') or '', current.get('stock_code') or ''), reverse=True)
 
-    def _build_history_center_stock_analysis_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _build_history_center_focus_stock_analysis_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for item in watch_stocks:
             for record in self.list_stock_analysis_records(item.get('id', ''), limit=10):
@@ -2470,10 +2576,14 @@ class TradingDecisionService:
                         'risk_level': record.get('risk_level', ''),
                         'composite_score': scores.get('composite', 0) if isinstance(scores, dict) else 0,
                         'conclusion_summary': record.get('conclusion_summary', ''),
-                        'detail_url': self.build_watch_record_detail_url('stock_analysis', item, record),
+                        'detail_url': self.build_focus_record_detail_url('stock_analysis', item, record),
                     }
                 )
         return sorted(records, key=lambda current: (current.get('trade_date') or '', current.get('stock_code') or ''), reverse=True)
+
+    # 兼容旧 history-center 股票分析入口，真实实现已切到 Focus 命名入口。
+    def _build_history_center_stock_analysis_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return self._build_history_center_focus_stock_analysis_records(watch_stocks)
 
     def _build_history_center_trade_plan_records(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
@@ -2622,7 +2732,7 @@ class TradingDecisionService:
             },
         }
 
-    def build_stock_analysis_record_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+    def build_focus_stock_analysis_record_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
         watch_stock = self.get_watch_stock(watch_stock_id)
         if not watch_stock:
             raise ValueError('关注股票不存在')
@@ -2649,7 +2759,11 @@ class TradingDecisionService:
             'history_items': history_items,
         }
 
-    def build_holding_reanalysis_page_data(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+    # 兼容旧股票分析记录页面入口，真实实现已切到 Focus 命名入口。
+    def build_stock_analysis_record_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        return self.build_focus_stock_analysis_record_page_data(watch_stock_id, record_id)
+
+    def build_focus_holding_reanalysis_page_data(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
         holding_stock = self.get_holding_stock(holding_stock_id)
         if not holding_stock:
             raise ValueError('持仓不存在')
@@ -2679,6 +2793,10 @@ class TradingDecisionService:
             'selected_record': selected_record,
             'history_items': history_items,
         }
+
+    # 兼容旧 holding reanalysis 页面入口，真实实现已切到 Focus/Holding 显式入口。
+    def build_holding_reanalysis_page_data(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        return self.build_focus_holding_reanalysis_page_data(holding_stock_id, record_id)
 
     def build_holding_reanalysis_context(self, holding_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         holding_stock = self.get_holding_stock(holding_stock_id)
@@ -2870,11 +2988,14 @@ class TradingDecisionService:
             'analysis_depth': 'standard',
         }
 
-    def build_holding_reanalysis_page_context(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
-        page_data = self.build_holding_reanalysis_page_data(holding_stock_id, record_id)
+    def build_focus_holding_reanalysis_page_context(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        page_data = self.build_focus_holding_reanalysis_page_data(holding_stock_id, record_id)
         page_data['form_defaults'] = self.build_holding_reanalysis_form_defaults(holding_stock_id)
         page_data['history_items'] = self.build_holding_reanalysis_history_items(holding_stock_id, limit=10)
         return page_data
+
+    def build_holding_reanalysis_page_context(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        return self.build_focus_holding_reanalysis_page_context(holding_stock_id, record_id)
 
     def build_holding_review_page_data(self, holding_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
         holding_stock = self.get_holding_stock(holding_stock_id)
@@ -3347,11 +3468,7 @@ class TradingDecisionService:
         row = self.stock_analysis_record_repository.get_by_id(record_id)
         return self._format_stock_analysis_record(row) if row else None
 
-    def save_stock_analysis_record(self, payload: dict[str, Any]) -> dict[str, Any]:
-        analysis_scene = (payload.get('analysis_scene') or '').strip()
-        if analysis_scene == 'holding_reanalysis' or (payload.get('holding_stock_id') or '').strip():
-            return self.save_holding_reanalysis_record(payload)
-
+    def save_focus_stock_analysis_record(self, payload: dict[str, Any]) -> dict[str, Any]:
         watch_stock_id = (payload.get('watch_stock_id') or '').strip()
         if not watch_stock_id:
             raise ValueError('缺少 watch_stock_id')
@@ -3375,6 +3492,13 @@ class TradingDecisionService:
             },
         )
         return formatted
+
+    # 兼容旧共享保存入口，真实保存逻辑已拆到 Focus/Holding 显式入口。
+    def save_stock_analysis_record(self, payload: dict[str, Any]) -> dict[str, Any]:
+        analysis_scene = (payload.get('analysis_scene') or '').strip()
+        if analysis_scene == 'holding_reanalysis' or (payload.get('holding_stock_id') or '').strip():
+            return self.save_holding_reanalysis_record(payload)
+        return self.save_focus_stock_analysis_record(payload)
 
     def create_entry_decision_session(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         watch_stock = self.get_watch_stock(watch_stock_id)
@@ -3639,8 +3763,12 @@ class TradingDecisionService:
             markdown = self._build_entry_decision_cache_markdown(result)
         elif result_type == 'trade_plan':
             markdown = self._build_trade_plan_cache_markdown(result)
-        elif result_type == 'stock_analysis':
+        elif result_type in ('stock_analysis', 'holding_reanalysis'):
             markdown = self._build_stock_analysis_cache_markdown(result)
+        elif result_type == 'position_decision':
+            markdown = self._build_position_decision_cache_markdown(result)
+        elif result_type == 'holding_review':
+            markdown = self._build_holding_review_cache_markdown(result)
         else:
             return None
         markdown = markdown.strip()
@@ -3881,6 +4009,80 @@ class TradingDecisionService:
     def _build_stock_analysis_cache_markdown(self, result: dict[str, Any]) -> str:
         return self._build_generic_result_cache_markdown('stock_analysis', result)
 
+    def _build_position_decision_cache_markdown(self, result: dict[str, Any]) -> str:
+        data = result.get('data') or {}
+        decision = data.get('decision') or {}
+        tabs = data.get('tabs') or []
+        sections = [
+            '# 买卖决策',
+            '',
+            f'- 标的代码：{data.get("stock_code") or "待确认"}',
+            f'- 标的名称：{data.get("stock_name") or "待确认"}',
+            f'- 市场：{data.get("market") or "待确认"}',
+            f'- 交易日期：{data.get("trade_date") or "待确认"}',
+            '',
+            '## 决策概要',
+            '',
+            f'- 推荐动作：{decision.get("action") or "待确认"}',
+            f'- 置信度：{decision.get("confidence") or "待确认"}',
+            f'- 状态：{decision.get("status") or "待确认"}',
+            f'- 摘要：{decision.get("summary") or "待确认"}',
+        ]
+        if isinstance(tabs, list):
+            for tab in tabs:
+                if not isinstance(tab, dict):
+                    continue
+                tab_id = str(tab.get('id') or tab.get('title') or '未知').strip()
+                tab_summary = str(tab.get('summary') or '待确认').strip()
+                sections.extend(['', f'## {tab_id}', '', tab_summary])
+                evidence = tab.get('evidence') or []
+                if isinstance(evidence, list) and evidence:
+                    sections.append('')
+                    for idx, detail in enumerate(evidence, 1):
+                        text = str(detail).strip()
+                        if text:
+                            sections.append(f'{idx}. {text}')
+        sections.extend(['', '## 原始结果 JSON', '', '```json', json.dumps(result, ensure_ascii=False, indent=2, default=str), '```'])
+        return '\n'.join(sections).strip()
+
+    def _build_holding_review_cache_markdown(self, result: dict[str, Any]) -> str:
+        data = result.get('data') or {}
+        tabs = data.get('tabs') or []
+        sections = [
+            '# 持仓复盘',
+            '',
+            f'- 标的代码：{data.get("stock_code") or "待确认"}',
+            f'- 标的名称：{data.get("stock_name") or "待确认"}',
+            f'- 市场：{data.get("market") or "待确认"}',
+            f'- 交易日期：{data.get("trade_date") or "待确认"}',
+            f'- 复盘类型：{data.get("review_type") or "待确认"}',
+            f'- 结论标签：{data.get("conclusion_tag") or "待确认"}',
+            '',
+            '## 摘要',
+            '',
+            f'- 绩效：{data.get("performance_summary") or "待确认"}',
+            f'- 执行：{data.get("execution_summary") or "待确认"}',
+            f'- 风险：{data.get("risk_summary") or "待确认"}',
+            f'- 纪律：{data.get("discipline_summary") or "待确认"}',
+            f'- 后续动作：{data.get("next_action_summary") or "待确认"}',
+        ]
+        if isinstance(tabs, list):
+            for tab in tabs:
+                if not isinstance(tab, dict):
+                    continue
+                tab_id = str(tab.get('id') or tab.get('title') or '未知').strip()
+                tab_summary = str(tab.get('summary') or '待确认').strip()
+                sections.extend(['', f'## {tab_id}', '', tab_summary])
+                evidence = tab.get('evidence') or []
+                if isinstance(evidence, list) and evidence:
+                    sections.append('')
+                    for idx, detail in enumerate(evidence, 1):
+                        text = str(detail).strip()
+                        if text:
+                            sections.append(f'{idx}. {text}')
+        sections.extend(['', '## 原始结果 JSON', '', '```json', json.dumps(result, ensure_ascii=False, indent=2, default=str), '```'])
+        return '\n'.join(sections).strip()
+
 
     def _build_generic_result_cache_markdown(self, result_type: str, result: dict[str, Any]) -> str:
         data = result.get('data') or {}
@@ -4089,12 +4291,12 @@ class TradingDecisionService:
     def build_stock_analysis_record_payload(self, raw_result: dict[str, Any], watch_stock: dict[str, Any], request_payload: dict[str, Any]) -> dict[str, Any]:
         data = raw_result.get('data') or {}
         decision = data.get('decision') or {}
-        trade_date = (request_payload.get('trade_date') or '').strip() or str(data.get('trade_date') or '').strip() or datetime.now().strftime('%Y-%m-%d')
+        trade_date = (request_payload.get('trade_date') or '').strip() or self._stringify_manual_value(data.get('trade_date')) or datetime.now().strftime('%Y-%m-%d')
         conclusion_summary = (
             (request_payload.get('conclusion_summary') or '').strip()
-            or str(decision.get('summary') or '').strip()
-            or str(data.get('logic') or '').strip()
-            or str(decision.get('logic') or '').strip()
+            or self._stringify_manual_value(decision.get('summary'))
+            or self._stringify_manual_value(data.get('logic'))
+            or self._stringify_manual_value(decision.get('logic'))
         )
         return {
             'watch_stock_id': watch_stock['id'],
@@ -4102,11 +4304,11 @@ class TradingDecisionService:
             'stock_name': watch_stock.get('stock_name', ''),
             'market': watch_stock.get('market', ''),
             'trade_date': trade_date,
-            'analysis_mode': str(data.get('analysis_mode') or 'agentic').strip(),
-            'stance': str(data.get('stance') or decision.get('stance') or '').strip(),
-            'time_horizon': str(data.get('time_horizon') or decision.get('time_horizon') or '').strip(),
+            'analysis_mode': self._stringify_manual_value(data.get('analysis_mode')) or 'agentic',
+            'stance': self._stringify_manual_value(data.get('stance')) or self._stringify_manual_value(decision.get('stance')),
+            'time_horizon': self._stringify_manual_value(data.get('time_horizon')) or self._stringify_manual_value(decision.get('time_horizon')),
             'conclusion_summary': conclusion_summary,
-            'risk_level': str(decision.get('risk_level') or '').strip(),
+            'risk_level': self._stringify_manual_value(decision.get('risk_level')),
             'scores_json': data.get('scores') or {},
             'signals_json': data.get('signals') or [],
             'risks_json': data.get('risks') or [],

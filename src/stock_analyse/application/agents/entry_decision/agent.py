@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from stock_analyse.infrastructure.llm.langchain_client_factory import build_langchain_chat_model
+from stock_analyse.infrastructure.llm.stock_ai_analyzer import StockAiAnalyzer
 
 from .models import EntryDecisionInput, EntryDecisionRoleOutputMap, EntryDecisionSummaryInput
 from .prompts import (
@@ -29,29 +29,21 @@ class EntryDecisionAgent:
         api_code: str | None = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
-        llm = build_langchain_chat_model(
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            api_code=api_code,
-        )
         prompt = build_entry_decision_role_user_prompt(data)
-        instruction = ENTRY_DECISION_ROLE_CONFIG[data.target_role]['instruction']
-        structured_llm = llm.with_structured_output(EntryDecisionRoleOutputMap)
-        try:
-            result = structured_llm.invoke([
-                {'role': 'system', 'content': system_prompt or instruction},
-                {'role': 'user', 'content': prompt},
-            ])
-            if isinstance(result, EntryDecisionRoleOutputMap):
-                return result.model_dump(mode='json')
-            return EntryDecisionRoleOutputMap.model_validate(result).model_dump(mode='json')
-        except Exception:
-            fallback = llm.invoke([
-                {'role': 'system', 'content': system_prompt or instruction},
-                {'role': 'user', 'content': prompt},
-            ])
-            content = getattr(fallback, 'content', fallback)
-            return self._parse_role_output(content)
+        instruction = system_prompt or ENTRY_DECISION_ROLE_CONFIG[data.target_role]['instruction']
+        analyzer = StockAiAnalyzer(
+            system_prompt=instruction,
+            prompt_template='{content}',
+            ai_platform=llm_provider,
+            model=llm_model,
+            api_token=api_code,
+        )
+        response = analyzer.openai_api_call(
+            symbol=data.watch_stock.get('stock_code', ''),
+            message=prompt,
+            instruction=instruction,
+        )
+        return self._parse_role_output(response)
 
     def build_summary_markdown(
         self,
@@ -62,19 +54,25 @@ class EntryDecisionAgent:
         api_code: str | None = None,
         system_prompt: str | None = None,
     ) -> str:
-        llm = build_langchain_chat_model(
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            api_code=api_code,
+        instruction = system_prompt or ENTRY_DECISION_SUMMARY_SYSTEM_PROMPT
+        analyzer = StockAiAnalyzer(
+            system_prompt=instruction,
+            prompt_template='{content}',
+            ai_platform=llm_provider,
+            model=llm_model,
+            api_token=api_code,
         )
         prompt = build_entry_decision_summary_user_prompt(data)
-        response = llm.invoke([
-            {'role': 'system', 'content': system_prompt or ENTRY_DECISION_SUMMARY_SYSTEM_PROMPT},
-            {'role': 'user', 'content': prompt},
-        ])
-        return self._normalize_markdown_response(getattr(response, 'content', response), data.template_markdown)
+        response = analyzer.openai_api_call(
+            symbol=data.watch_stock.get('stock_code', ''),
+            message=prompt,
+            instruction=instruction,
+        )
+        return self._normalize_markdown_response(response, data.template_markdown)
 
     def _parse_role_output(self, raw_content: Any) -> dict[str, Any]:
+        if isinstance(raw_content, dict):
+            return EntryDecisionRoleOutputMap.model_validate(raw_content).model_dump(mode='json')
         text = str(raw_content or '').strip()
         if text.startswith('```'):
             text = text.strip('`').strip()

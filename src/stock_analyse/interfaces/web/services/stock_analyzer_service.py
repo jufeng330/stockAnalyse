@@ -7,30 +7,24 @@ import os
 import logging
 import warnings
 import pandas as pd
-import numpy as np
 import json
-import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Callable
-import time
-import re
 from concurrent.futures import ThreadPoolExecutor
 import matplotlib.pyplot as plt
 
 from stock_analyse.infrastructure.llm.stock_ai_analyzer import StockAiAnalyzer
 from stock_analyse.application.orchestrators.stock_analysis_orchestrator import StockAnalysisOrchestrator
 from stock_analyse.application.use_cases import analyze_single_stock as analyze_single_stock_use_case
-from stock_analyse.application.use_cases import analyze_single_stock_ai as analyze_single_stock_ai_use_case
+from stock_analyse.application.use_cases import analyze_focus_stock_ai as analyze_focus_stock_ai_use_case
+from stock_analyse.application.use_cases import analyze_holding_reanalysis_ai as analyze_holding_reanalysis_ai_use_case
 from stock_analyse.application.use_cases import find_history_stock_analysis as find_history_stock_analysis_use_case
 from stock_analyse.application.use_cases import find_history_strategy_analysis as find_history_strategy_analysis_use_case
 from stock_analyse.application.use_cases import query_analysis_history as query_analysis_history_use_case
 from stock_analyse.application.use_cases import query_select_history as query_select_history_use_case
 from stock_analyse.application.use_cases import run_stock_selection as run_stock_selection_use_case
 from stock_analyse.infrastructure.config.settings import get_settings, DEFAULT_PROMPT_TEMPLATE, DEFAULT_SYSTEM_PROMPT
-from stock_analyse.interfaces.web.streaming.streaming_analyzer import StreamingAnalyzer
 from stock_analyse.interfaces.web.services.trading_decision_service import TradingDecisionService
-from stock_analyse.infrastructure.services.market_data_service import stockBorderInfo
-from stock_analyse.infrastructure.services.company_data_service import stockCompanyInfo
 from stock_analyse.application.services.quantitative_analysis_service import stockIndicatorQuantitative
 from stock_analyse.domain.services.sentiment_analysis import StockSentimentAnalysis
 
@@ -112,16 +106,16 @@ class StockAnalyzerService:
             'max_tokens': ai_config.get('max_tokens', 4000),
             'temperature': ai_config.get('temperature', 0.7),
             'model_preference': ai_config.get('model_preference', 'openai'),
-            'model_plat': ai_config.get("model_plat", "qwen"),
-            'model_name': ai_config.get("model_name", "qwen-turbo-2025-07-15"),
-            'api_key': ai_config.get("api_key", ""),
+            'model_plat': ai_config.get('model_plat', 'qwen'),
+            'model_name': ai_config.get('model_name', 'qwen-turbo-2025-07-15'),
+            'api_key': ai_config.get('api_key', ''),
             'api_base_urls': ai_config.get('api_base_urls', {}),
         }
-        self.message_format = ai_config.get("prompt_template", DEFAULT_PROMPT_TEMPLATE)
-        self.system_prompt = ai_config.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
-        self.ai_platform = self.ai_config.get("model_plat", "qwen")
-        self.ai_model = self.ai_config.get("model_name", "qwen-turbo-2025-07-15")
-        self.api_code = self.ai_config.get("api_key", "")
+        self.message_format = ai_config.get('prompt_template', DEFAULT_PROMPT_TEMPLATE)
+        self.system_prompt = ai_config.get('system_prompt', DEFAULT_SYSTEM_PROMPT)
+        self.ai_platform = self.ai_config.get('model_plat', 'qwen')
+        self.ai_model = self.ai_config.get('model_name', 'qwen-turbo-2025-07-15')
+        self.api_code = self.ai_config.get('api_key', '')
         self.api_keys = self.config.get('api_keys', {})
         self.ai_base_urls = self.ai_config.get('api_base_urls', {})
 
@@ -142,12 +136,15 @@ class StockAnalyzerService:
         }
         self.config['api_keys'] = self.api_keys
 
-        self.logger.info(f"✅ 成功加载配置文件: {self.config_file}")
-        self.logger.info("📝 当前配置已通过统一 settings 解析")
+        self.logger.info(f'✅ 成功加载配置文件: {self.config_file}')
+        self.logger.info('📝 当前配置已通过统一 settings 解析')
 
-        self.stock_strategies = ['均线策略', '布林带策略', '动量MACD策略', '突破策略', 'SAR策略', '均值回归策略', 'RSI策略', 'KDJ策略', '威廉指标策略', 'ADX策略', '线性回归策略', 'K线形态策略', '神经网络多层感知回归策略']
+        self.stock_strategies = [
+            '均线策略', '布林带策略', '动量MACD策略', '突破策略', 'SAR策略', '均值回归策略',
+            'RSI策略', 'KDJ策略', '威廉指标策略', 'ADX策略', '线性回归策略', 'K线形态策略', '神经网络多层感知回归策略'
+        ]
 
-        self.logger.info("Web版股票分析器初始化完成（支持AI流式输出）")
+        self.logger.info('Web版股票分析器初始化完成（支持AI流式输出）')
         self.streaming = None
         self._log_config_status()
         self.stock_analysis_orchestrator = StockAnalysisOrchestrator()
@@ -164,15 +161,15 @@ class StockAnalyzerService:
         return self.settings.as_service_config()
 
     def _save_config(self, config):
-        self.logger.info("跳过自动写入配置文件，使用统一 settings 配置")
+        self.logger.info('跳过自动写入配置文件，使用统一 settings 配置')
         return None
 
     def _log_config_status(self):
-        self.logger.info("=== Web版系统配置状态（支持AI流式输出）===")
+        self.logger.info('=== Web版系统配置状态（支持AI流式输出）===')
         masked_api_key = self.settings.mask_secret(self.api_code)
         resolved_base_url = self.ai_base_urls.get(self.ai_platform) or self.ai_base_urls.get('openai', '')
         self.logger.info(
-            f"🤖 AI配置: platform={self.ai_platform}, model={self.ai_model}, max_tokens={self.ai_config.get('max_tokens')}, temperature={self.ai_config.get('temperature')}, base_url={resolved_base_url or 'default'}, api_key={masked_api_key or 'empty'}"
+            f'🤖 AI配置: platform={self.ai_platform}, model={self.ai_model}, max_tokens={self.ai_config.get("max_tokens")}, temperature={self.ai_config.get("temperature")}, base_url={resolved_base_url or "default"}, api_key={masked_api_key or "empty"}'
         )
         available_apis = []
         for api_name, api_key in self.api_keys.items():
@@ -180,44 +177,44 @@ class StockAnalyzerService:
                 available_apis.append(api_name)
 
         if available_apis:
-            self.logger.info(f"🤖 可用AI API: {', '.join(available_apis)}")
+            self.logger.info(f'🤖 可用AI API: {", ".join(available_apis)}')
             primary = self.config.get('ai', {}).get('model_preference', 'openai')
-            self.logger.info(f"🎯 主要API: {primary}")
-            self.logger.info(f"🌊 AI流式输出: 支持")
+            self.logger.info(f'🎯 主要API: {primary}')
+            self.logger.info('🌊 AI流式输出: 支持')
             api_base = self.config.get('ai', {}).get('api_base_urls', {}).get('openai')
             if api_base and api_base != 'https://api.openai.com/v1':
-                self.logger.info(f"🔗 自定义API地址: {api_base}")
+                self.logger.info(f'🔗 自定义API地址: {api_base}')
         else:
-            self.logger.warning("⚠️ 未配置任何AI API密钥")
+            self.logger.warning('⚠️ 未配置任何AI API密钥')
 
         web_auth = self.config.get('web_auth', {})
         if web_auth.get('enabled', False):
-            self.logger.info(f"🔐 Web鉴权: 已启用")
+            self.logger.info('🔐 Web鉴权: 已启用')
         else:
-            self.logger.info(f"🔓 Web鉴权: 未启用")
+            self.logger.info('🔓 Web鉴权: 未启用')
 
-        self.logger.info("=" * 40)
+        self.logger.info('=' * 40)
         if self.streaming is not None:
-            self.streaming.send_log("🚀 系统已启动", 'header')
+            self.streaming.send_log('🚀 系统已启动', 'header')
 
     def stock_select_process(self, strategy_code, market):
         try:
             strategy_type = int(strategy_code)
-            self.logger.info(f"开始全盘扫描股票{market}_{strategy_type}……")
-            self.streaming.send_log(f"\n开始全盘扫描股票{market}_{strategy_type}……")
+            self.logger.info(f'开始全盘扫描股票{market}_{strategy_type}……')
+            self.streaming.send_log(f'\n开始全盘扫描股票{market}_{strategy_type}……')
             json_result = run_stock_selection_use_case.execute(market=market, strategy_code=strategy_code)
-            self.streaming.send_log(f"\n全盘扫描股票{market}_{strategy_type}完成……")
-            self.streaming.send_progress('singleProgress', 95, "全盘扫描股票...")
+            self.streaming.send_log(f'\n全盘扫描股票{market}_{strategy_type}完成……')
+            self.streaming.send_progress('singleProgress', 95, '全盘扫描股票...')
             if json_result.get('high_score_text') == '未找到得分大于等于85分的股票。':
-                self.streaming.send_log("\n未找到得分大于等于85分的股票。")
-            self.logger.info(f"\n分析完成！结果已保存至 scanner 文件夹中：")
-            self.logger.info("1. 按价格区间保存的详细分析文件（price_XX_YY.txt）")
-            self.logger.info("2. 汇总报告（summary.txt）")
-            self.logger.info("\n" + "=" * 80)
+                self.streaming.send_log('\n未找到得分大于等于85分的股票。')
+            self.logger.info(f'\n分析完成！结果已保存至 scanner 文件夹中：')
+            self.logger.info('1. 按价格区间保存的详细分析文件（price_XX_YY.txt）')
+            self.logger.info('2. 汇总报告（summary.txt）')
+            self.logger.info('\n' + '=' * 80)
             self.streaming.send_select_result(json_result)
             return json_result
         except Exception as e:
-            self.logger.error("错误日志已保存至 scanner/error_log.txt")
+            self.logger.error('错误日志已保存至 scanner/error_log.txt')
             json_result = {
                 'success': False,
                 'data': f'{str(e)}',
@@ -227,23 +224,15 @@ class StockAnalyzerService:
             return json_result
 
     def stock_analysis_process_test(self, stock_code, market, start_date_str, end_date_str):
-        selected_strategies = self.stock_strategies
-        system_prompt = self.system_prompt
-        message_format = self.message_format
-        ai_platform = self.ai_platform
-        ai_model = self.ai_model
-        api_code = self.api_code
-
         try:
-            self.streaming.send_log(f"🚀 开始技术指标分析: {stock_code}", 'header')
+            self.streaming.send_log(f'🚀 开始技术指标分析: {stock_code}', 'header')
             score, df_summary_data = self.get_stock_technical_analysis(stock_code, market)
             if isinstance(df_summary_data, dict):
                 df_summary_data = pd.DataFrame.from_dict(df_summary_data, orient='index')
 
             tec_data_markdown = df_summary_data.to_markdown(index=True)
-
-            self.streaming.send_log(f"🚀 完成技术指标分析: {stock_code}", 'header')
-            self.streaming.send_progress('singleProgress', 20, "完成技术指标分析...")
+            self.streaming.send_log(f'🚀 完成技术指标分析: {stock_code}', 'header')
+            self.streaming.send_progress('singleProgress', 20, '完成技术指标分析...')
 
             image_paths, strategies_selected, stock_summary, stock_analysis_result, annual_report_analysis, sentiment_analysis, sentiment_score = '', '', '', '', '#old', '#old-2', 0
             self.streaming.send_scores({
@@ -266,23 +255,16 @@ class StockAnalyzerService:
             self.streaming.send_final_result(json_result)
             return json_result
         except Exception as e:
-            self.logger.error(f"分析股票 {stock_code} 时出错: {e}")
+            self.logger.error(f'分析股票 {stock_code} 时出错: {e}')
             json_result = {
-                "success": False,
-                "error": f"{str(e)}",
-                "message": "服务器内部错误"
+                'success': False,
+                'error': f'{str(e)}',
+                'message': '服务器内部错误'
             }
             self.streaming.send_error(str(e))
             return json_result
 
     def stock_analysis_process(self, stock_code, market, start_date_str, end_date_str):
-        selected_strategies = self.stock_strategies
-        system_prompt = self.system_prompt
-        message_format = self.message_format
-        ai_platform = self.ai_platform
-        ai_model = self.ai_model
-        api_code = self.api_code
-
         callbacks = {}
         if self.streaming is not None:
             callbacks = {
@@ -295,12 +277,12 @@ class StockAnalyzerService:
             market=market,
             start_date_str=start_date_str,
             end_date_str=end_date_str,
-            selected_strategies=selected_strategies,
-            system_prompt=system_prompt,
-            message_format=message_format,
-            ai_platform=ai_platform,
-            ai_model=ai_model,
-            api_code=api_code,
+            selected_strategies=self.stock_strategies,
+            system_prompt=self.system_prompt,
+            message_format=self.message_format,
+            ai_platform=self.ai_platform,
+            ai_model=self.ai_model,
+            api_code=self.api_code,
             callbacks=callbacks,
         )
 
@@ -314,9 +296,63 @@ class StockAnalyzerService:
             self.streaming.send_final_result(json_result)
             return json_result
 
-        self.logger.error(f"分析股票 {stock_code} 时出错: {json_result.get('error')}")
+        self.logger.error(f'分析股票 {stock_code} 时出错: {json_result.get("error")}')
         self.streaming.send_error(json_result.get('error'))
         return json_result
+
+    def _run_focus_stock_ai_analysis(
+        self,
+        *,
+        stock_code,
+        market,
+        start_date_str,
+        end_date_str,
+        trade_date=None,
+        analysis_depth='standard',
+        callbacks=None,
+    ):
+        return analyze_focus_stock_ai_use_case.execute(
+            stock_code=stock_code,
+            market=market,
+            trade_date=trade_date,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
+            analysis_depth=analysis_depth,
+            include_technical=True,
+            include_sentiment=True,
+            llm_provider=self.ai_platform,
+            llm_model=self.ai_model,
+            api_code=self.api_code,
+            system_prompt=self.system_prompt,
+            callbacks=callbacks,
+        )
+
+    def _run_holding_reanalysis(
+        self,
+        *,
+        stock_code,
+        market,
+        start_date_str,
+        end_date_str,
+        trade_date=None,
+        analysis_depth='standard',
+        callbacks=None,
+    ):
+        return analyze_holding_reanalysis_ai_use_case.execute(
+            stock_code=stock_code,
+            market=market,
+            trade_date=trade_date,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
+            analysis_depth=analysis_depth,
+            include_technical=True,
+            include_sentiment=True,
+            llm_provider=self.ai_platform,
+            llm_model=self.ai_model,
+            api_code=self.api_code,
+            system_prompt=self.system_prompt,
+            callbacks=callbacks,
+        )
 
     def stock_ai_analysis_process(
         self,
@@ -344,25 +380,30 @@ class StockAnalyzerService:
             }
 
         self.logger.info(
-            f"开始AI个股分析: stock={stock_code}, market={market}, provider={self.ai_platform}, model={self.ai_model}, max_tokens={self.ai_config.get('max_tokens')}, temperature={self.ai_config.get('temperature')}, base_url={self.ai_base_urls.get(self.ai_platform) or self.ai_base_urls.get('openai', 'default')}"
+            f'开始AI个股分析: stock={stock_code}, market={market}, provider={self.ai_platform}, model={self.ai_model}, max_tokens={self.ai_config.get("max_tokens")}, temperature={self.ai_config.get("temperature")}, base_url={self.ai_base_urls.get(self.ai_platform) or self.ai_base_urls.get("openai", "default")}'
         )
 
-        json_result = analyze_single_stock_ai_use_case.execute(
-            stock_code=stock_code,
-            market=market,
-            trade_date=trade_date,
-            start_date_str=start_date_str,
-            end_date_str=end_date_str,
-            analysis_depth=analysis_depth,
-            include_technical=True,
-            include_sentiment=True,
-            llm_provider=self.ai_platform,
-            llm_model=self.ai_model,
-            api_code=self.api_code,
-            system_prompt=self.system_prompt,
-            callbacks=callbacks,
-            analysis_scene=analysis_scene,
-        )
+        normalized_scene = 'holding_reanalysis' if str(analysis_scene or '').strip() == 'holding_reanalysis' else 'stock_analysis'
+        if normalized_scene == 'holding_reanalysis':
+            json_result = self._run_holding_reanalysis(
+                stock_code=stock_code,
+                market=market,
+                start_date_str=start_date_str,
+                end_date_str=end_date_str,
+                trade_date=trade_date,
+                analysis_depth=analysis_depth,
+                callbacks=callbacks,
+            )
+        else:
+            json_result = self._run_focus_stock_ai_analysis(
+                stock_code=stock_code,
+                market=market,
+                start_date_str=start_date_str,
+                end_date_str=end_date_str,
+                trade_date=trade_date,
+                analysis_depth=analysis_depth,
+                callbacks=callbacks,
+            )
 
         if json_result.get('success'):
             scores = json_result.get('data', {}).get('scores', {})
@@ -375,11 +416,10 @@ class StockAnalyzerService:
                     'stock_name': str(stock_name or (json_result.get('data', {}) or {}).get('stock_name') or '').strip(),
                     'market': (json_result.get('data', {}) or {}).get('market') or market,
                 }
-            cache_scene = 'holding_reanalysis' if str(analysis_scene or '').strip() == 'holding_reanalysis' else 'stock_analysis'
-            trading_decision_service.save_result_markdown_cache(cache_scene, json_result, watch_stock_context)
+            trading_decision_service.save_result_markdown_cache(normalized_scene, json_result, watch_stock_context)
             try:
-                if str(analysis_scene or '').strip() == 'holding_reanalysis' or str(holding_stock_id or '').strip():
-                    trading_decision_service.save_stock_analysis_record(
+                if normalized_scene == 'holding_reanalysis' or str(holding_stock_id or '').strip():
+                    trading_decision_service.save_holding_reanalysis_record(
                         {
                             'holding_stock_id': str(holding_stock_id or '').strip(),
                             'analysis_scene': 'holding_reanalysis',
@@ -388,15 +428,17 @@ class StockAnalyzerService:
                         }
                     )
                 elif watch_stock_id:
-                    trading_decision_service.save_stock_analysis_record(
+                    trading_decision_service.save_focus_stock_analysis_record(
                         {
                             'watch_stock_id': str(watch_stock_id).strip(),
                             'trade_date': trade_date or '',
                             'raw_result': json_result,
                         }
                     )
+                else:
+                    pass
             except Exception as exc:
-                self.logger.error(f"保存股票分析历史记录失败: {exc}")
+                self.logger.error(f'保存股票分析历史记录失败: {exc}')
             if self.streaming is not None:
                 self.streaming.send_scores({
                     'technical': scores.get('technical', 0),
@@ -407,10 +449,60 @@ class StockAnalyzerService:
                 self.streaming.send_final_result(json_result)
             return json_result
 
-        self.logger.error(f"AI个股分析 {stock_code} 出错: {json_result.get('error')}")
+        error_payload = json_result.get('error')
+        error_text = error_payload if isinstance(error_payload, str) else json.dumps(error_payload, ensure_ascii=False, default=str)
+        self.logger.error(f'AI个股分析 {stock_code} 出错: {error_text}')
         if self.streaming is not None:
-            self.streaming.send_error(json_result.get('error'))
+            self.streaming.send_error(error_text)
         return json_result
+
+    def focus_stock_ai_analysis_process(
+        self,
+        stock_code,
+        market,
+        start_date_str,
+        end_date_str,
+        trade_date=None,
+        analysis_depth='standard',
+        watch_stock_id=None,
+        stock_name=None,
+    ):
+        return self.stock_ai_analysis_process(
+            stock_code=stock_code,
+            market=market,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
+            trade_date=trade_date,
+            analysis_depth=analysis_depth,
+            watch_stock_id=watch_stock_id,
+            stock_name=stock_name,
+            analysis_scene='stock_analysis',
+        )
+
+    def holding_reanalysis_process(
+        self,
+        stock_code,
+        market,
+        start_date_str,
+        end_date_str,
+        trade_date=None,
+        analysis_depth='standard',
+        watch_stock_id=None,
+        stock_name=None,
+        holding_stock_id=None,
+    ):
+        return self.stock_ai_analysis_process(
+            stock_code=stock_code,
+            market=market,
+            start_date_str=start_date_str,
+            end_date_str=end_date_str,
+            trade_date=trade_date,
+            analysis_depth=analysis_depth,
+            watch_stock_id=watch_stock_id,
+            stock_name=stock_name,
+            holding_stock_id=holding_stock_id,
+            analysis_scene='holding_reanalysis',
+        )
 
     def get_stock_analysis(self, stock_code, market, start_date_str, end_date_str,
                            selected_strategies, system_prompt, message_format,
@@ -451,20 +543,19 @@ class StockAnalyzerService:
             start_date_str = start_date.strftime('%Y%m%d')
             end_date_str = end_date.strftime('%Y%m%d')
         except ValueError:
-            raise ValueError("日期格式不正确，请使用 YYYY-MM-DD 格式。")
+            raise ValueError('日期格式不正确，请使用 YYYY-MM-DD 格式。')
 
         if self.streaming is not None:
-            self.streaming.send_log(f"🚀 开始技术指标图形绘制: {stock_code}", 'header')
-            self.streaming.send_progress('singleProgress', 10, "开始技术指标图形绘制...")
+            self.streaming.send_log(f'🚀 开始技术指标图形绘制: {stock_code}', 'header')
+            self.streaming.send_progress('singleProgress', 10, '开始技术指标图形绘制...')
         sq = stockIndicatorQuantitative()
         stock_data = sq.stock_day_data_code(stock_code, market, start_date_str, end_date_str)
 
         if self.streaming is not None:
-            self.streaming.send_log(f"🚀 股票历史成交数据获取完成 : {stock_code}", 'header')
-            self.streaming.send_progress('singleProgress', 20, "股票历史成交数据获取完成...")
+            self.streaming.send_log(f'🚀 股票历史成交数据获取完成 : {stock_code}', 'header')
+            self.streaming.send_progress('singleProgress', 20, '股票历史成交数据获取完成...')
 
         if stock_data is None or stock_data.empty:
-            print("stock_data is null")
             raise ValueError('stock_data is null。', 'error')
 
         strategy_functions = {
@@ -485,7 +576,6 @@ class StockAnalyzerService:
 
         image_paths = []
         strategies_selected = []
-
         for strategy in selected_strategies:
             if strategy in strategy_functions:
                 plt.clf()
@@ -496,32 +586,42 @@ class StockAnalyzerService:
                 strategies_selected.append(strategy)
 
         if self.streaming is not None:
-            self.streaming.send_log(f"🚀 技术指标图形绘制完成 : {stock_code}", 'header')
-            self.streaming.send_progress('singleProgress', 30, "技术指标图形绘制完成...")
+            self.streaming.send_log(f'🚀 技术指标图形绘制完成 : {stock_code}', 'header')
+            self.streaming.send_progress('singleProgress', 30, '技术指标图形绘制完成...')
 
         sentiment_analysis = StockSentimentAnalysis()
         sentiment_score, sentiment_analysis = sentiment_analysis.get_sentiment_analysis()
         sentiment_analysis = f'Score:{sentiment_score}\n {sentiment_analysis}'
 
         if self.streaming is not None:
-            self.streaming.send_log(f"🚀 股票情绪据获取完成 : {stock_code}", 'header')
-            self.streaming.send_progress('singleProgress', 20, "股票情绪据获取完成...")
-        stock_analysis = StockAiAnalyzer(system_prompt=system_prompt,
-                                         prompt_template=message_format, ai_platform=ai_platform,
-                                         model=ai_model, api_token=api_code)
-
-        stock_report_analysis = StockAiAnalyzer(system_prompt=system_prompt,
-                                                prompt_template=message_format, ai_platform=ai_platform,
-                                                model=ai_model, api_token=api_code)
+            self.streaming.send_log(f'🚀 股票情绪据获取完成 : {stock_code}', 'header')
+            self.streaming.send_progress('singleProgress', 20, '股票情绪据获取完成...')
+        stock_analysis = StockAiAnalyzer(
+            system_prompt=system_prompt,
+            prompt_template=message_format,
+            ai_platform=ai_platform,
+            model=ai_model,
+            api_token=api_code,
+        )
+        stock_report_analysis = StockAiAnalyzer(
+            system_prompt=system_prompt,
+            prompt_template=message_format,
+            ai_platform=ai_platform,
+            model=ai_model,
+            api_token=api_code,
+        )
 
         if self.streaming is not None:
-            self.streaming.send_log(f"🚀 股票AI分析开始 : {stock_code}", 'header')
+            self.streaming.send_log(f'🚀 股票AI分析开始 : {stock_code}', 'header')
         with ThreadPoolExecutor(max_workers=3) as executor:
-            future_analysis = executor.submit(stock_analysis.stock_indicator_analyse, market=market, symbol=stock_code,
-                                              start_date=start_date_str, end_date=end_date_str)
-
-            future_report = executor.submit(stock_report_analysis.stock_report_analyse, market=market,
-                                            symbol=stock_code)
+            future_analysis = executor.submit(
+                stock_analysis.stock_indicator_analyse,
+                market=market,
+                symbol=stock_code,
+                start_date=start_date_str,
+                end_date=end_date_str,
+            )
+            future_report = executor.submit(stock_report_analysis.stock_report_analyse, market=market, symbol=stock_code)
             future_summary = executor.submit(stock_analysis.get_stock_summary, market=market, symbol=stock_code)
 
             stock_analysis_result = future_analysis.result()
@@ -529,8 +629,8 @@ class StockAnalyzerService:
             stock_summary = future_summary.result()
 
             if self.streaming is not None:
-                self.streaming.send_log(f"🚀 股票AI分析完成 : {stock_code}", 'header')
-                self.streaming.send_progress('singleProgress', 80, "股票AI分析完成...")
+                self.streaming.send_log(f'🚀 股票AI分析完成 : {stock_code}', 'header')
+                self.streaming.send_progress('singleProgress', 80, '股票AI分析完成...')
 
         return image_paths, strategies_selected, stock_summary, stock_analysis_result, annual_report_analysis, sentiment_analysis, sentiment_score
 

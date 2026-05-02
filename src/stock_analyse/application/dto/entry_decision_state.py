@@ -61,6 +61,18 @@ class EntryDecisionState:
         )
         self.meta['updated_at'] = datetime.now().isoformat()
 
+    @property
+    def completed_roles(self) -> list[str]:
+        return self.meta.setdefault('completed_roles', [])
+
+    @property
+    def timeline(self) -> list[dict[str, Any]]:
+        return self.meta.setdefault('timeline', [])
+
+    @property
+    def errors(self) -> list[dict[str, Any]]:
+        return self.meta.setdefault('errors', [])
+
     def to_dict(self) -> dict[str, Any]:
         return {
             'session_id': self.session_id,

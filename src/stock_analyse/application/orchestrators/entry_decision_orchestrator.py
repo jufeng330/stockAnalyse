@@ -59,8 +59,8 @@ ROLE_CONFIG = {
 }
 
 
-class EntryDecisionOrchestrator:
-    """进场决策多角色编排器。
+class FocusEntryDecisionOrchestrator:
+    """Focus 进场决策多角色编排器。
 
     负责组织宏观、资产分类、价值阶段、价格区间、买卖计划和风险控制等角色串行产出结果。
     """
@@ -212,13 +212,43 @@ class EntryDecisionOrchestrator:
                 'market': market,
                 'industry': watch_stock.get('industry', ''),
                 'asset_type': watch_stock.get('asset_type', ''),
-                'current_price': watch_stock.get('current_price'),
-                'pe': watch_stock.get('pe'),
-                'note': watch_stock.get('note', ''),
+                'source': watch_stock.get('source', ''),
+                'notes': watch_stock.get('notes', ''),
             },
-            'derived_inputs': derived_inputs,
             'snapshot': snapshot,
+            'derived_inputs': derived_inputs,
         }
+
+    def _build_derived_inputs(self, watch_stock: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
+        return {
+            'position_input': {
+                'current_position': watch_stock.get('current_position', ''),
+                'max_target_position': watch_stock.get('target_position', ''),
+            },
+            'valuation_context': snapshot.get('valuation') or {},
+            'technical_context': snapshot.get('technical') or {},
+            'sentiment_context': snapshot.get('sentiment') or {},
+            'fundamental_context': snapshot.get('fundamental') or {},
+            'news_context': snapshot.get('news') or {},
+            'market_context': snapshot.get('market') or {},
+        }
+
+    def _determine_start_index(self, state: EntryDecisionState) -> int:
+        current_role = (state.current_role or '').strip()
+        if state.status != 'paused' or not current_role:
+            return 0
+        try:
+            return ROLE_SEQUENCE.index(current_role)
+        except ValueError:
+            return 0
+
+    def _missing_required_fields(self, manual_inputs: dict[str, Any], fields: list[str]) -> list[str]:
+        missing = []
+        for field in fields:
+            value = self._deep_get(manual_inputs, field)
+            if value in (None, ''):
+                missing.append(field)
+        return missing
 
     def _run_role(
         self,
@@ -231,7 +261,6 @@ class EntryDecisionOrchestrator:
         api_code: str | None = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
-        _ = analyzer
         return run_entry_decision_role_graph(
             role_name=role_name,
             state=state,
@@ -241,90 +270,6 @@ class EntryDecisionOrchestrator:
             system_prompt=system_prompt,
         )
 
-    def _build_prompt(self, role_name: str, state: EntryDecisionState) -> str:
-        payload = {
-            'session_id': state.session_id,
-            'watch_stock': state.watch_stock,
-            'request': state.request,
-            'auto_context': state.auto_context,
-            'manual_inputs': state.manual_inputs,
-            'completed_role_outputs': state.role_outputs,
-            'derived_inputs': state.auto_context.get('derived_inputs') or {},
-            'target_role': role_name,
-        }
-        return (
-            f"角色: {ROLE_CONFIG[role_name]['title']}\n"
-            f"任务说明:\n{ROLE_CONFIG[role_name]['prompt']}\n\n"
-            '请仅输出 JSON 对象，不要输出 markdown 代码块，不要输出额外解释。\n\n'
-            f"上下文数据:\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
-        )
-
-    def _build_final_result(
-        self,
-        state: EntryDecisionState,
-        *,
-        duration_ms: int,
-        entry_decision_summary_markdown: str = '',
-    ) -> dict[str, Any]:
-        snapshot = state.auto_context.get('snapshot') or {}
-        watch_stock_context = state.auto_context.get('watch_stock_context') or {}
-        macro_analysis = state.role_outputs.get('macro_analysis') or {}
-        asset_classification = state.role_outputs.get('asset_classification') or {}
-        value_stage_analysis = state.role_outputs.get('value_stage_analysis') or {}
-        price_zone_analysis = state.role_outputs.get('price_zone_analysis') or {}
-        buy_plan_analysis = state.role_outputs.get('buy_plan_analysis') or {}
-        risk_control_analysis = state.role_outputs.get('risk_control_analysis') or {}
-        decision_card = dict(risk_control_analysis.get('decision_card') or {})
-        derived_inputs = state.auto_context.get('derived_inputs') or {}
-        decision_card.setdefault('current_stage', value_stage_analysis.get('current_stage') or '')
-        decision_card.setdefault('current_price_zone', price_zone_analysis.get('price_zone') or '')
-        decision_card.setdefault('suggested_action', buy_plan_analysis.get('suggested_action') or '')
-        decision_card.setdefault('suggested_entry_leg', buy_plan_analysis.get('suggested_entry_leg') or '')
-        decision_card.setdefault('max_target_position', buy_plan_analysis.get('max_target_position') or state.manual_inputs.get('position_input', {}).get('max_target_position', ''))
-        decision_card.setdefault('execution_summary', risk_control_analysis.get('conclusion_summary') or buy_plan_analysis.get('action_reasoning') or '')
-
-        return {
-            'success': True,
-            'data': {
-                'session_id': state.session_id,
-                'watch_stock_id': state.watch_stock_id,
-                'stock_code': watch_stock_context.get('stock_code') or state.watch_stock.get('stock_code', ''),
-                'stock_name': watch_stock_context.get('stock_name') or state.watch_stock.get('stock_name', ''),
-                'market': watch_stock_context.get('market') or state.watch_stock.get('market', ''),
-                'trade_date': state.auto_context.get('trade_date') or state.request.get('trade_date') or '',
-                'basic_info': {
-                    'stock_code': watch_stock_context.get('stock_code') or '',
-                    'stock_name': watch_stock_context.get('stock_name') or '',
-                    'market': watch_stock_context.get('market') or '',
-                    'industry': watch_stock_context.get('industry') or '',
-                    'asset_type': watch_stock_context.get('asset_type') or '',
-                    'current_price': watch_stock_context.get('current_price'),
-                    'pe': watch_stock_context.get('pe'),
-                    'investment_horizon': derived_inputs.get('investment_horizon') or '',
-                },
-                'macro_analysis': macro_analysis,
-                'asset_classification': asset_classification,
-                'value_stage_analysis': value_stage_analysis,
-                'price_zone_analysis': price_zone_analysis,
-                'buy_plan_analysis': buy_plan_analysis,
-                'risk_control_analysis': risk_control_analysis,
-                'decision_card': decision_card,
-                'entry_decision_summary_markdown': entry_decision_summary_markdown,
-                'entry_decision_summary_template': '进场决策模板_空白实战版',
-                'snapshot': snapshot,
-                'manual_inputs': state.manual_inputs,
-                'meta': {
-                    'status': state.status,
-                    'current_role': state.current_role,
-                    'completed_roles': state.meta.get('completed_roles', []),
-                    'timeline': state.meta.get('timeline', []),
-                    'duration_ms': duration_ms,
-                    'started_at': state.meta.get('started_at'),
-                    'finished_at': state.meta.get('finished_at') or datetime.now().isoformat(),
-                    'errors': state.meta.get('errors', []),
-                },
-            },
-        }
 
     def _build_entry_decision_summary_markdown(
         self,
@@ -336,18 +281,59 @@ class EntryDecisionOrchestrator:
         api_code: str | None = None,
         system_prompt: str | None = None,
     ) -> str:
-        _ = analyzer
-        template_markdown = self._load_entry_decision_template_markdown()
-        if not template_markdown:
+        try:
+            return str(
+                run_entry_decision_summary_graph(
+                    template_markdown=self._load_entry_decision_template_markdown(),
+                    state=state,
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                    api_code=api_code,
+                    system_prompt=system_prompt,
+                )
+                or ''
+            ).strip()
+        except Exception:
             return ''
-        return run_entry_decision_summary_graph(
-            template_markdown=template_markdown,
-            state=state,
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            api_code=api_code,
-            system_prompt=system_prompt,
-        )
+
+    def _build_final_result(
+        self,
+        state: EntryDecisionState,
+        *,
+        duration_ms: int,
+        entry_decision_summary_markdown: str,
+    ) -> dict[str, Any]:
+        role_outputs = state.role_outputs
+        watch_stock = state.watch_stock
+        request = state.request
+        risk_output = role_outputs.get('risk_control_analysis') or {}
+        decision_card = risk_output.get('decision_card') or {}
+        return {
+            'success': True,
+            'data': {
+                'session_id': state.session_id,
+                'watch_stock_id': state.watch_stock_id,
+                'stock_code': watch_stock.get('stock_code', ''),
+                'stock_name': watch_stock.get('stock_name', ''),
+                'market': watch_stock.get('market', ''),
+                'trade_date': request.get('trade_date', ''),
+                'analysis_depth': request.get('analysis_depth', 'standard'),
+                'status': state.status,
+                'decision_card': decision_card,
+                'macro_analysis': role_outputs.get('macro_analysis') or {},
+                'asset_classification': role_outputs.get('asset_classification') or {},
+                'value_stage_analysis': role_outputs.get('value_stage_analysis') or {},
+                'price_zone_analysis': role_outputs.get('price_zone_analysis') or {},
+                'buy_plan_analysis': role_outputs.get('buy_plan_analysis') or {},
+                'risk_control_analysis': risk_output,
+                'entry_decision_summary_markdown': entry_decision_summary_markdown,
+                'meta': {
+                    'duration_ms': duration_ms,
+                    'completed_roles': list(state.completed_roles),
+                    'timeline': list(state.timeline),
+                },
+            },
+        }
 
     def _load_entry_decision_template_markdown(self) -> str:
         try:
@@ -355,186 +341,32 @@ class EntryDecisionOrchestrator:
         except Exception:
             return ''
 
-    def _normalize_markdown_response(self, response: Any, fallback_markdown: str) -> str:
-        text = str(response or '').strip()
-        if text.startswith('```'):
-            lines = text.splitlines()
-            if lines:
-                lines = lines[1:]
-            if lines and lines[-1].strip() == '```':
-                lines = lines[:-1]
-            text = '\n'.join(lines).strip()
-        if not text or '发生异常:' in text:
-            return fallback_markdown
-        return text
+    def _normalize_market(self, value: Any) -> str:
+        market = str(value or '').strip()
+        lowered = market.lower()
+        if lowered in {'cn', 'sh', 'sz', 'a股'}:
+            return 'SH'
+        if lowered in {'h', 'hk', '港股'}:
+            return 'H'
+        if lowered in {'usa', 'us', '美股'}:
+            return 'usa'
+        if lowered == 'zq':
+            return 'zq'
+        return market or 'SH'
 
-    def _parse_json_response(self, raw_response: Any, role_name: str) -> dict[str, Any]:
-        text = str(raw_response or '').strip()
-        if text.startswith('```'):
-            text = text.strip('`')
-            if text.startswith('json'):
-                text = text[4:].strip()
-        try:
-            parsed = json.loads(text)
-        except Exception as exc:
-            raise ValueError(f'{role_name} 返回非 JSON 内容: {exc}; 原始返回: {text[:800]}') from exc
-        if not isinstance(parsed, dict):
-            raise ValueError(f'{role_name} 返回结果必须是 JSON 对象')
-        return parsed
-
-    def _build_derived_inputs(self, watch_stock: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
-        market_context = snapshot.get('market_context') or {}
-        spot = market_context.get('spot') or {}
-        reports = snapshot.get('reports') or {}
-        financial_indicators = snapshot.get('financial_indicators')
-        if financial_indicators is None or (hasattr(financial_indicators, 'empty') and financial_indicators.empty):
-            financial_indicators = {}
-        technical = snapshot.get('technical') or {}
-        technical_summary = technical.get('summary') or {}
-        sentiment = snapshot.get('sentiment') or {}
-
-        revenue_growth = self._pick_first_non_empty(
-            self._read_nested(financial_indicators, ['主营业务收入增长率(%)']),
-            self._read_latest_report_value(reports.get('income_statement'), ['营业总收入同比', '营业总收入同比增长率']),
-        )
-        profit_growth = self._pick_first_non_empty(
-            self._read_nested(financial_indicators, ['净利润增长率(%)']),
-            self._read_latest_report_value(reports.get('income_statement'), ['净利润同比', '净利润同比增长率']),
-        )
-        cashflow_status = self._pick_first_non_empty(
-            self._read_latest_report_value(reports.get('cash_flow'), ['经营性现金流-现金流量净额', '经营性现金流-净现金流占比']),
-            self._read_nested(financial_indicators, ['经营现金净流量与净利润的比率(%)']),
-        )
-        margin_trend = self._pick_first_non_empty(
-            self._read_nested(financial_indicators, ['销售毛利率(%)', '营业利润率(%)']),
-            self._read_latest_report_value(reports.get('income_statement'), ['营业利润']),
-        )
-        valuation_pb = self._pick_first_non_empty(
-            self._read_nested(spot, ['市净率', 'PB', 'pb']),
-            self._read_nested(financial_indicators, ['每股净资产_调整后(元)']),
-        )
-        valuation_judgement = self._build_valuation_judgement(watch_stock, spot, technical_summary)
-        expectation_summary = self._build_expectation_summary(sentiment, technical_summary)
-        investment_horizon = self._build_investment_horizon(technical_summary, sentiment)
-
-        return {
-            'investment_horizon': investment_horizon,
-            'expectation_summary': expectation_summary,
-            'financial_summary': {
-                'revenue_growth': self._stringify_value(revenue_growth),
-                'profit_growth': self._stringify_value(profit_growth),
-                'cashflow_status': self._stringify_value(cashflow_status),
-                'margin_trend': self._stringify_value(margin_trend),
-            },
-            'valuation_input': {
-                'pe': self._stringify_value(self._pick_first_non_empty(watch_stock.get('pe'), self._read_nested(spot, ['市盈率-动态', '动态市盈率', '市盈率']))),
-                'pb': self._stringify_value(valuation_pb),
-                'valuation_judgement': valuation_judgement,
-            },
-        }
-
-    def _build_expectation_summary(self, sentiment: dict[str, Any], technical_summary: dict[str, Any]) -> str:
-        return self._stringify_value(
-            self._pick_first_non_empty(
-                self._read_nested(sentiment, ['summary']),
-                self._read_nested(sentiment, ['conclusion']),
-                self._read_nested(technical_summary, ['summary']),
-                self._read_nested(technical_summary, ['conclusion']),
-            )
-        )
-
-    def _build_investment_horizon(self, technical_summary: dict[str, Any], sentiment: dict[str, Any]) -> str:
-        swing_signal = self._pick_first_non_empty(
-            self._read_nested(technical_summary, ['short_term_trend']),
-            self._read_nested(technical_summary, ['trend']),
-            self._read_nested(sentiment, ['trend']),
-        )
-        return '中期+长期' if not swing_signal else '波段+中期'
-
-    def _build_valuation_judgement(self, watch_stock: dict[str, Any], spot: dict[str, Any], technical_summary: dict[str, Any]) -> str:
-        pe_value = self._pick_first_non_empty(watch_stock.get('pe'), self._read_nested(spot, ['市盈率-动态', '动态市盈率', '市盈率']))
-        if isinstance(pe_value, (int, float)):
-            if pe_value <= 15:
-                return '估值偏低'
-            if pe_value <= 30:
-                return '估值大致合理'
-            return '估值偏高，需结合景气度消化'
-        if isinstance(pe_value, str) and pe_value.strip():
-            return f'估值参考: {pe_value.strip()}'
-        technical_bias = self._pick_first_non_empty(
-            self._read_nested(technical_summary, ['valuation_comment']),
-            self._read_nested(technical_summary, ['summary']),
-        )
-        return self._stringify_value(technical_bias)
-
-    def _read_latest_report_value(self, rows: Any, keys: list[str]) -> Any:
-        if not isinstance(rows, list) or not rows:
-            return None
-        row = rows[0] if isinstance(rows[0], dict) else None
-        if not row:
-            return None
-        return self._read_nested(row, keys)
-
-    def _read_nested(self, payload: Any, keys: list[str]) -> Any:
-        if not isinstance(payload, dict):
-            return None
-        for key in keys:
-            if key in payload and payload.get(key) not in (None, ''):
-                return payload.get(key)
-        return None
-
-    def _pick_first_non_empty(self, *values: Any) -> Any:
-        for value in values:
-            if value not in (None, ''):
-                return value
-        return None
-
-    def _stringify_value(self, value: Any) -> str:
-        if value in (None, ''):
-            return ''
-        return str(value).strip()
-
-    def _missing_required_fields(self, manual_inputs: dict[str, Any], required_fields: list[str]) -> list[str]:
-        missing: list[str] = []
-        for field_path in required_fields:
-            value = self._get_nested_value(manual_inputs, field_path)
-            if value in (None, ''):
-                missing.append(field_path)
-        return missing
-
-    def _missing_required_fields(self, manual_inputs: dict[str, Any], required_fields: list[str]) -> list[str]:
-        missing: list[str] = []
-        for field_path in required_fields:
-            value = self._get_nested_value(manual_inputs, field_path)
-            if value in (None, ''):
-                missing.append(field_path)
-        return missing
-
-    def _get_nested_value(self, payload: dict[str, Any], field_path: str) -> Any:
-        current: Any = payload
-        for part in field_path.split('.'):
-            if not isinstance(current, dict) or part not in current:
+    def _deep_get(self, data: dict[str, Any], path: str) -> Any:
+        current: Any = data
+        for segment in path.split('.'):
+            if not isinstance(current, dict):
                 return None
-            current = current[part]
+            current = current.get(segment)
         return current
 
-    def _determine_start_index(self, state: EntryDecisionState) -> int:
-        completed_roles = state.meta.get('completed_roles', [])
-        if state.status == 'paused' and state.current_role in ROLE_SEQUENCE:
-            return ROLE_SEQUENCE.index(state.current_role)
-        if not completed_roles:
-            return 0
-        for index, role_name in enumerate(ROLE_SEQUENCE):
-            if role_name not in completed_roles:
-                return index
-        return len(ROLE_SEQUENCE)
+    def dumps_state(self, state: EntryDecisionState) -> str:
+        return json.dumps(state.model_dump(mode='json'), ensure_ascii=False)
 
-    def _normalize_market(self, market: Any) -> str:
-        normalized = str(market or '').strip().lower()
-        if normalized in {'a股', 'cn', 'sh', 'sz'}:
-            return 'SH'
-        if normalized in {'港股', 'hk', 'h'}:
-            return 'H'
-        if normalized in {'美股', 'us', 'usa'}:
-            return 'usa'
-        return str(market or 'SH').strip() or 'SH'
+
+class EntryDecisionOrchestrator(FocusEntryDecisionOrchestrator):
+    """兼容保留的旧进场决策编排器名称。"""
+
+    pass

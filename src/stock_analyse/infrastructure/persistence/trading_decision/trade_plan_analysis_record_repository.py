@@ -139,7 +139,7 @@ class TradePlanAnalysisRecordRepository:
         return f'TPA-{uuid4().hex[:12].upper()}'
 
     def _json_dumps(self, value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False, default=str)
 
     def _map_action_label(self, action: str | None) -> str:
         normalized = (action or '').strip().lower()

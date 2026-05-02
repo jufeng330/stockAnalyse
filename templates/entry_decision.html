@@ -377,7 +377,7 @@
 
             <div class="content-stack">
                 <div class="panel">
-                    <h2>标的上下文</h2>
+                    <h2>分析参数</h2>
                     <div class="context-grid">
                         <div class="kv"><div class="label">股票名称</div><div class="value">{{ watch_stock.stock_name }}</div></div>
                         <div class="kv"><div class="label">股票代码</div><div class="value">{{ watch_stock.stock_code }}</div></div>
@@ -388,10 +388,6 @@
                         <div class="label" style="font-size:12px;color:#6b7280;margin-bottom:6px;">上次结论摘要</div>
                         <div id="previousConclusionText" style="line-height:1.7;font-weight:600;">{{ form_defaults.last_conclusion_summary or '暂无结论摘要' }}</div>
                     </div>
-                </div>
-
-                <div class="panel">
-                    <h2>决策参数</h2>
                     <div class="grid-2">
                         <div class="form-group">
                             <label for="tradeDate">交易日期</label>
@@ -448,6 +444,27 @@
                 </div>
 
                 <div class="panel">
+                    <h2>分析结果</h2>
+                    {% if selected_record %}
+                    <div class="helper-text" style="margin-bottom:12px;">已加载历史决策记录：{{ selected_record.id }}{% if selected_record.suggested_action %} · {{ selected_record.suggested_action }}{% endif %}{% if selected_record.conclusion_summary %} · {{ selected_record.conclusion_summary }}{% endif %}</div>
+                    {% endif %}
+                    <div id="resultsContent">
+                        <div class="empty-state">
+                            <div style="font-size:48px;">🧭</div>
+                            <div>点击“生成决策”后展示章节化进场决策结果。</div>
+                            <div style="font-size:13px;color:#9ca3af;">结果区会展示分析师结果、总结，以及原始 JSON。</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>分析日志</h2>
+                    <div id="logBox" class="log-box">
+                        <div class="log-entry log-info">[系统] 等待发起进场决策任务...</div>
+                    </div>
+                </div>
+
+                <div class="panel">
                     <h2>历史决策记录</h2>
                     {% if history_items %}
                     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
@@ -467,27 +484,6 @@
                     {% else %}
                     <div class="helper-text" style="margin-bottom:18px;">暂无历史决策记录。</div>
                     {% endif %}
-                </div>
-
-                <div class="panel">
-                    <h2>决策结果</h2>
-                    {% if selected_record %}
-                    <div class="helper-text" style="margin-bottom:12px;">已加载历史决策记录：{{ selected_record.id }}{% if selected_record.suggested_action %} · {{ selected_record.suggested_action }}{% endif %}{% if selected_record.conclusion_summary %} · {{ selected_record.conclusion_summary }}{% endif %}</div>
-                    {% endif %}
-                    <div id="resultsContent">
-                        <div class="empty-state">
-                            <div style="font-size:48px;">🧭</div>
-                            <div>点击“生成决策”后展示章节化进场决策结果。</div>
-                            <div style="font-size:13px;color:#9ca3af;">结果区会展示分析师结果、总结，以及原始 JSON。</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <h2>运行日志</h2>
-                    <div id="logBox" class="log-box">
-                        <div class="log-entry log-info">[系统] 等待发起进场决策任务...</div>
-                    </div>
                 </div>
             </div>
         </main>

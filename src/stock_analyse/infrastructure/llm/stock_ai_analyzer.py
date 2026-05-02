@@ -128,6 +128,68 @@ class StockAiAnalyzer:
             return
         debug_log(f"OpenAI completion 已保存到文件: {dump_path}")
 
+    def _stream_chat_completion_text(self, client, request_kwargs: dict[str, object], stock_name: str, current_date: datetime.datetime) -> str:
+        raw_chunks: list[dict[str, object]] = []
+        text_parts: list[str] = []
+        stream = client.chat.completions.create(
+            **request_kwargs,
+            stream=True,
+        )
+        for chunk in stream:
+            if hasattr(chunk, 'model_dump'):
+                raw_chunks.append(chunk.model_dump())
+            else:
+                raw_chunks.append(json.loads(json.dumps(chunk, ensure_ascii=False, default=str)))
+            for choice in getattr(chunk, 'choices', []) or []:
+                delta = getattr(choice, 'delta', None)
+                if delta is None:
+                    continue
+                content = getattr(delta, 'content', None)
+                if isinstance(content, str) and content:
+                    text_parts.append(content)
+                    continue
+                reasoning_content = getattr(delta, 'reasoning_content', None)
+                if isinstance(reasoning_content, str) and reasoning_content:
+                    text_parts.append(reasoning_content)
+        timestamp_str = current_date.strftime("%Y%m%d%H%M%S")
+        dump_path = self.data_dir / f"{stock_name or 'unknown'}_{self.model}_stream_completion_{timestamp_str}.json"
+        try:
+            dump_path.write_text(
+                json.dumps(raw_chunks, ensure_ascii=False, indent=2, default=str),
+                encoding='utf-8',
+            )
+            debug_log(f"OpenAI stream completion 已保存到文件: {dump_path}")
+        except Exception as dump_error:
+            debug_log(f"写入 stream completion dump 失败: {dump_error}")
+        return ''.join(text_parts).strip()
+
+    def _summarize_stream_text(self, text: str) -> str:
+        preview = (text or '').strip()[:500]
+        return f"content={preview!r}, tool_calls=[]"
+
+    def _run_stream_json_reformat(self, client, request_kwargs: dict, instruction: str, raw_text: str, stock_name: str, current_date: datetime.datetime):
+        fallback_kwargs = dict(request_kwargs)
+        fallback_kwargs.pop('tools', None)
+        fallback_kwargs.pop('tool_choice', None)
+        fallback_kwargs.pop('response_format', None)
+        fallback_kwargs['messages'] = (
+            {'role': 'system', 'content': self._build_json_reformat_instruction(instruction)},
+            {'role': 'user', 'content': self._build_json_reformat_message(raw_text)},
+        )
+        content = self._stream_chat_completion_text(
+            client,
+            fallback_kwargs,
+            f"{stock_name or 'unknown'}_json_reformat",
+            current_date,
+        )
+        parsed = self._parse_json_content(content)
+        if parsed is not None:
+            return parsed
+        raise ValueError(
+            '当前 AI 服务在首轮生成和 JSON 重整模式下都未返回可解析内容。'
+            f' 原始响应摘要: {self._summarize_stream_text(content)}'
+        )
+
     def _extract_message_tool_calls(self, choice) -> list:
         tool_calls = getattr(choice, 'tool_calls', None) or []
         if tool_calls:
@@ -196,29 +258,7 @@ class StockAiAnalyzer:
         return None
 
     def _retry_json_reformat(self, client, request_kwargs: dict, instruction: str, raw_text: str, stock_name: str, current_date: datetime.datetime):
-        fallback_kwargs = dict(request_kwargs)
-        fallback_kwargs.pop('tools', None)
-        fallback_kwargs.pop('tool_choice', None)
-        fallback_kwargs.pop('response_format', None)
-        fallback_kwargs['messages'] = (
-            {'role': 'system', 'content': self._build_json_reformat_instruction(instruction)},
-            {'role': 'user', 'content': self._build_json_reformat_message(raw_text)},
-        )
-        completion = client.chat.completions.create(
-            **fallback_kwargs,
-            stream=False,
-        )
-        self._dump_openai_completion(f"{stock_name or 'unknown'}_json_reformat", completion, current_date)
-        choice = completion.choices[0].message if completion and completion.choices else None
-        if choice is None:
-            raise ValueError('模型在 JSON 重整模式下未返回 message')
-        parsed = self._parse_json_content(getattr(choice, 'content', None))
-        if parsed is not None:
-            return parsed
-        raise ValueError(
-            '当前 AI 服务在首轮生成和 JSON 重整模式下都未返回可解析内容。'
-            f' 原始响应摘要: {self._summarize_choice(choice)}'
-        )
+        return self._run_stream_json_reformat(client, request_kwargs, instruction, raw_text, stock_name, current_date)
 
     def aliyun_chat_api_call(self, symbol='', message='你好'):
         current_date = datetime.datetime.now()
@@ -297,18 +337,11 @@ class StockAiAnalyzer:
             request_kwargs.pop('tools', None)
             request_kwargs.pop('tool_choice', None)
             request_kwargs.pop('response_format', None)
-            completion = client.chat.completions.create(
-                **request_kwargs,
-                stream=False,
-            )
-            self._dump_openai_completion(stock_name, completion, current_date)
-            choice = completion.choices[0].message if completion and completion.choices else None
-            if choice is None:
-                raise ValueError('模型未返回 message')
-
-            content = getattr(choice, 'content', None)
-            if isinstance(content, str) and content.strip():
-                raw_response = content.strip()
+            raw_response = self._stream_chat_completion_text(client, request_kwargs, stock_name, current_date)
+            if raw_response:
+                debug_log(
+                    f"OpenAI 兼容响应摘要: symbol={stock_name}, model={self.model}, preview={raw_response[:500]!r}"
+                )
                 parsed = self._parse_json_content(raw_response)
                 if parsed is not None:
                     return parsed
@@ -323,7 +356,7 @@ class StockAiAnalyzer:
 
             raise ValueError(
                 '当前 AI 服务未返回文本内容，无法进入 JSON 解析。'
-                f' 原始响应摘要: {self._summarize_choice(choice)}'
+                f' 原始响应摘要: {self._summarize_stream_text(raw_response)}'
             )
         except Exception as e:
             debug_log(f"发生异常: {e}; raw_response={raw_response}")

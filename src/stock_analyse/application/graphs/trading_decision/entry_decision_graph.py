@@ -6,10 +6,10 @@ from stock_analyse.application.agents.entry_decision import EntryDecisionAgent
 from stock_analyse.application.agents.entry_decision.models import EntryDecisionInput, EntryDecisionSummaryInput
 
 
-class EntryDecisionGraph:
-    """进场决策 graph 封装。
+class FocusEntryDecisionGraph:
+    """Focus 进场决策 graph 封装。
 
-    用于进场优化会话执行时把状态对象转换成结构化 agent 输入，并分别驱动单角色分析与最终摘要生成。
+    用于关注股票进场优化会话执行时把状态对象转换成结构化 agent 输入，并分别驱动单角色分析与最终摘要生成。
     """
 
     def __init__(self, *, agent: EntryDecisionAgent | None = None) -> None:
@@ -73,9 +73,23 @@ class EntryDecisionGraph:
         )
 
 
+class EntryDecisionGraph(FocusEntryDecisionGraph):
+    """兼容保留的旧进场决策 graph 名称。"""
+
+    pass
+
+
+def run_focus_entry_decision_role_graph(**kwargs) -> dict[str, Any]:
+    return FocusEntryDecisionGraph().run_role(**kwargs)
+
+
+def run_focus_entry_decision_summary_graph(**kwargs) -> str:
+    return FocusEntryDecisionGraph().build_summary_markdown(**kwargs)
+
+
 def run_entry_decision_role_graph(**kwargs) -> dict[str, Any]:
-    return EntryDecisionGraph().run_role(**kwargs)
+    return run_focus_entry_decision_role_graph(**kwargs)
 
 
 def run_entry_decision_summary_graph(**kwargs) -> str:
-    return EntryDecisionGraph().build_summary_markdown(**kwargs)
+    return run_focus_entry_decision_summary_graph(**kwargs)

@@ -45,8 +45,10 @@ class BaseStockAnalysisAgent:
             f'上下文数据:\n{payload}'
         )
 
-    def parse_response(self, response: str) -> dict[str, Any]:
-        text = (response or '').strip()
+    def parse_response(self, response: Any) -> dict[str, Any]:
+        if isinstance(response, dict):
+            return self._normalize_structured_response(response, raw_text=json.dumps(response, ensure_ascii=False, default=str))
+        text = str(response or '').strip()
         if not text:
             return self._fallback_response('')
         start = text.find('{')
@@ -55,17 +57,45 @@ class BaseStockAnalysisAgent:
             candidate = text[start:end + 1]
             try:
                 data = json.loads(candidate)
-                return {
-                    'summary': data.get('summary', ''),
-                    'signals': data.get('signals', []),
-                    'risks': data.get('risks', []),
-                    'confidence': self._normalize_confidence(data.get('confidence', 0.5)),
-                    'evidence': data.get('evidence', []),
-                    'raw_text': text,
-                }
+                return self._normalize_structured_response(data, raw_text=text)
             except json.JSONDecodeError:
                 pass
         return self._fallback_response(text)
+
+    def _normalize_structured_response(self, data: dict[str, Any], *, raw_text: str) -> dict[str, Any]:
+        return {
+            'summary': self._stringify_text(data.get('summary')),
+            'signals': self._normalize_string_list(data.get('signals')),
+            'risks': self._normalize_string_list(data.get('risks')),
+            'confidence': self._normalize_confidence(data.get('confidence', 0.5)),
+            'evidence': self._normalize_evidence(data.get('evidence')),
+            'raw_text': raw_text,
+        }
+
+    def _normalize_string_list(self, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [item for item in (self._stringify_text(entry) for entry in value) if item]
+        text = self._stringify_text(value)
+        return [text] if text else []
+
+    def _normalize_evidence(self, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [item for item in (self._stringify_text(entry) for entry in value) if item]
+        text = self._stringify_text(value)
+        return [text] if text else []
+
+    def _stringify_text(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in ('summary', 'detail', 'description', 'text', 'content', 'logic', 'note', 'source'):
+                nested = value.get(key)
+                if isinstance(nested, str) and nested.strip():
+                    return nested.strip()
+            return ''
+        if value is None:
+            return ''
+        return str(value).strip()
 
     def _fallback_response(self, text: str) -> dict[str, Any]:
         lines = [line.strip('-• ') for line in text.splitlines() if line.strip()]

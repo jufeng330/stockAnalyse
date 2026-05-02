@@ -18,8 +18,8 @@ def _legacy_analyzer_factory(**kwargs):
     return kwargs
 
 
-class TradePlanAnalysisOrchestrator:
-    """持仓计划分析 AI 编排器。
+class FocusTradePlanAnalysisOrchestrator:
+    """Focus 持仓计划分析 AI 编排器。
 
     负责把模板、缓存与回退数据整理为一份可执行的持仓计划草案及决策摘要。
     """
@@ -157,3 +157,9 @@ class TradePlanAnalysisOrchestrator:
             return TRADE_PLAN_TEMPLATE_PATH.read_text(encoding='utf-8').strip()
         except Exception:
             return ''
+
+
+class TradePlanAnalysisOrchestrator(FocusTradePlanAnalysisOrchestrator):
+    """兼容保留的旧持仓计划分析编排器名称。"""
+
+    pass

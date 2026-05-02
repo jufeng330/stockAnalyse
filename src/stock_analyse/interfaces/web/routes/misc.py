@@ -72,7 +72,7 @@ def register_misc_routes(app):
         if not watch_stock_id:
             return render_template('stock_analysis_record.html')
         try:
-            page_data = _trading_decision_service().build_stock_analysis_record_page_data(watch_stock_id, record_id)
+            page_data = _trading_decision_service().build_focus_stock_analysis_record_page_data(watch_stock_id, record_id)
         except ValueError as exc:
             if not record_id:
                 return render_template('stock_analysis_record.html')
@@ -101,7 +101,7 @@ def register_misc_routes(app):
         if not holding_stock_id:
             return jsonify({'success': False, 'message': '缺少 holding_stock_id', 'error': {'code': 'bad_request', 'message': '缺少 holding_stock_id'}}), 400
         try:
-            page_data = _trading_decision_service().build_holding_reanalysis_page_context(holding_stock_id, record_id)
+            page_data = _trading_decision_service().build_focus_holding_reanalysis_page_context(holding_stock_id, record_id)
         except ValueError as exc:
             message = str(exc)
             code = 'not_found' if '不存在' in message else 'bad_request'

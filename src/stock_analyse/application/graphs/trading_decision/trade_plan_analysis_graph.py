@@ -9,8 +9,8 @@ from stock_analyse.application.agents.trade_plan_analysis import (
 )
 
 
-class TradePlanAnalysisGraph:
-    """持仓计划分析 graph 封装。
+class FocusTradePlanAnalysisGraph:
+    """Focus 持仓计划分析 graph 封装。
 
     用于关注股票的持仓计划分析场景，负责把页面/服务层上下文归一化为 agent 可消费的结构化输入。
     """
@@ -46,5 +46,15 @@ class TradePlanAnalysisGraph:
         )
 
 
+class TradePlanAnalysisGraph(FocusTradePlanAnalysisGraph):
+    """兼容保留的旧持仓计划分析 graph 名称。"""
+
+    pass
+
+
+def run_focus_trade_plan_analysis_graph(**kwargs) -> TradePlanAnalysisOutput:
+    return FocusTradePlanAnalysisGraph().run(**kwargs)
+
+
 def run_trade_plan_analysis_graph(**kwargs) -> TradePlanAnalysisOutput:
-    return TradePlanAnalysisGraph().run(**kwargs)
+    return run_focus_trade_plan_analysis_graph(**kwargs)

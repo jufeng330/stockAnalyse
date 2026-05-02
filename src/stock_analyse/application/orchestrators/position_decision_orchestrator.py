@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
+import logging
 import time
 from typing import Any
 
 from stock_analyse.application.graphs.trading_decision.position_decision_graph import run_position_decision_graph
 
 
-class PositionDecisionOrchestrator:
-    """买卖决策 AI 编排器。
+logger = logging.getLogger(__name__)
+
+
+class HoldingPositionDecisionOrchestrator:
+    """Holding 买卖决策 AI 编排器。
 
     用于持仓股票列表的买卖决策场景，负责承接持仓上下文、调用 position decision graph，并映射为页面与落库兼容结构。
     """
@@ -44,12 +49,19 @@ class PositionDecisionOrchestrator:
             api_code=api_code,
             system_prompt=system_prompt,
         )
+        response_payload = response.model_dump(mode='json')
+        response_preview = self._build_response_preview(response_payload)
+        logger.info('买卖决策 AI 原始应答摘要: %s', response_preview)
+        log(f'AI 应答摘要: {response_preview}', 'info')
         progress(85, '正在生成买卖决策草案...')
         result = self._build_final_result(
             context,
-            response.model_dump(mode='json'),
+            response_payload,
             duration_ms=int((time.time() - started_at) * 1000),
         )
+        result_summary = self._build_result_summary(result)
+        logger.info('买卖决策归一化结果摘要: %s', result_summary)
+        log(f'买卖决策结果摘要: {result_summary}', 'info')
         progress(100, '买卖决策草案生成完成')
         return result
 
@@ -98,6 +110,30 @@ class PositionDecisionOrchestrator:
             },
         }
 
+    def _build_response_preview(self, response: dict[str, Any]) -> str:
+        preview = {
+            'recommended_action': str(response.get('recommended_action') or '').strip(),
+            'decision_status': str(response.get('decision_status') or '').strip(),
+            'confidence': str(response.get('confidence') or '').strip(),
+            'conclusion_summary': str(response.get('conclusion_summary') or '').strip(),
+            'tabs_count': len(response.get('tabs') or []) if isinstance(response.get('tabs'), list) else 0,
+        }
+        return json.dumps(preview, ensure_ascii=False)
+
+    def _build_result_summary(self, result: dict[str, Any]) -> str:
+        data = result.get('data') or {}
+        decision = data.get('decision') or {}
+        summary = {
+            'stock_code': str(data.get('stock_code') or '').strip(),
+            'trade_date': str(data.get('trade_date') or '').strip(),
+            'action': str(decision.get('action') or '').strip(),
+            'status': str(decision.get('status') or '').strip(),
+            'confidence': str(decision.get('confidence') or '').strip(),
+            'conclusion_summary': str(decision.get('summary') or '').strip(),
+            'tabs_count': len(data.get('tabs') or []) if isinstance(data.get('tabs'), list) else 0,
+        }
+        return json.dumps(summary, ensure_ascii=False)
+
     def _normalize_tabs(self, value: Any) -> list[dict[str, Any]]:
         expected = [
             ('trigger', '触发条件'),
@@ -106,10 +142,18 @@ class PositionDecisionOrchestrator:
             ('risk', '风险分析'),
             ('conclusion', '结论'),
         ]
-        source = value if isinstance(value, list) else []
+        source = [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
         normalized: list[dict[str, Any]] = []
         for index, (default_id, default_title) in enumerate(expected):
-            item = source[index] if index < len(source) and isinstance(source[index], dict) else {}
+            item = next(
+                (
+                    candidate
+                    for candidate in source
+                    if str(candidate.get('id') or '').strip().lower() == default_id
+                    or str(candidate.get('title') or '').strip() == default_title
+                ),
+                source[index] if index < len(source) else {},
+            )
             evidence = item.get('evidence') if isinstance(item.get('evidence'), list) else []
             normalized.append(
                 {
@@ -129,3 +173,9 @@ class PositionDecisionOrchestrator:
             'watch': 'observe',
         }
         return mapping.get(action, 'observe')
+
+
+class PositionDecisionOrchestrator(HoldingPositionDecisionOrchestrator):
+    """兼容保留的旧买卖决策编排器名称。"""
+
+    pass
