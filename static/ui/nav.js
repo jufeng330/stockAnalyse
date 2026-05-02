@@ -20,7 +20,7 @@
         { key: 'entry-decision', label: '进场决策', href: '/entry-decision' },
         { key: 'stock-analysis-record', label: '股票分析', href: '/stock-analysis-record' },
         { key: 'trade-plan-analysis', label: '持仓计划分析', href: '/trade-plan-analysis' },
-        { key: 'watch-records', label: '历史记录', href: '#watch-records' },
+        { key: 'watch-records', label: '历史记录', href: '/index#watch-records' },
       ],
     },
     {
@@ -41,8 +41,8 @@
       href: '/portfolio-review',
       children: [
         { key: 'portfolio-review', label: '组合概览', href: '/portfolio-review' },
-        { key: 'portfolio-summary', label: '组合概览', href: '#portfolio-summary' },
-        { key: 'portfolio-records', label: '历史记录', href: '#portfolio-records' },
+        { key: 'portfolio-summary', label: '组合概览', href: '/portfolio-review#portfolio-summary' },
+        { key: 'portfolio-records', label: '历史记录', href: '/portfolio-review#portfolio-records' },
       ],
     },
     {

@@ -425,6 +425,14 @@
     th, td { padding: 16px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; text-align: left; }
     th { background: #f8fafc; color: #475569; font-size: 13px; font-weight: 700; }
     td { font-size: 14px; color: #111827; }
+    .summary-column { width: 360px; min-width: 360px; }
+    .summary-text { line-height: 1.6; word-break: break-word; }
+    .summary-text.compact { max-width: 360px; }
+    .history-summary-text { line-height: 1.6; word-break: break-word; }
+    .history-summary-text.compact { max-width: 520px; }
+    .text-ellipsis { display: inline-block; }
+    .text-ellipsis.compact { white-space: normal; }
+    .text-ellipsis[title] { cursor: help; }
     tbody tr:hover { background: #fafbff; }
     .stock-name { font-weight: 800; margin-bottom: 4px; }
     .sub-text { font-size: 12px; color: #6b7280; line-height: 1.5; }
@@ -658,7 +666,7 @@
                 <th>行业 / 类型</th>
                 <th>阶段 / 区间</th>
                 <th>当前建议</th>
-                <th>最新结论</th>
+                <th class="summary-column">最新结论</th>
                 <th>操作按钮</th>
               </tr>
             </thead>
@@ -691,8 +699,9 @@
                     {% endif %}
                     <div class="sub-text">状态：{{ item.status }}</div>
                   </td>
-                  <td>
-                    <div>{{ item.last_conclusion_summary or '暂无结论摘要' }}</div>
+                  <td class="summary-column">
+                    {% set latest_summary = item.last_conclusion_summary or '暂无结论摘要' %}
+                    <div class="summary-text compact" title="{{ latest_summary }}">{{ latest_summary[:60] ~ ('...' if latest_summary|length > 60 else '') }}</div>
                     <div class="sub-text">来源：{{ item.source or '手工录入' }}</div>
                   </td>
                   <td>
@@ -783,7 +792,8 @@
                   {% for record in history.entry_decision_records %}
                   <div style="margin-bottom: 10px;">
                     <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.suggested_action or '未给出动作' }}</div>
-                    <div class="muted">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    {% set entry_summary = record.conclusion_summary or '暂无结论摘要' %}
+                    <div class="muted history-summary-text compact" title="{{ entry_summary }}">{{ entry_summary[:100] ~ ('...' if entry_summary|length > 100 else '') }}</div>
                     <a class="row-link primary" href="{{ record.detail_url }}">查看记录</a>
                   </div>
                   {% endfor %}
@@ -797,7 +807,8 @@
                   {% for record in history.stock_analysis_records %}
                   <div style="margin-bottom: 10px;">
                     <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.stance or '待确认立场' }}</div>
-                    <div class="muted">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    {% set stock_analysis_summary = record.conclusion_summary or '暂无结论摘要' %}
+                    <div class="muted history-summary-text compact" title="{{ stock_analysis_summary }}">{{ stock_analysis_summary[:100] ~ ('...' if stock_analysis_summary|length > 100 else '') }}</div>
                     <a class="row-link primary" href="{{ record.detail_url }}">查看记录</a>
                   </div>
                   {% endfor %}
@@ -812,7 +823,8 @@
                   {% for record in history.trade_plan_records %}
                   <div style="margin-bottom: 10px;">
                     <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.suggested_action or '未给出动作' }}</div>
-                    <div class="muted">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    {% set trade_plan_summary = record.conclusion_summary or '暂无结论摘要' %}
+                    <div class="muted history-summary-text compact" title="{{ trade_plan_summary }}">{{ trade_plan_summary[:100] ~ ('...' if trade_plan_summary|length > 100 else '') }}</div>
                     <a class="row-link primary" href="{{ record.detail_url }}">查看记录</a>
                   </div>
                   {% endfor %}

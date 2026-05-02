@@ -117,6 +117,10 @@
     th, td { padding: 16px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; text-align: left; }
     th { background: #f8fafc; color: #475569; font-size: 13px; font-weight: 700; }
     td { font-size: 14px; color: #111827; }
+    .risk-column { width: 360px; min-width: 360px; }
+    .risk-summary { line-height: 1.6; word-break: break-word; }
+    .risk-summary.compact { max-width: 360px; }
+    .sub-text.compact { max-width: 360px; word-break: break-word; }
     tbody tr:hover { background: #fafbff; }
     .stock-name { font-weight: 800; margin-bottom: 4px; }
     .sub-text { font-size: 12px; color: #6b7280; line-height: 1.55; }
@@ -346,7 +350,7 @@
         <div id="statusMessage" class="status-message"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="holding-table">
         <div class="panel-header">
           <div>
             <h3>当前持仓标的</h3>
@@ -360,7 +364,7 @@
                 <th>标的</th>
                 <th>持仓与成本</th>
                 <th>盈亏与仓位</th>
-                <th>风险与建议</th>
+                <th class="risk-column">风险与建议</th>
                 <th>买卖明细</th>
                 <th>操作按钮</th>
               </tr>
@@ -387,11 +391,18 @@
                     <div class="sub-text">收益率：{{ item.unrealized_pnl_pct_display }}</div>
                     <div class="sub-text">持仓市值：{{ item.market_value_display }}</div>
                   </td>
-                  <td>
-                    {% if item.risk_status %}<span class="tag tag-risk">{{ item.risk_status }}</span>{% endif %}
-                    {% if item.suggested_action %}<span class="tag tag-action">{{ item.suggested_action }}</span>{% endif %}
+                  <td class="risk-column">
+                    {% if item.risk_status %}
+                    {% set risk_status_text = item.risk_status %}
+                    <span class="tag tag-risk" title="{{ risk_status_text }}">{{ risk_status_text[:60] ~ ('...' if risk_status_text|length > 60 else '') }}</span>
+                    {% endif %}
+                    {% if item.suggested_action %}
+                    {% set suggested_action_text = item.suggested_action %}
+                    <span class="tag tag-action" title="{{ suggested_action_text }}">{{ suggested_action_text[:60] ~ ('...' if suggested_action_text|length > 60 else '') }}</span>
+                    {% endif %}
                     {% if not item.risk_status and not item.suggested_action %}<span class="sub-text">暂无风险和建议标记</span>{% endif %}
-                    <div class="sub-text">备注：{{ item.note or '无' }}</div>
+                    {% set holding_note = item.note or '无' %}
+                    <div class="sub-text compact risk-summary" title="备注：{{ holding_note }}">备注：{{ holding_note[:60] ~ ('...' if holding_note|length > 60 else '') }}</div>
                   </td>
                   <td>
                     <div>累计买入：{{ item.buy_amount_display }}</div>
