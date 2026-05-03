@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from stock_analyse.infrastructure.data_sources.news.eastmoney_news_client import stockNewsData
+from stock_analyse.infrastructure.persistence.file_cache import FileCacheUtils
+
 
 class AIStockDataFacade:
     """AI 分析前置数据快照门面。
@@ -39,6 +42,7 @@ class AIStockDataFacade:
         self._company_service_factory = company_service_factory
         self._market_service_factory = market_service_factory
         self._report_service = report_service
+        self._cache_service = FileCacheUtils(market='none', cache_dir='ai_stock_snapshot')
 
     def build_snapshot(
         self,
@@ -107,11 +111,19 @@ class AIStockDataFacade:
             return {'spot': None}
 
     def _build_news(self, stock_code: str):
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        report_type = f'{stock_code}_news_top10'
+        cached_data = self._cache_service.read_from_serialized(current_date, report_type)
+        if cached_data is not None:
+            return cached_data
         try:
             news_df = stockNewsData.stock_news_em(symbol=stock_code, pageSize=10)
             if news_df is None:
-                return []
-            return news_df.head(10).to_dict('records')
+                result = []
+            else:
+                result = news_df.head(10).to_dict('records')
+            self._cache_service.write_to_cache_serialized(current_date, report_type, result)
+            return result
         except Exception:
             return []
 

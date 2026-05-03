@@ -197,31 +197,41 @@ class stockCompanyInfo:
 
     # 主营业务介绍 根据主营业务网络搜索相关事件报道
     def get_stock_zyjs(self):
+        current_date = self.reportUtils.get_current__history_date_str()
+        report_type = f"{self.market}_{self.symbol}_stock_zyjs"
+        cached_data = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_data is not None:
+            return cached_data
         if self.market  == self.HongKong or self.market == self.usa:
-            return self.get_default_df()
-        stock_zyjs_ths_df = ak.stock_zyjs_ths(symbol=self.symbol)
-        return stock_zyjs_ths_df
+            result = self.get_default_df()
+        else:
+            result = ak.stock_zyjs_ths(symbol=self.symbol)
+        if result is not None:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, result)
+        return result
 
     def get_stock_name(self):
         """ 获取股票名称"""
+        current_date = self.reportUtils.get_current__history_date_str()
+        report_type = f"{self.market}_{self.symbol}_stock_name"
+        cached_data = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_data is not None:
+            return cached_data
         try:
             if self.market == self.ETF:
-                return self.symbol
+                stock_name = self.symbol
             elif self.market == self.HongKong:
                 stock_individual = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol, token=self.xq_a_token)
                 stock_name = stock_individual[stock_individual['item'] == 'comcnname']['value'].values[0]
-                return stock_name
             elif self.market == self.usa:
                 symbol = self.get_usa_code()
                 stock_individual_info_em_df = ak.stock_individual_basic_info_us_xq(symbol=symbol, token=self.xq_a_token)
-                stock_name = \
-                stock_individual_info_em_df[stock_individual_info_em_df['item'] == 'org_name_cn']['value'].values[0]
-                return stock_name
+                stock_name = stock_individual_info_em_df[stock_individual_info_em_df['item'] == 'org_name_cn']['value'].values[0]
             else:
                 stock_individual_info_em_df = ak.stock_individual_info_em(symbol=self.symbol)
-                stock_name = \
-                stock_individual_info_em_df[stock_individual_info_em_df['item'] == '股票简称']['value'].values[0]
-                return stock_name
+                stock_name = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '股票简称']['value'].values[0]
+            self.cache_service.write_to_cache_serialized(current_date, report_type, stock_name)
+            return stock_name
         except Exception as e:
             self.logger.error(f"调用方法时发生属性错误，请检查对象是否正确初始化: {e}")
             traceback.print_exc()
@@ -237,28 +247,24 @@ class stockCompanyInfo:
 
         :return:
         """
-        # 个股信息查询
-        # 个股信息查询
+        current_date = self.reportUtils.get_current__history_date_str()
+        report_type = f"{self.market}_{self.symbol}_stock_individual_info"
+        cached_data = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_data is not None:
+            return cached_data
         try:
             if self.market == self.ETF:
-                # 创建一个默认的 DataFrame
-                default_df = self.get_default_df()
-                return default_df
+                result = self.get_default_df()
             elif self.market == self.HongKong:
-                # [comunic 公司代码，comcnname 公司中文名称，comenname 公司英文名称，incdate 成立日期，rgiofc 注册办公地址，hofclctmbu 总部办公地址，chairman 董事长，mbu 主营业务，comintr 公司简介，refccomty 参考社区，numtissh 发行股数，ispr 发行价格，nrfd 净资产，nation_name 国家名称，tel 联系电话，fax 传真号码，email 电子邮箱，web_site 官方网站，lsdateipo 上市日期，mainholder 主要股东]
-                stock_individual_info_em_df = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol,
-                                                                                   token=self.xq_a_token)
-                return stock_individual_info_em_df
+                result = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol, token=self.xq_a_token)
             elif self.market == self.usa:
                 symbol = self.get_usa_code()
-                # [org_id 机构代码，org_name_cn 机构中文名，org_short_name_cn 机构中文简称，org_name_en 机构英文名，org_short_name_en 机构英文简称，main_operation_business 主要经营业务，operating_scope 经营范围，district_encode 地区编码，org_cn_introduction 机构中文简介，legal_representative 法定代表人，general_manager 总经理，secretary 秘书，established_date 成立日期，reg_asset 注册资产，staff_num 员工人数，telephone 电话号码，postcode 邮政编码，fax 传真，email 电子邮箱，org_website 机构官网，reg_address_cn 注册地址（中文）, reg_address_en 注册地址（英文）, office_address_cn 办公地址（中文）, office_address_en 办公地址（英文）, currency_encode 货币编码，currency 货币，listed_date 上市日期，td_mkt 交易市场，chairman 董事长，executives_nums 高管人数，mainholder 主要持有者]  上面内容显示成一行
-                stock_individual_info_em_df = ak.stock_individual_basic_info_us_xq(symbol=symbol, token=self.xq_a_token)
-                return stock_individual_info_em_df
+                result = ak.stock_individual_basic_info_us_xq(symbol=symbol, token=self.xq_a_token)
             else:
-                # [最新，股票代码，股票简称，总股本，流通股，总市值，流通市值，行业，上市时间]
-                stock_individual_info_em_df = ak.stock_individual_info_em(symbol=self.symbol)
-                return stock_individual_info_em_df
-
+                result = ak.stock_individual_info_em(symbol=self.symbol)
+            if result is not None:
+                self.cache_service.write_to_cache_serialized(current_date, report_type, result)
+            return result
         except  Exception as e:
             self.logger.error(f"get_stock_individual_info error {self.symbol} 错误: {e}")
             traceback.print_exc()
@@ -332,26 +338,29 @@ class stockCompanyInfo:
     # 历史的个股资金流
     def get_stock_individual_fund_flow(self):
         # 历史的个股资金流
-
+        current_date = self.reportUtils.get_current__history_date_str()
+        report_type = f"{self.market}_{self.symbol}_individual_fund_flow"
+        cached_data = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_data is not None:
+            return cached_data
         try:
             if not isinstance(self.market, str):
                 raise ValueError(f'market 必须是字符串，当前类型: {type(self.market).__name__}')
             normalized_market = self.market.strip()
             market_name = normalized_market.lower()
             if(normalized_market == self.HongKong or normalized_market == self.usa):
-                return self.get_default_df()
-            if(normalized_market == 'zq'):
-                market_name = 'sh'
-            stock_individual_fund_flow_df = ak.stock_individual_fund_flow(stock=self.symbol, market=market_name)
-            # 转换日期列为 datetime 类型，以便进行排序
-            stock_individual_fund_flow_df['日期'] = pd.to_datetime(stock_individual_fund_flow_df['日期'])
-            # 按日期降序排序f
-            sorted_data = stock_individual_fund_flow_df.sort_values(by='日期', ascending=False)
-            num_records = min(20, len(sorted_data))
-            # 提取最近的至少20条记录，如果不足20条则提取所有记录
-            recent_data = sorted_data.head(num_records)
-            stock_individual_fund_flow_df = recent_data
-            return stock_individual_fund_flow_df
+                result = self.get_default_df()
+            else:
+                if(normalized_market == 'zq'):
+                    market_name = 'sh'
+                stock_individual_fund_flow_df = ak.stock_individual_fund_flow(stock=self.symbol, market=market_name)
+                stock_individual_fund_flow_df['日期'] = pd.to_datetime(stock_individual_fund_flow_df['日期'])
+                sorted_data = stock_individual_fund_flow_df.sort_values(by='日期', ascending=False)
+                num_records = min(20, len(sorted_data))
+                result = sorted_data.head(num_records)
+            if result is not None:
+                self.cache_service.write_to_cache_serialized(current_date, report_type, result)
+            return result
         except Exception as e:
             self.logger.error(f"Error occurred: {e}")
             return pd.DataFrame()
