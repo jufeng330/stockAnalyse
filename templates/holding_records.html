@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }} - 交易决策中心</title>
+  <link rel="stylesheet" href="/static/ui/nav.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #1f2937; min-height: 100vh; }
+    .app-shell { max-width: 1520px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+    .sidebar, .header, .panel, .record-card, .score-card { background: rgba(255, 255, 255, 0.96); border-radius: 16px; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.12); backdrop-filter: blur(8px); }
+    .sidebar { padding: 20px 16px; position: sticky; top: 20px; align-self: start; min-height: calc(100vh - 48px); }
+    .header, .panel { padding: 20px; }
+    .header { margin-bottom: 20px; }
+    .panel { margin-bottom: 20px; }
+    .header h2 { margin: 0 0 8px; font-size: 30px; color: #111827; }
+    .header p, .panel-desc, .muted { margin: 0; color: #6b7280; line-height: 1.6; }
+    .score-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .score-card { padding: 16px; color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+    .score-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; opacity: .92; }
+    .score-value { font-size: 28px; font-weight: 800; }
+    .score-meta { margin-top: 4px; font-size: 12px; opacity: .9; }
+    .panel-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+    .panel h3 { margin: 0; font-size: 20px; color: #111827; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .btn-light, .row-link { border: none; border-radius: 12px; padding: 12px 14px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+    .btn-light { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
+    .row-link.primary { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
+    .record-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .record-card { padding: 18px; }
+    .record-card h4 { margin: 0 0 8px; font-size: 16px; }
+    .record-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+    .record-summary { color: #6b7280; font-size: 13px; line-height: 1.7; word-break: break-word; }
+    .empty-state { display: grid; place-items: center; min-height: 180px; text-align: center; border: 1px dashed #d1d5db; border-radius: 12px; background: #fff; padding: 24px; }
+    @media (max-width: 1360px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; min-height: auto; }
+      .score-grid, .record-detail-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 720px) {
+      .score-grid, .record-detail-grid { grid-template-columns: 1fr; }
+      .panel-header { flex-direction: column; align-items: stretch; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" data-page="holding-records"></aside>
+    <main>
+      <div class="header">
+        <h2>{{ title }}</h2>
+        <p>{{ description }}</p>
+        <p class="muted" style="margin-top:8px;">当前标的：{{ holding_stock.stock_name }} {{ holding_stock.stock_code }}（{{ holding_stock.market or 'A股' }}）</p>
+      </div>
+
+      <div class="score-grid">
+        <div class="score-card"><h3>历史记录总数</h3><div class="score-value">{{ summary.total_count }}</div><div class="score-meta">当前持仓标的全部历史记录</div></div>
+        <div class="score-card"><h3>二次分析记录</h3><div class="score-value">{{ summary.reanalysis_count }}</div><div class="score-meta">持仓二次分析</div></div>
+        <div class="score-card"><h3>买卖决策记录</h3><div class="score-value">{{ summary.decision_count }}</div><div class="score-meta">买卖决策草案</div></div>
+        <div class="score-card"><h3>复盘记录</h3><div class="score-value">{{ summary.review_count }}</div><div class="score-meta">持仓复盘记录</div></div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>同级历史记录列表</h3>
+            <p class="panel-desc">统一查看当前持仓标的的二次分析、买卖决策与复盘记录。</p>
+          </div>
+          <div class="toolbar">
+            <a class="btn-light" href="/holding-stocks#holding-table">返回持仓列表</a>
+          </div>
+        </div>
+
+        <div class="record-grid">
+          <div class="record-card">
+            <h4>{{ holding_stock.stock_name }} {{ holding_stock.stock_code }} <span class="muted">({{ holding_stock.market or 'A股' }})</span></h4>
+            <div class="record-detail-grid">
+              <div class="record-card">
+                <h4>二次分析记录</h4>
+                {% if reanalysis_records %}
+                  {% for record in reanalysis_records %}
+                  <div style="margin-bottom: 10px;">
+                    <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.stance or '待确认立场' }}</div>
+                    <div class="record-summary">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    <a class="row-link primary" href="{{ record.detail_url }}">查看页面</a>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="muted">暂无二次分析记录</p>
+                {% endif %}
+              </div>
+              <div class="record-card">
+                <h4>买卖决策记录</h4>
+                {% if decision_records %}
+                  {% for record in decision_records %}
+                  <div style="margin-bottom: 10px;">
+                    <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.decision_type_label or record.decision_type or '未给出动作' }}</div>
+                    <div class="record-summary">{{ record.conclusion_summary or '暂无结论摘要' }}</div>
+                    <a class="row-link primary" href="{{ record.detail_url }}">查看页面</a>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="muted">暂无买卖决策记录</p>
+                {% endif %}
+              </div>
+              <div class="record-card">
+                <h4>复盘记录</h4>
+                {% if review_records %}
+                  {% for record in review_records %}
+                  <div style="margin-bottom: 10px;">
+                    <div><strong>{{ record.trade_date or '-' }}</strong> · {{ record.review_type_label or record.review_type or '待确认类型' }}</div>
+                    <div class="record-summary">{{ record.next_action_summary or record.performance_summary or '暂无结论摘要' }}</div>
+                    <a class="row-link primary" href="{{ record.detail_url }}">查看页面</a>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="muted">暂无复盘记录</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/ui/nav.js"></script>
+</body>
+</html>

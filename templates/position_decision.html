@@ -356,7 +356,7 @@
                     <div class="muted" style="margin-bottom:12px;font-size:13px;">买卖决策结果会在下方 Tab 区域展示。</div>
                     <div id="resultsContent">
                         {% if selected_record %}
-                        <div id="positionDecisionPrefill" data-result='{{ selected_record.raw_result_json | tojson | forceescape }}'></div>
+                        <script id="positionDecisionPrefill" type="application/json">{{ selected_record.raw_result_json | tojson }}</script>
                         {% else %}
                         <div class="empty-state">
                             <div style="font-size:48px;">📊</div>
@@ -784,10 +784,19 @@
 
         window.addEventListener('DOMContentLoaded', () => {
             const prefill = document.getElementById('positionDecisionPrefill');
-            if (prefill?.dataset?.result) {
-                currentResult = JSON.parse(prefill.dataset.result);
-                renderPositionDecisionResult(currentResult);
-                addLog('已加载历史买卖决策记录', 'success');
+            const prefillText = prefill?.textContent?.trim();
+            if (prefillText) {
+                try {
+                    currentResult = JSON.parse(prefillText);
+                    renderPositionDecisionResult(currentResult);
+                    setProgress(100, '已加载历史买卖决策记录');
+                    setSystemStatus('已加载历史买卖决策记录');
+                    addLog('已加载历史买卖决策记录', 'success');
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error || '历史买卖决策记录解析失败');
+                    addLog(`历史买卖决策记录解析失败: ${message}`, 'error');
+                    renderResultError(`历史买卖决策记录解析失败：${message}`);
+                }
             }
         });
     </script>

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from flask import current_app, jsonify, render_template, request, send_file
+from flask import current_app, jsonify, redirect, render_template, request, send_file
 
 from stock_analyse.domain.strategies.selection_strategy_service import STRATEGY_NAMES
 
@@ -62,7 +62,17 @@ def register_misc_routes(app):
 
     @app.route('/holding-records', methods=['GET'])
     def holding_records():
-        return send_file(UI_DOC_ROOT / 'holding_records_page.html')
+        holding_stock_id = (request.args.get('holding_stock_id') or '').strip()
+        if not holding_stock_id:
+            return redirect(_trading_decision_service().build_default_holding_records_url())
+        try:
+            page_data = _trading_decision_service().build_holding_records_page_data(holding_stock_id)
+        except ValueError as exc:
+            message = str(exc)
+            code = 'not_found' if '不存在' in message else 'bad_request'
+            status_code = 404 if code == 'not_found' else 400
+            return jsonify({'success': False, 'message': message, 'error': {'code': code, 'message': message}}), status_code
+        return render_template('holding_records.html', **page_data)
 
 
     @app.route('/stock-analysis-record', methods=['GET'])
