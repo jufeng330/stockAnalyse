@@ -119,6 +119,136 @@ class TradingDecisionService:
     def build_watch_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.build_focus_stocks_page_data(filters)
 
+    def _build_focus_records_history_items(self, watch_stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        history_items: list[dict[str, Any]] = []
+        for item in watch_stocks:
+            watch_stock_id = item.get('id') or ''
+            if not watch_stock_id:
+                continue
+            entry_records = self.list_entry_decision_records(watch_stock_id, limit=3)
+            stock_analysis_records = self.list_stock_analysis_records(watch_stock_id, limit=3)
+            trade_plan_records = self.list_trade_plan_analysis_records(watch_stock_id, limit=3)
+            history_items.append(
+                {
+                    'watch_stock': item,
+                    'entry_decision_records': [
+                        {**record, 'detail_url': self.build_focus_record_detail_url('entry_decision', item, record)}
+                        for record in entry_records
+                    ],
+                    'stock_analysis_records': [
+                        {**record, 'detail_url': self.build_focus_record_detail_url('stock_analysis', item, record)}
+                        for record in stock_analysis_records
+                    ],
+                    'trade_plan_records': [
+                        {**record, 'detail_url': self.build_focus_record_detail_url('trade_plan', item, record)}
+                        for record in trade_plan_records
+                    ],
+                    'counts': {
+                        'entry_decision': len(entry_records),
+                        'stock_analysis': len(stock_analysis_records),
+                        'trade_plan': len(trade_plan_records),
+                    },
+                    'latest_records': {
+                        'entry_decision': ({**entry_records[0], 'detail_url': self.build_focus_record_detail_url('entry_decision', item, entry_records[0])} if entry_records else None),
+                        'stock_analysis': ({**stock_analysis_records[0], 'detail_url': self.build_focus_record_detail_url('stock_analysis', item, stock_analysis_records[0])} if stock_analysis_records else None),
+                        'trade_plan': ({**trade_plan_records[0], 'detail_url': self.build_focus_record_detail_url('trade_plan', item, trade_plan_records[0])} if trade_plan_records else None),
+                    },
+                }
+            )
+        return history_items
+
+    def build_focus_record_detail_url(self, record_type: str, watch_stock: dict[str, Any], record: dict[str, Any]) -> str:
+        watch_stock_id = watch_stock.get('id', '')
+        record_id = record.get('id', '')
+        if record_type == 'entry_decision':
+            return f'/entry-decision?watch_stock_id={watch_stock_id}&record_id={record_id}'
+        if record_type == 'stock_analysis':
+            if (record.get('analysis_scene') or '').strip() == 'holding_reanalysis' and (record.get('holding_stock_id') or '').strip():
+                return f'/holding-reanalysis?holding_stock_id={record.get("holding_stock_id", "")}&record_id={record_id}'
+            return f'/stock-analysis-record?watch_stock_id={watch_stock_id}&record_id={record_id}&code={watch_stock.get("stock_code", "")}&market={watch_stock.get("market", "")}'
+        if record_type == 'trade_plan':
+            return f'/trade-plan-analysis?watch_stock_id={watch_stock_id}&record_id={record_id}'
+        return f'/watch-stocks?watch_stock_id={watch_stock_id}'
+
+    def build_watch_stocks_page_href(self, *, page: int, filters: dict[str, Any], history_filters: dict[str, Any]) -> str:
+        query = {
+            'page': max(int(page or 1), 1),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+            'history_page': self._to_int(history_filters.get('history_page'), default=1, minimum=1),
+            'history_page_size': self._to_int(history_filters.get('history_page_size'), default=5, minimum=1, maximum=20),
+            'history_type': history_filters.get('history_type', 'all'),
+        }
+        for key in ('keyword', 'market', 'asset_type', 'stage', 'price_zone'):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                query[key] = value
+        return '/watch-stocks?' + urlencode(query)
+
+    def build_watch_history_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
+        history_type = (filters.get('history_type') or 'all').strip() or 'all'
+        if history_type not in {'all', 'entry-decision', 'stock-analysis', 'trade-plan'}:
+            history_type = 'all'
+        return {
+            'history_type': history_type,
+            'history_page': self._to_int(filters.get('history_page'), default=1, minimum=1),
+            'history_page_size': self._to_int(filters.get('history_page_size'), default=5, minimum=1, maximum=20),
+        }
+
+    def build_watch_history_filter_options(self) -> list[dict[str, str]]:
+        return [
+            {'value': 'all', 'label': '全部历史'},
+            {'value': 'entry-decision', 'label': '仅进场决策'},
+            {'value': 'stock-analysis', 'label': '仅股票分析'},
+            {'value': 'trade-plan', 'label': '仅持仓计划'},
+        ]
+
+    def build_watch_history_filter_summary(self, history_filters: dict[str, Any]) -> str:
+        labels = {
+            'all': '当前展示全部历史类型。',
+            'entry-decision': '当前仅展示含进场决策记录的标的。',
+            'stock-analysis': '当前仅展示含股票分析记录的标的。',
+            'trade-plan': '当前仅展示含持仓计划记录的标的。',
+        }
+        return labels.get(history_filters.get('history_type', 'all'), labels['all'])
+
+    def build_watch_stocks_history_href(self, *, page: int, filters: dict[str, Any], history_filters: dict[str, Any]) -> str:
+        query = {
+            'page': self._to_int(filters.get('page'), default=1, minimum=1),
+            'page_size': self._to_int(filters.get('page_size'), default=20, minimum=1, maximum=100),
+            'history_page': max(int(page or 1), 1),
+            'history_page_size': self._to_int(history_filters.get('history_page_size'), default=5, minimum=1, maximum=20),
+            'history_type': history_filters.get('history_type', 'all'),
+        }
+        for key in ('keyword', 'market', 'asset_type', 'stage', 'price_zone'):
+            value = (filters.get(key) or '').strip() if isinstance(filters.get(key), str) else filters.get(key)
+            if value:
+                query[key] = value
+        return '/watch-stocks?' + urlencode(query)
+
+    def _filter_watch_records_history_items(self, history_items: list[dict[str, Any]], history_type: str) -> list[dict[str, Any]]:
+        if history_type == 'entry-decision':
+            return [item for item in history_items if item.get('entry_decision_records')]
+        if history_type == 'stock-analysis':
+            return [item for item in history_items if item.get('stock_analysis_records')]
+        if history_type == 'trade-plan':
+            return [item for item in history_items if item.get('trade_plan_records')]
+        return history_items
+
+    def _paginate_items(self, items: list[dict[str, Any]], *, page: int, page_size: int) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        safe_page = max(int(page or 1), 1)
+        safe_page_size = max(min(int(page_size or 20), 100), 1)
+        total = len(items)
+        total_pages = max((total + safe_page_size - 1) // safe_page_size, 1)
+        current_page = min(safe_page, total_pages)
+        start = (current_page - 1) * safe_page_size
+        end = start + safe_page_size
+        return items[start:end], {
+            'page': current_page,
+            'page_size': safe_page_size,
+            'total': total,
+            'total_pages': total_pages,
+        }
+
     def build_focus_stocks_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         return self.build_focus_stocks_page_data(filters)
 
@@ -208,11 +338,75 @@ class TradingDecisionService:
         return self.build_focus_history_center_page_context(filters)
 
 
+    def build_holding_summary_badges(self, item: dict[str, Any]) -> list[str]:
+        badges: list[str] = []
+        if item.get('risk_status'):
+            badges.append(item['risk_status'])
+        if item.get('suggested_action'):
+            badges.append(item['suggested_action'])
+        return badges
+
+    def format_holding_quantity(self, value: Any) -> str:
+        quantity = self._to_float(value)
+        if quantity is None:
+            return '0'
+        if float(quantity).is_integer():
+            return str(int(quantity))
+        return f'{quantity:.2f}'
+
+    def format_holding_amount(self, value: Any) -> str:
+        amount = self._to_float(value)
+        if amount is None:
+            return '--'
+        return f'¥{amount:,.2f}'
+
+    def format_holding_percent(self, value: Any) -> str:
+        percent = self._to_float(value)
+        if percent is None:
+            return '--'
+        return f'{percent:+.2f}%'
+
+    def format_holding_price(self, value: Any) -> str:
+        price = self._to_float(value)
+        if price is None:
+            return '--'
+        return f'¥{price:,.2f}'
+
+    def build_holding_stock_recent_trade_label(self, item: dict[str, Any]) -> str:
+        return item.get('latest_buy_at') or '--'
+
+    def build_holding_stock_latest_review_label(self, item: dict[str, Any]) -> str:
+        return item.get('last_review_at') or '--'
+
+    def build_holding_stock_row_view(self, item: dict[str, Any]) -> dict[str, Any]:
+        payload = self._build_holding_stock_payload(item)
+        payload['action_links'] = self.build_holding_action_links(payload)
+        payload['badges'] = self.build_holding_summary_badges(payload)
+        return payload
+
+    def build_holding_stock_display_payload(self, item: dict[str, Any]) -> dict[str, Any]:
+        payload = self.build_holding_stock_row_view(item)
+        payload['latest_buy_label'] = self.build_holding_stock_recent_trade_label(payload)
+        payload['latest_review_label'] = self.build_holding_stock_latest_review_label(payload)
+        payload['quantity_display'] = self.format_holding_quantity(payload.get('quantity'))
+        payload['average_cost_display'] = self.format_holding_price(payload.get('average_cost'))
+        payload['current_price_display'] = self.format_holding_price(payload.get('current_price'))
+        payload['market_value_display'] = self.format_holding_amount(payload.get('market_value'))
+        payload['buy_amount_display'] = self.format_holding_amount(payload.get('total_buy_amount'))
+        payload['sell_amount_display'] = self.format_holding_amount(payload.get('total_sell_amount'))
+        payload['unrealized_pnl_display'] = self.format_holding_amount(payload.get('unrealized_pnl'))
+        payload['unrealized_pnl_pct_display'] = self.format_holding_percent(payload.get('unrealized_pnl_pct'))
+        return payload
+
+    def build_holding_stocks_display_items(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        result = self.holding_repository.list(self.normalize_holding_filters(filters or {}))
+        return [self.build_holding_stock_display_payload(item) for item in result.items]
+
     def build_holding_stocks_page_data(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         raw_filters = filters or {}
         normalized_filters = self.normalize_holding_filters(raw_filters)
         result = self.holding_repository.list(normalized_filters)
-        items = [self._build_holding_stock_payload(item) for item in result.items]
+        items = [self.build_holding_stock_display_payload(item) for item in result.items]
         pagination = {
             **result.pagination,
             'total_pages': max((result.pagination.get('total', 0) + result.pagination.get('page_size', 20) - 1) // result.pagination.get('page_size', 20), 1),
@@ -227,6 +421,36 @@ class TradingDecisionService:
             },
             'filters': normalized_filters,
             'filter_options': self._build_holding_filter_options(result.items),
+            'form_defaults': self.build_holding_form_defaults(),
+            'title': self.build_holding_page_title(),
+            'description': self.build_holding_page_description(),
+            'empty_state': self.build_holding_empty_state(),
+            'reset_href': self.build_holding_stocks_reset_href(),
+        }
+
+    def build_holding_stocks_page_vm(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_data(filters)
+
+    def build_holding_stocks_page_context(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.build_holding_stocks_page_vm(filters)
+
+    def build_holding_page_title(self) -> str:
+        return '持仓股票列表'
+
+    def build_holding_page_description(self) -> str:
+        return '统一查看持仓标的、仓位摘要、风险状态以及买卖决策/复盘/历史记录入口。'
+
+    def build_holding_empty_state(self) -> dict[str, str]:
+        return {
+            'title': '暂无持仓股票',
+            'description': '请先新增持仓股票后再查看仓位摘要与历史记录。',
+        }
+
+    def build_holding_form_defaults(self) -> dict[str, Any]:
+        return {
+            'trade_date': datetime.now().strftime('%Y-%m-%d'),
+            'asset_type': '股票',
+            'market': 'SH',
         }
 
     def build_holding_stocks_page_href(self, *, page: int, filters: dict[str, Any]) -> str:
@@ -268,6 +492,10 @@ class TradingDecisionService:
     def get_holding_stock(self, holding_stock_id: str) -> dict[str, Any] | None:
         item = self.holding_repository.get_by_id(holding_stock_id)
         return self._build_holding_stock_payload(item) if item else None
+
+    def get_watch_stock(self, watch_stock_id: str) -> dict[str, Any] | None:
+        row = self.repository.get_by_id(watch_stock_id)
+        return self._format_watch_stock_item(row) if row else None
 
     def get_holding_stock_by_watch_stock(self, watch_stock_id: str) -> dict[str, Any] | None:
         item = self.holding_repository.get_by_linked_watch_stock_id(watch_stock_id)
@@ -1347,6 +1575,36 @@ class TradingDecisionService:
                 'last_analysis_at': record.get('trade_date') or '',
             },
         )
+
+    def build_focus_stock_analysis_record_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+
+        watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+        history_items = self.list_stock_analysis_records(watch_stock_id, limit=10)
+        selected_record = None
+        if record_id:
+            selected_record = self.get_stock_analysis_record(record_id)
+            if not selected_record or selected_record.get('watch_stock_id') != watch_stock_id:
+                raise ValueError('股票分析记录不存在')
+        elif history_items:
+            selected_record = history_items[0]
+
+        return {
+            'page_mode': 'watch_stock_analysis',
+            'page_title': '股票分析记录',
+            'page_description': '该页面复用单股 AI 分析链路发起研究型分析，并将后台返回结果按真实数据结构动态拆分为多个结果标签页。',
+            'analyze_button_text': '开始股票分析',
+            'watch_stock': watch_stock,
+            'holding_stock': None,
+            'display_market': watch_stock.get('market') or 'A股',
+            'selected_record': selected_record,
+            'history_items': history_items,
+        }
+
+    def build_stock_analysis_record_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        return self.build_focus_stock_analysis_record_page_data(watch_stock_id, record_id)
 
     def build_trade_plan_analysis_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
         watch_stock = self.get_watch_stock(watch_stock_id)
