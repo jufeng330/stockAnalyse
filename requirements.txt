@@ -5,6 +5,7 @@ scipy==1.15.1
 pandas>=2.2.3
 # 数据获取和分析库
 akshare
+futu-api
 tqdm==4.67.1
 
 # GUI库

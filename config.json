@@ -32,6 +32,23 @@
         "technical_period_days": 180,
         "financial_indicators_count": 25
     },
+    "market_data": {
+        "default_provider": "akshare",
+        "providers_by_market": {
+            "SH": "akshare",
+            "SZ": "akshare",
+            "H": "akshare",
+            "HK": "akshare",
+            "usa": "futu"
+        },
+        "providers": {
+            "futu": {
+                "enabled": true,
+                "opend_host": "127.0.0.1",
+                "opend_port": 11111
+            }
+        }
+    },
     "web_auth": {
         "enabled": true,
         "password": "my_password",

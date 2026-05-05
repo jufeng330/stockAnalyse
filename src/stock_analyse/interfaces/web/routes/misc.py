@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from flask import current_app, jsonify, redirect, render_template, request, send_file
 
 from stock_analyse.domain.strategies.selection_strategy_service import STRATEGY_NAMES
+from stock_analyse.infrastructure.config.settings import get_settings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 UI_DOC_ROOT = PROJECT_ROOT / 'doc' / 'ui'
-CONFIG_PATH = PROJECT_ROOT / 'config.json'
 
 
 def _trading_decision_service():
@@ -26,8 +25,8 @@ def _mask_secret(value: str) -> str:
 
 
 def _load_masked_config() -> dict:
-    with CONFIG_PATH.open('r', encoding='utf-8') as file:
-        config = json.load(file)
+    settings = get_settings()
+    config = settings.as_service_config()
 
     ai_config = dict(config.get('ai', {}))
     if 'api_key' in ai_config:

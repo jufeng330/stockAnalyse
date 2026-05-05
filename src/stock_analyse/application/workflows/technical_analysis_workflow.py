@@ -22,6 +22,13 @@ class TechnicalAnalysisWorkflow:
     用于单只股票技术评分、指标计算与全市场扫描中的单票分析，是传统量化流程与 AI 快照构建都会复用的应用层工作流。
     """
 
+    @staticmethod
+    def _resolve_stock_code(stock, market: str) -> str:
+        stock_code = str(stock.get('股票代码') or stock.get('代码') or '').strip()
+        if market == 'usa' and '.' in stock_code:
+            return stock_code.split('.', 1)[1].strip()
+        return stock_code
+
     def __init__(self, params: Optional[TechnicalParams] = None, market: str = 'SH') -> None:
         self._setup_logging()
         self.params = params or TechnicalParams.default()
@@ -122,8 +129,8 @@ class TechnicalAnalysisWorkflow:
     def analyze_stock(self, stock, market: str = 'SH') -> dict:
         if isinstance(stock, pd.DataFrame) and len(stock) == 1:
             stock = stock.iloc[0]
-        stock_code = stock['代码']
-        market = stock['market']
+        market = str(stock.get('market', market)).strip()
+        stock_code = self._resolve_stock_code(stock, market)
         try:
             stock_service = stockCompanyInfo(marker=market, symbol=stock_code)
             end_date_str = self.date_utils.get_current_history_date_st()

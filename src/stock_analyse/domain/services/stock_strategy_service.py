@@ -171,7 +171,13 @@ class StockStrategy:
         wave_service = StockWaveAnalyzer(market=self.market,symbol=stock_code)
 
         df_wave,total_trend,last_trend = wave_service.analysis_stock_trend(stock_df = df_history_data)
-        wave_percent = df_wave['波动百分比'].iloc[-1]
+        if df_wave is None or df_wave.empty or '波动百分比' not in df_wave.columns:
+            df_wave = pd.DataFrame()
+            wave_percent = 0
+            total_trend = '波动'
+            last_trend = '未知趋势'
+        else:
+            wave_percent = pd.to_numeric(df_wave['波动百分比'], errors='coerce').fillna(0).iloc[-1]
         if total_trend == '上升':
             if last_trend == '翻转中':
                 if wave_percent<3:

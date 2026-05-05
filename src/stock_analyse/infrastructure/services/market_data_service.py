@@ -16,6 +16,8 @@ from stock_analyse.infrastructure.services.company_data_service import stockComp
 from stock_analyse.infrastructure.persistence.file_cache import FileCacheUtils
 from stock_analyse.domain.services.stock_strategy_service import StockStrategy
 from stock_analyse.shared.stock_utils import StockUtils
+from stock_analyse.infrastructure.config.settings import get_settings
+from stock_analyse.infrastructure.services.futu_market_data_provider import FutuMarketDataProvider
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -104,11 +106,59 @@ class stockBorderInfo:
         cache = True
         current_date = self.reportUtils.get_current__history_date_str()
         report_type = self.market+'_spot_em_zh_df'
+        normalized_market = get_settings().market_data.normalize_market(self.market)
+        configured_provider = get_settings().market_data.provider_for_market(normalized_market)
+        use_futu_provider = configured_provider == 'futu' and FutuMarketDataProvider.is_enabled(normalized_market)
+
         stock_zh_a_spot_em_df = self.cache_service.read_from_serialized(current_date, report_type)
         if stock_zh_a_spot_em_df is not None and cache:
-            code_col = '代码'  # 替换为实际列名
-            # 使用正则表达式移除前缀 (bj|sz|sh)，不区分大小写
-            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].str.replace(
+            code_col = '代码'
+            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].astype(str).str.replace(
+                r'^(bj|sz|sh)', '', case=False, regex=True
+            ).str.upper()
+            if self.market == 'usa':
+                stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码'].apply(
+                    lambda x: self.reportUtils.get_stock_code(market=self.market, symbol=x))
+            else:
+                stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码']
+            self.logger.info(
+                'Loaded stock spot from cache | market=%s | provider=%s | rows=%s',
+                normalized_market,
+                configured_provider,
+                len(stock_zh_a_spot_em_df),
+            )
+            return stock_zh_a_spot_em_df
+
+        if use_futu_provider:
+            try:
+                provider_df = FutuMarketDataProvider(normalized_market).get_stock_spot(normalized_market)
+                if provider_df is not None and not provider_df.empty:
+                    self.logger.info(
+                        'Loaded stock spot via provider | market=%s | provider=%s | rows=%s',
+                        normalized_market,
+                        configured_provider,
+                        len(provider_df),
+                    )
+                    return provider_df
+            except Exception as exc:
+                self.logger.warning(
+                    'Failed to load stock spot via provider | market=%s | provider=%s | fallback=akshare | error=%s',
+                    normalized_market,
+                    configured_provider,
+                    exc,
+                )
+
+        if configured_provider == 'futu' and not use_futu_provider:
+            self.logger.info(
+                'Configured provider unavailable, fallback to AkShare | market=%s | provider=%s | fallback=akshare',
+                normalized_market,
+                configured_provider,
+            )
+
+        stock_zh_a_spot_em_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if stock_zh_a_spot_em_df is not None and cache:
+            code_col = '代码'
+            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].astype(str).str.replace(
                 r'^(bj|sz|sh)', '', case=False, regex=True
             ).str.upper()
             if self.market == 'usa':
@@ -117,26 +167,22 @@ class stockBorderInfo:
             else:
                 stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码']
             return stock_zh_a_spot_em_df
+
+        if use_futu_provider:
+            self.logger.info('Provider fallback reached AkShare live path | market=%s | provider=futu', normalized_market)
+
         if self.market == 'SH' or self.market == 'SZ':
             stock_zh_a_spot_em_df = self.get_stock_zh_a_spot_em_df()
-            # stock_zh_a_spot_em_df = ak.stock_zh_ah_spot()
-            code_col = '代码'  # 替换为实际列名
-            # 使用正则表达式移除前缀 (bj|sz|sh)，不区分大小写
-            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].str.replace(
+            code_col = '代码'
+            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].astype(str).str.replace(
                 r'^(bj|sz|sh)', '', case=False, regex=True
             ).str.upper()
-
-
         elif self.market == 'usa':
-            # ['序号', '名称', '最新价', '涨跌额', '涨跌幅', '开盘价', '最高价', '最低价', '昨收价', '总市值', '市盈率','成交量', '成交额', '振幅', '换手率', '代码']
             stock_zh_a_spot_em_df = ak.stock_us_spot_em()
             stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码'].apply(
                 lambda x: self.reportUtils.get_stock_code(market=self.market, symbol=x))
-        elif self.market == 'H':
-            # ['序号', '代码', '名称', '最新价', '涨跌额', '涨跌幅', '今开', '最高', '最低', '昨收', '成交量', '成交额']
-            # stock_zh_a_spot_em_df = ak.stock_hk_spot_em()
+        elif self.market == 'H' or self.market == 'HK':
             stock_zh_a_spot_em_df = ak.stock_hk_main_board_spot_em()
-            # stock_hk_valuation_baidu_df = ak.stock_hk_valuation_baidu(symbol="06969", indicator="总市值", period="近一年")
         else:
             stock_zh_a_spot_em_df = ak.stock_zh_a_spot_em()
 

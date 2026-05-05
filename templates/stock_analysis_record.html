@@ -700,6 +700,15 @@
             document.getElementById('systemStatus').textContent = text;
         }
 
+        function unpackSsePayload(event) {
+            try {
+                const payload = JSON.parse(event.data || '{}');
+                return payload && typeof payload === 'object' ? payload : {};
+            } catch (error) {
+                return {};
+            }
+        }
+
         function initSSE() {
             if (sseConnection) {
                 sseConnection.close();
@@ -714,6 +723,37 @@
                 addLog('SSE 连接已建立', 'success');
             };
 
+            sseConnection.addEventListener('log', function(event) {
+                const payload = unpackSsePayload(event);
+                addLog(payload.message || '', payload.type || 'info');
+            });
+            sseConnection.addEventListener('progress', function(event) {
+                const payload = unpackSsePayload(event);
+                updateProgress(payload.percent || 0, payload.message || '处理中...');
+            });
+            sseConnection.addEventListener('scores_update', function(event) {
+                const payload = unpackSsePayload(event);
+                updateScores(payload.scores || {});
+            });
+            sseConnection.addEventListener('final_result', function(event) {
+                const payload = unpackSsePayload(event);
+                currentResult = payload;
+                renderResult(payload);
+            });
+            sseConnection.addEventListener('analysis_complete', function(event) {
+                const payload = unpackSsePayload(event);
+                finishAnalysis(payload.message || '分析完成');
+            });
+            sseConnection.addEventListener('analysis_error', function(event) {
+                const payload = unpackSsePayload(event);
+                renderError(payload.error || '未知错误');
+                finishAnalysis('分析失败');
+            });
+            sseConnection.addEventListener('error', function(event) {
+                const payload = unpackSsePayload(event);
+                renderError(payload.error || '未知错误');
+                finishAnalysis('分析失败');
+            });
             sseConnection.onmessage = function(event) {
                 try {
                     const payload = JSON.parse(event.data);

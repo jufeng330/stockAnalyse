@@ -3,6 +3,7 @@ import datetime
 import pandas as pd
 from stock_analyse.infrastructure.data_sources.concepts.ths_concept_client import stockConceptData
 from stock_analyse.infrastructure.data_sources.news.eastmoney_news_client import stockNewsData
+from stock_analyse.infrastructure.data_sources.searxng_client import SearxngClient
 from stock_analyse.infrastructure.analysis.technical_indicator_calculator import stockAKIndicator
 from stock_analyse.shared.report_date_utils import ReportDateUtils
 from stock_analyse.infrastructure.persistence.file_cache import FileCacheUtils
@@ -34,7 +35,9 @@ class stockCompanyInfo:
         self.logger = logging.getLogger(__name__)
         # self.border = stockBorderInfo(self.market)
         self.report_util = ReportDateUtils()
+        self.reportUtils = self.report_util
         self.cache_service = FileCacheUtils(market=self.market)
+        self.searxng = SearxngClient()
         self.mysql = MySQLCache()
 
     #  获取概念板块名称
@@ -314,13 +317,30 @@ class stockCompanyInfo:
 
     # 个股新闻查询
     def get_stock_news(self):
-        # 个股新闻
         stock_news_em_df = stockNewsData.stock_news_em(symbol=self.symbol, pageSize=10)
         if stock_news_em_df is None or stock_news_em_df.empty:
-            return stock_news_em_df
-        # 删除指定列
-        stock_news_em_df = stock_news_em_df.drop(["文章来源", "新闻链接"], axis=1)
-
+            fallback_records = self.searxng.search(
+                query=f'{self.symbol} stock latest news',
+                limit=10,
+                category='news',
+                time_range='month',
+            )
+            if not fallback_records:
+                return pd.DataFrame()
+            stock_news_em_df = pd.DataFrame([
+                {
+                    '关键词': self.symbol,
+                    '新闻标题': item.get('title', ''),
+                    '新闻内容': item.get('content', ''),
+                    '发布时间': item.get('publishedDate', '') or item.get('published_date', '') or '',
+                    '文章来源': ', '.join(item.get('engines', []) or []),
+                    '新闻链接': item.get('url', ''),
+                    'source': 'searxng',
+                }
+                for item in fallback_records
+            ])
+        if '文章来源' in stock_news_em_df.columns and '新闻链接' in stock_news_em_df.columns:
+            stock_news_em_df = stock_news_em_df.drop(["文章来源", "新闻链接"], axis=1)
         return stock_news_em_df
 
     # # 获取当前个股所在行业板块情况

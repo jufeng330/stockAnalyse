@@ -606,6 +606,15 @@
             }
         }
 
+        function unpackSsePayload(event) {
+            try {
+                const payload = JSON.parse(event.data || '{}');
+                return payload && typeof payload === 'object' ? payload : {};
+            } catch (error) {
+                return {};
+            }
+        }
+
         function initSSE() {
             if (sseConnection) {
                 sseConnection.close();
@@ -617,6 +626,48 @@
                 setSSEStatus(true);
                 addLog('SSE 连接已建立', 'success');
             };
+            sseConnection.addEventListener('log', event => {
+                const payload = unpackSsePayload(event);
+                addLog(payload.message || '', payload.type || 'info');
+            });
+            sseConnection.addEventListener('progress', event => {
+                const payload = unpackSsePayload(event);
+                updateProgress(payload.percent || 0, payload.message || '处理中...');
+            });
+            sseConnection.addEventListener('final_result', event => {
+                const payload = unpackSsePayload(event);
+                hidePausePanel();
+                currentResult = payload;
+                renderResult(payload);
+                syncSummaryFieldsFromResult(payload);
+            });
+            sseConnection.addEventListener('decision_role_result', event => {
+                const payload = unpackSsePayload(event);
+                addLog(`角色完成: ${payload.role_title || payload.role_name || 'unknown'}`, 'success');
+                renderRolePreview(payload);
+            });
+            sseConnection.addEventListener('decision_pause', event => {
+                const payload = unpackSsePayload(event);
+                showPausePanel(payload);
+                setRunningState(false, '等待补充');
+            });
+            sseConnection.addEventListener('analysis_complete', event => {
+                const payload = unpackSsePayload(event);
+                addLog(payload.message || '分析完成', 'success');
+                setRunningState(false, '分析完成');
+            });
+            sseConnection.addEventListener('analysis_error', event => {
+                const payload = unpackSsePayload(event);
+                renderError(payload.error || '未知错误');
+                addLog(payload.error || '未知错误', 'error');
+                setRunningState(false, '分析失败');
+            });
+            sseConnection.addEventListener('error', event => {
+                const payload = unpackSsePayload(event);
+                renderError(payload.error || '未知错误');
+                addLog(payload.error || '未知错误', 'error');
+                setRunningState(false, '分析失败');
+            });
             sseConnection.onmessage = event => {
                 try {
                     handleSSEMessage(JSON.parse(event.data));

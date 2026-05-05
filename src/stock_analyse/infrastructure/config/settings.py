@@ -96,11 +96,58 @@ class WebSettings:
 
 
 @dataclass(frozen=True)
+class MarketDataSettings:
+    default_provider: str
+    providers_by_market: dict[str, str]
+    provider_options: dict[str, dict[str, Any]]
+
+    @staticmethod
+    def normalize_market(market: str) -> str:
+        market_text = str(market or '').strip()
+        return 'H' if market_text.upper() == 'HK' else market_text
+
+    def provider_for_market(self, market: str) -> str:
+        normalized_market = self.normalize_market(market)
+        provider = self.providers_by_market.get(normalized_market)
+        if provider:
+            return str(provider).strip().lower()
+        fallback = self.providers_by_market.get(str(market or '').strip())
+        if fallback:
+            return str(fallback).strip().lower()
+        return self.default_provider
+
+    def uses_provider(self, market: str, provider: str) -> bool:
+        return self.provider_for_market(market) == str(provider or '').strip().lower()
+
+    @property
+    def futu_enabled(self) -> bool:
+        options = self.provider_options.get('futu', {})
+        if 'enabled' in options:
+            return bool(options.get('enabled'))
+        return os.getenv('FUTU_ENABLE', 'false').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+    @property
+    def futu_host(self) -> str:
+        options = self.provider_options.get('futu', {})
+        value = options.get('opend_host')
+        return str(value).strip() if value else os.getenv('FUTU_OPEND_HOST', '127.0.0.1')
+
+    @property
+    def futu_port(self) -> int:
+        options = self.provider_options.get('futu', {})
+        value = options.get('opend_port')
+        if value is not None:
+            return int(value)
+        return int(os.getenv('FUTU_OPEND_PORT', '11111'))
+
+
+@dataclass(frozen=True)
 class Settings:
     path: Path
     data: dict[str, Any]
     ai: AISettings
     web: WebSettings
+    market_data: MarketDataSettings
 
     @classmethod
     def from_file(cls, path: str | Path = "config.json") -> "Settings":
@@ -113,6 +160,7 @@ class Settings:
         ai_config = data.get("ai", {})
         api_keys = data.get("api_keys", {})
         web_auth = data.get("web_auth", {})
+        market_data_config = data.get("market_data", {})
         api_base_urls = ai_config.get("api_base_urls", {})
 
         provider_keys = {
@@ -154,14 +202,28 @@ class Settings:
             auth_password=os.getenv("STOCK_ANALYSE_WEB_AUTH_PASSWORD", web_auth.get("password", "")),
             session_timeout=int(web_auth.get("session_timeout", 3600)),
         )
+        market_data = MarketDataSettings(
+            default_provider=str(market_data_config.get("default_provider", "akshare")).strip().lower() or "akshare",
+            providers_by_market={
+                str(key).strip(): str(value).strip().lower()
+                for key, value in market_data_config.get("providers_by_market", {}).items()
+                if str(key).strip() and str(value).strip()
+            },
+            provider_options={
+                str(key).strip().lower(): value
+                for key, value in market_data_config.get("providers", {}).items()
+                if str(key).strip() and isinstance(value, dict)
+            },
+        )
 
-        return cls(path=settings_path, data=data, ai=ai, web=web)
+        return cls(path=settings_path, data=data, ai=ai, web=web, market_data=market_data)
 
     def as_service_config(self) -> dict[str, Any]:
         config = json.loads(json.dumps(self.data)) if self.data else {}
         config.setdefault("ai", {})
         config.setdefault("api_keys", {})
         config.setdefault("web_auth", {})
+        config.setdefault("market_data", {})
 
         config["ai"]["model_plat"] = self.ai.platform
         config["ai"]["model_name"] = self.ai.model_name
@@ -179,6 +241,16 @@ class Settings:
         config["web_auth"]["enabled"] = self.web.auth_enabled
         config["web_auth"]["password"] = self.web.auth_password
         config["web_auth"]["session_timeout"] = self.web.session_timeout
+
+        config["market_data"]["default_provider"] = self.market_data.default_provider
+        config["market_data"]["providers_by_market"] = self.market_data.providers_by_market
+        providers = config["market_data"].get("providers")
+        config["market_data"]["providers"] = providers if isinstance(providers, dict) else {}
+        config["market_data"]["providers"]["futu"] = {
+            "enabled": self.market_data.futu_enabled,
+            "opend_host": self.market_data.futu_host,
+            "opend_port": self.market_data.futu_port,
+        }
         return config
 
     def mask_secret(self, value: str | None) -> str:

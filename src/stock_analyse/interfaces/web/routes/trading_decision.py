@@ -40,7 +40,8 @@ def _service() -> TradingDecisionService:
 
 
 def _json_success(data, message: str = ''):
-    return jsonify({'success': True, 'data': data, 'message': message})
+    response = {'success': True, 'data': data, 'message': message}
+    return jsonify(response)
 
 
 def _json_error(message: str, status_code: int, code: str):
@@ -588,14 +589,18 @@ def register_trading_decision_routes(app):
         query = request.args.get('query', '')
         market = request.args.get('market', '')
         limit = request.args.get('limit', 20)
-        return _json_success(_service().search_stock_candidates(query=query, market=market, limit=int(limit or 20)))
+        data = _service().search_stock_candidates(query=query, market=market, limit=int(limit or 20))
+        logger.info('stock-search response | path=%s | query=%s | market=%s | limit=%s | data=%s', request.path, query, market, limit, data)
+        return _json_success(data)
 
     @app.route(f'{HOLDING_STOCKS_API}/stock-search', methods=['GET'])
     def search_holding_stock_candidates_api():
         query = request.args.get('query', '')
         market = request.args.get('market', '')
         limit = request.args.get('limit', 20)
-        return _json_success(_service().search_stock_candidates(query=query, market=market, limit=int(limit or 20)))
+        data = _service().search_stock_candidates(query=query, market=market, limit=int(limit or 20))
+        logger.info('stock-search response | path=%s | query=%s | market=%s | limit=%s | data=%s', request.path, query, market, limit, data)
+        return _json_success(data)
 
     @app.route(HOLDING_STOCKS_API, methods=['GET'])
     def list_holding_stocks_api():

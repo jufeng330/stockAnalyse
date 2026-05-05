@@ -11,6 +11,8 @@ from sklearn.preprocessing import StandardScaler
 # from tensorflow.keras.models import Sequential
 # from tensorflow.keras.layers import Dense
 from stock_analyse.shared.stock_utils import StockUtils
+from stock_analyse.infrastructure.config.settings import get_settings
+from stock_analyse.infrastructure.services.futu_market_data_provider import FutuMarketDataProvider
 import traceback
 
 class stockAKIndicator:
@@ -28,6 +30,38 @@ class stockAKIndicator:
     - 计算ATR指标
     - 计算OBV指标
     """
+    @staticmethod
+    def _normalize_history_code(stock_code, market):
+        normalized = str(stock_code or '').strip()
+        if market == 'usa' and '.' in normalized:
+            return normalized.split('.', 1)[1].strip()
+        return normalized
+
+    @staticmethod
+    def _normalize_history_frame(df, stock_code):
+        if df is None or df.empty:
+            return df
+        column_mapping = {
+            'date': '日期',
+            'open': '开盘',
+            'high': '最高',
+            'low': '最低',
+            'close': '收盘',
+            'volume': '成交量',
+            'amount': '成交额',
+            'turnover': '换手率',
+        }
+        df = df.rename(columns=column_mapping).copy()
+        if '股票代码' not in df.columns:
+            df['股票代码'] = stock_code
+        if '日期' in df.columns:
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+        numeric_columns = ['开盘', '收盘', '最高', '最低', '成交量', '成交额', '换手率']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df.reset_index(drop=True)
+
     def __init__(self):
         # 获取当前日期
         current_date = datetime.datetime.now()
@@ -56,98 +90,60 @@ class stockAKIndicator:
     # 根据code获取每日成交数据
     def stock_day_data_code(self, stock_code, market, start_date_str, end_date_str):
         df = None
-        if market == 'usa':
+        settings = get_settings()
+        normalized_market = settings.market_data.normalize_market(market)
+        normalized_stock_code = self._normalize_history_code(stock_code, normalized_market)
+        configured_provider = settings.market_data.provider_for_market(normalized_market)
+        if configured_provider == 'futu' and FutuMarketDataProvider.is_enabled(normalized_market) and normalized_market in {'H', 'usa'}:
             try:
-                # 1. 获取美股实时行情数据
-                #stock_us_spot_df = ak.stock_us_spot_em()
-                #self.logger.debug("美股实时行情数据：")
-                # 查找阿里巴巴的代码
-                # baba_filtered = stock_us_spot_df[stock_us_spot_df["名称"] == stock_code]
-                baba_filtered = pd.DataFrame()
-                if not baba_filtered.empty:
-                    baba_code = baba_filtered["代码"].values[0]
-                    self.logger.debug(f"美股股票的代码: {baba_code}")
-                    # 3. 获取阿里巴巴（BABA）的每日行情数据
-                    stock_us_hist_df = ak.stock_us_hist(symbol=baba_code, start_date=start_date_str,
-                                                        end_date=end_date_str)
-                    df = stock_us_hist_df
-                    # self.logger.debug(stock_us_hist_df)
-                else:
-                    stock_us_hist_df = ak.stock_us_hist(symbol=stock_code, start_date=start_date_str,
-                                                        end_date=end_date_str)
-                    df = stock_us_hist_df
-                    df['股票代码'] = stock_code
-                    # self.logger.debug(stock_us_hist_df)
+                df = FutuMarketDataProvider(normalized_market).get_history_kline(
+                    stock_code=normalized_stock_code,
+                    market=normalized_market,
+                    start_date_str=start_date_str,
+                    end_date_str=end_date_str,
+                )
             except Exception as e:
-                self.logger.error(f"获取美股数据时出现错误: {e}")
-        elif market == 'H':  # 港股数据获取
-            try:
-                # 获取港股历史数据
-                stock_hk_hist_df = ak.stock_hk_hist(symbol=stock_code, period="daily", start_date=start_date_str,
-                                                    end_date=end_date_str)
-                # self.logger.debug(stock_hk_hist_df)
-                df = stock_hk_hist_df
-                df['股票代码'] = stock_code
-
-            except Exception as e:
-                self.logger.error(f"获取债券/ETF基金数据时出现错误: {e}")
-        elif market == 'zq':  # 新增债券/ETF基金条件
-            try:
-                # 获取债券或ETF基金的历史数据
-                stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,
-                                                         end_date=end_date_str)
-                # self.logger.debug(stock_zh_a_hist_df)
-                df = stock_zh_a_hist_df
-            except Exception as e:
-                self.logger.error(f"获取债券/ETF基金数据时出现错误: {e}")
-                traceback.print_exc()
-        else:
-            try:
-                # stock_zh_a_hist_df = ak.fund_etf_hist_em(symbol=stock_code, period="daily", start_date=start_date_str,end_date=end_date_str)
-
-                # 3.历史行情数据 - 前复权
-                # 日期，开盘，收盘，最高，最低，成交量，成交额，振幅，涨跌幅，涨跌额，换手率，股票代码
-
-                sina_code = self.stockUtils.get_stock_zh_code(code=stock_code)
-                stock_zh_a_hist_df = ak.stock_zh_a_daily(symbol=sina_code, start_date=start_date_str,
-                                                         end_date=end_date_str, adjust="qfq")
-
-                df = self.stockUtils.format_history_stock_code(stock_zh_a_hist_df, stock_code)
-
-            except Exception as e:
-                self.logger.error(f"获取 A 股数据{stock_code}时出现错误: {e}")
+                self.logger.warning(
+                    f"Futu 历史行情回退到 AkShare | market={normalized_market} | stock_code={normalized_stock_code} | provider={configured_provider} | error={e}"
+                )
+        elif configured_provider == 'futu':
+            self.logger.info(
+                f"Configured Futu history provider unavailable, fallback to AkShare | market={normalized_market} | stock_code={normalized_stock_code}"
+            )
+        if df is None:
+            if normalized_market == 'usa':
                 try:
-
-                    code = stock_code
-                    stock_zh_a_hist_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date_str,
-                                                            end_date=end_date_str,
-                                                            adjust="qfq")
-
-                    df = stock_zh_a_hist_df
-
-                except Exception as e2:
-                    self.logger.error(f"获取 A 股数据{stock_code}时出现错误: {e2}")
+                    df = ak.stock_us_hist(symbol=normalized_stock_code, start_date=start_date_str, end_date=end_date_str)
+                except Exception as e:
+                    self.logger.error(f"获取美股数据时出现错误: {e}")
+            elif normalized_market in {'H', 'HK'}:
+                try:
+                    df = ak.stock_hk_hist(symbol=normalized_stock_code, period="daily", start_date=start_date_str,
+                                          end_date=end_date_str)
+                except Exception as e:
+                    self.logger.error(f"获取债券/ETF基金数据时出现错误: {e}")
+            elif normalized_market == 'zq':
+                try:
+                    df = ak.fund_etf_hist_em(symbol=normalized_stock_code, period="daily", start_date=start_date_str,
+                                             end_date=end_date_str)
+                except Exception as e:
+                    self.logger.error(f"获取债券/ETF基金数据时出现错误: {e}")
                     traceback.print_exc()
-        if df is not None:
-            def format_float(x):
-                if isinstance(x, float):
-                    return '{:.2f}'.format(x)
-                return x
-
-            # 应用格式化函数
-            df = df.apply(lambda x: x.map(format_float))
-
-            df = df.reset_index(drop=True)
-            numeric_columns = ['开盘', '收盘', '最高', '最低', '成交量']
-
-            # 遍历列名列表，仅处理存在的列
-            for col in numeric_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                    # self.logger.debug(f"成功转换列: {col}")
-                else:
-                    self.logger.info(f"警告: 列 '{col}' 不存在，已跳过")
-        return df
+            else:
+                try:
+                    sina_code = self.stockUtils.get_stock_zh_code(code=normalized_stock_code)
+                    stock_zh_a_hist_df = ak.stock_zh_a_daily(symbol=sina_code, start_date=start_date_str,
+                                                             end_date=end_date_str, adjust="qfq")
+                    df = self.stockUtils.format_history_stock_code(stock_zh_a_hist_df, normalized_stock_code)
+                except Exception as e:
+                    self.logger.error(f"获取 A 股数据{normalized_stock_code}时出现错误: {e}")
+                    try:
+                        df = ak.stock_zh_a_hist(symbol=normalized_stock_code, period="daily", start_date=start_date_str,
+                                                end_date=end_date_str, adjust="qfq")
+                    except Exception as e2:
+                        self.logger.error(f"获取 A 股数据{normalized_stock_code}时出现错误: {e2}")
+                        traceback.print_exc()
+        return self._normalize_history_frame(df, normalized_stock_code)
 
     # 移动平均线算法
     """

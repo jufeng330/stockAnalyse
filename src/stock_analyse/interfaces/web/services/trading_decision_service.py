@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import pandas as pd
 import re
 from datetime import datetime
 from pathlib import Path
@@ -500,6 +501,94 @@ class TradingDecisionService:
     def get_holding_stock_by_watch_stock(self, watch_stock_id: str) -> dict[str, Any] | None:
         item = self.holding_repository.get_by_linked_watch_stock_id(watch_stock_id)
         return self._build_holding_stock_payload(item) if item else None
+
+    def create_watch_stock(self, payload: dict[str, Any]) -> dict[str, Any]:
+        created = self.repository.create(self._normalize_watch_stock_payload(payload, creating=True))
+        return self._format_watch_stock_item(created)
+
+    def update_watch_stock(self, watch_stock_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        updated = self.repository.update(watch_stock_id, self._normalize_watch_stock_payload(payload, creating=False))
+        return self._format_watch_stock_item(updated) if updated else None
+
+    def search_stock_candidates(self, *, query: str, market: str, limit: int = 20) -> list[dict[str, Any]]:
+        keyword = str(query or '').strip()
+        if not keyword:
+            return []
+
+        lookup_market = self._normalize_lookup_market(market)
+        try:
+            spot_df = stockBorderInfo(market=lookup_market).get_stock_spot()
+        except Exception:
+            return []
+        if spot_df is None or getattr(spot_df, 'empty', True):
+            return []
+
+        code_column = self._first_existing_column(spot_df, ['股票代码', '代码', 'symbol'])
+        name_column = self._first_existing_column(spot_df, ['股票名称', '名称', 'name'])
+        if not code_column or not name_column:
+            return []
+
+        keyword_upper = keyword.upper()
+        code_series = spot_df[code_column].astype(str).str.strip()
+        name_series = spot_df[name_column].astype(str).str.strip()
+        alias_keywords = self._expand_stock_search_aliases(keyword_upper, lookup_market)
+        code_mask = code_series.str.upper().str.contains(keyword_upper, na=False)
+        name_mask = name_series.str.upper().str.contains(keyword_upper, na=False)
+        for alias_keyword in alias_keywords:
+            code_mask = code_mask | code_series.str.upper().str.contains(alias_keyword, na=False)
+            name_mask = name_mask | name_series.str.upper().str.contains(alias_keyword, na=False)
+        matched = spot_df[code_mask | name_mask].copy()
+        if getattr(matched, 'empty', True):
+            return []
+
+        alias_targets = {keyword_upper, *alias_keywords}
+        matched['_search_code'] = matched[code_column].astype(str).str.strip().str.upper()
+        matched['_search_name'] = matched[name_column].astype(str).str.strip().str.upper()
+        matched['_search_rank'] = 4
+        matched.loc[matched['_search_code'].isin(alias_targets), '_search_rank'] = 0
+        matched.loc[
+            (matched['_search_rank'] > 0) & matched['_search_name'].isin(alias_targets),
+            '_search_rank'
+        ] = 1
+        matched.loc[
+            (matched['_search_rank'] > 1) & matched['_search_code'].str.startswith(tuple(alias_targets)),
+            '_search_rank'
+        ] = 2
+        matched.loc[
+            (matched['_search_rank'] > 2) & matched['_search_name'].str.startswith(tuple(alias_targets)),
+            '_search_rank'
+        ] = 3
+        matched = matched.sort_values(by=['_search_rank', code_column], kind='stable')
+
+        price_column = self._first_existing_column(spot_df, ['最新价', '最新价格', '当前价', '收盘价'])
+        pe_column = self._resolve_pe_column(spot_df, lookup_market)
+        industry_column = self._first_existing_column(spot_df, ['所属行业', '行业'])
+        display_market = self._display_market(lookup_market)
+        safe_limit = self._to_int(limit, default=20, minimum=1, maximum=50)
+
+        candidates: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for _, row in matched.head(safe_limit * 3).iterrows():
+            code = str(row.get(code_column) or '').strip()
+            name = str(row.get(name_column) or '').strip()
+            if not code or not name or code in seen:
+                continue
+            seen.add(code)
+            candidates.append(
+                {
+                    'code': code,
+                    'name': name,
+                    'market': display_market,
+                    'display_label': f'{code} - {name} ({display_market})',
+                    'source': 'spot',
+                    'current_price': self._json_safe_number(self._to_float(row.get(price_column)) if price_column else None),
+                    'pe': self._json_safe_number(self._to_float(row.get(pe_column)) if pe_column else None),
+                    'industry': str(row.get(industry_column) or '').strip() if industry_column else '',
+                }
+            )
+            if len(candidates) >= safe_limit:
+                break
+        return candidates
 
     def create_holding_stock_buy(self, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = self._normalize_holding_buy_payload(payload, creating=True)
@@ -1576,6 +1665,44 @@ class TradingDecisionService:
             },
         )
 
+    def build_entry_decision_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
+        watch_stock = self.get_watch_stock(watch_stock_id)
+        if not watch_stock:
+            raise ValueError('关注股票不存在')
+
+        watch_stock = self._hydrate_watch_stock_market_metrics(watch_stock)
+        history_items = self.list_entry_decision_records(watch_stock_id, limit=10)
+        selected_record = None
+        if record_id:
+            selected_record = self.get_entry_decision_record(record_id)
+            if not selected_record or selected_record.get('watch_stock_id') != watch_stock_id:
+                raise ValueError('进场决策记录不存在')
+        elif history_items:
+            selected_record = history_items[0]
+
+        active_session = self.get_latest_active_entry_decision_session(watch_stock_id)
+        active_request = ((active_session or {}).get('request_json') or {}) if active_session else {}
+        active_manual_inputs = ((active_session or {}).get('manual_inputs_json') or {}) if active_session else {}
+        selected_trade_date = (selected_record or {}).get('trade_date') or active_request.get('trade_date') or datetime.now().strftime('%Y-%m-%d')
+        selected_summary = (selected_record or {}).get('conclusion_summary') or watch_stock.get('last_conclusion_summary') or ''
+
+        return {
+            'watch_stock': watch_stock,
+            'display_market': watch_stock.get('market') or 'A股',
+            'selected_record': selected_record,
+            'history_items': history_items,
+            'active_session': active_session,
+            'form_defaults': {
+                'trade_date': selected_trade_date,
+                'analysis_depth': active_request.get('analysis_depth') or 'standard',
+                'last_conclusion_summary': selected_summary,
+                'position_input': {
+                    'current_position': (((active_manual_inputs.get('position_input') or {}).get('current_position')) if isinstance(active_manual_inputs, dict) else '') or '',
+                    'max_target_position': (((active_manual_inputs.get('position_input') or {}).get('max_target_position')) if isinstance(active_manual_inputs, dict) else '') or '',
+                },
+            },
+        }
+
     def build_focus_stock_analysis_record_page_data(self, watch_stock_id: str, record_id: str | None = None) -> dict[str, Any]:
         watch_stock = self.get_watch_stock(watch_stock_id)
         if not watch_stock:
@@ -2569,6 +2696,9 @@ class TradingDecisionService:
             return {}
         return loaded if isinstance(loaded, dict) else {}
 
+    def _normalize_watch_stock_payload(self, payload: dict[str, Any], creating: bool) -> dict[str, Any]:
+        return self._normalize_payload(payload, creating)
+
     def _normalize_payload(self, payload: dict[str, Any], creating: bool) -> dict[str, Any]:
         normalized = {
             'stock_code': (payload.get('stock_code') or '').strip(),
@@ -2675,6 +2805,32 @@ class TradingDecisionService:
         if market == 'usa':
             return '美股'
         return 'A股'
+
+    def _json_safe_number(self, value: Any) -> float | None:
+        if value is None or pd.isna(value):
+            return None
+        return float(value)
+
+    def _expand_stock_search_aliases(self, keyword_upper: str, market: str) -> set[str]:
+        normalized = ''.join(ch for ch in keyword_upper if ch.isalnum())
+        aliases: set[str] = set()
+        if market != 'usa':
+            return aliases
+        alias_map = {
+            'APPLE': {'AAPL', '苹果'},
+            'TESLA': {'TSLA', '特斯拉'},
+            'MICROSOFT': {'MSFT', '微软'},
+            'GOOGLE': {'GOOGL', 'GOOG', '谷歌'},
+            'ALPHABET': {'GOOGL', 'GOOG', '谷歌'},
+            'AMAZON': {'AMZN', '亚马逊'},
+            'NVIDIA': {'NVDA', '英伟达'},
+            'META': {'META', '脸书'},
+            'NETFLIX': {'NFLX', '奈飞'},
+        }
+        for key, values in alias_map.items():
+            if normalized == key or normalized in {''.join(ch for ch in value.upper() if ch.isalnum()) for value in values}:
+                aliases.update(value.upper() for value in values)
+        return aliases
 
     def _map_ai_decision_action_to_label(self, action: str | None) -> str:
         normalized = (action or '').strip().lower()
