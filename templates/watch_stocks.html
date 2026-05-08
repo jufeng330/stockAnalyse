@@ -421,21 +421,103 @@
     }
     .status-message.error { color: #dc2626; }
     .table-wrap { overflow: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 1180px; }
+    table { width: 100%; border-collapse: collapse; min-width: 1460px; table-layout: fixed; }
     th, td { padding: 16px 14px; border-bottom: 1px solid #eef2f7; vertical-align: top; text-align: left; }
-    th { background: #f8fafc; color: #475569; font-size: 13px; font-weight: 700; }
+    th { background: #f8fafc; color: #475569; font-size: 13px; font-weight: 700; white-space: nowrap; }
     td { font-size: 14px; color: #111827; }
-    .summary-column { width: 360px; min-width: 360px; }
-    .summary-text { line-height: 1.6; word-break: break-word; }
-    .summary-text.compact { max-width: 360px; }
+    .target-column { width: 190px; min-width: 190px; }
+    .price-column { width: 120px; min-width: 120px; }
+    .meta-column { width: 140px; min-width: 140px; }
+    .stage-column { width: 240px; min-width: 240px; }
+    .suggestion-column { width: 180px; min-width: 180px; }
+    .summary-column { width: 340px; min-width: 340px; }
+    .action-column { width: 300px; min-width: 300px; }
+    .cell-card {
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      border: 1px solid #e6edf7;
+      border-radius: 14px;
+      padding: 12px 14px;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+      min-height: 100%;
+    }
+    .cell-stack { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .summary-text { line-height: 1.65; word-break: break-word; }
+    .summary-text.compact { max-width: 100%; }
+    .stage-stack,
+    .suggestion-stack { display: flex; flex-direction: column; gap: 8px; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tag-row .tag { margin: 0; }
+    .sub-text.tight { line-height: 1.45; }
+    .sub-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #94a3b8;
+    }
+    .metric-value {
+      font-size: 16px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .metric-muted {
+      font-size: 13px;
+      color: #475569;
+      font-weight: 600;
+    }
     .history-summary-text { line-height: 1.6; word-break: break-word; }
     .history-summary-text.compact { max-width: 520px; }
     .text-ellipsis { display: inline-block; }
     .text-ellipsis.compact { white-space: normal; }
     .text-ellipsis[title] { cursor: help; }
     tbody tr:hover { background: #fafbff; }
-    .stock-name { font-weight: 800; margin-bottom: 4px; }
+    .stock-name { font-weight: 800; margin-bottom: 4px; color: #0f172a; }
     .sub-text { font-size: 12px; color: #6b7280; line-height: 1.5; }
+    .action-card {
+      background: linear-gradient(180deg, #ffffff 0%, #f6f8ff 100%);
+      border: 1px solid #ddd6fe;
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 8px 20px rgba(124, 58, 237, 0.08);
+    }
+    .summary-card {
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+    .target-card {
+      background: linear-gradient(180deg, #ffffff 0%, #eef4ff 100%);
+      border-color: #dbe7ff;
+    }
+    .price-card,
+    .meta-card,
+    .stage-card,
+    .suggestion-card {
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }
+    .tag-stage { background: #e0e7ff; color: #3730a3; }
+    .tag-zone { background: #ccfbf1; color: #0f766e; }
+    .tag-watch { background: #ffedd5; color: #c2410c; }
+    .tag-action { background: #dcfce7; color: #166534; }
+    tbody tr td { background: transparent; }
+    tbody tr + tr td { border-top: none; }
+    tbody tr:hover .cell-card,
+    tbody tr:hover .action-card {
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+      transform: translateY(-1px);
+      transition: box-shadow 0.2s ease, transform 0.2s ease;
+    }
+    .summary-text.compact strong { color: #111827; }
+    .table-wrap::-webkit-scrollbar { height: 10px; }
+    .table-wrap::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+    .table-wrap::-webkit-scrollbar-track { background: #f1f5f9; }
+    @media (max-width: 1180px) {
+      .cell-card,
+      .action-card { padding: 12px; }
+      .metric-value { font-size: 15px; }
+    }
+    @media (max-width: 860px) {
+      .cell-card,
+      .action-card { border-radius: 12px; }
+    }
     .tag {
       display: inline-flex;
       align-items: center;
@@ -449,7 +531,43 @@
     .tag-zone { background: #ecfeff; color: #0f766e; }
     .tag-watch { background: #fff7ed; color: #c2410c; }
     .tag-action { background: #ecfdf5; color: #047857; }
-    .action-group { display: flex; flex-wrap: wrap; gap: 8px; }
+    .action-group {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(124px, 1fr));
+      gap: 8px;
+      min-width: 260px;
+    }
+    .action-column {
+      width: 300px;
+      min-width: 300px;
+    }
+    .action-group > .row-link,
+    .action-group > button.row-link {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
+      white-space: nowrap;
+    }
+    @media (max-width: 1180px) {
+      .action-column {
+        width: 280px;
+        min-width: 280px;
+      }
+      .action-group {
+        grid-template-columns: repeat(2, minmax(116px, 1fr));
+        min-width: 240px;
+      }
+    }
+    @media (max-width: 860px) {
+      .action-column {
+        width: 100%;
+        min-width: 0;
+      }
+      .action-group {
+        grid-template-columns: 1fr;
+        min-width: 0;
+      }
+    }
     .row-link.primary { color: #fff; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); }
     .row-link.secondary { color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; }
     .row-link.ghost { color: #7c3aed; background: #f5f3ff; border: 1px solid #ddd6fe; }
@@ -661,57 +779,93 @@
           <table>
             <thead>
               <tr>
-                <th>标的</th>
-                <th>价格 / 估值</th>
-                <th>行业 / 类型</th>
-                <th>阶段 / 区间</th>
-                <th>当前建议</th>
+                <th class="target-column">标的</th>
+                <th class="price-column">价格 / 估值</th>
+                <th class="meta-column">行业 / 类型</th>
+                <th class="stage-column">阶段 / 区间</th>
+                <th class="suggestion-column">当前建议</th>
                 <th class="summary-column">最新结论</th>
-                <th>操作按钮</th>
+                <th class="action-column">操作按钮</th>
               </tr>
             </thead>
             <tbody id="watchStockTableBody">
               {% if items %}
                 {% for item in items %}
                 <tr>
-                  <td>
-                    <div class="stock-name">{{ item.stock_name }} {{ item.stock_code }}</div>
-                    <div class="sub-text">{{ item.market }} · 最近分析：{{ item.last_analysis_at or '暂无' }}</div>
+                  <td class="target-column">
+                    <div class="cell-card target-card">
+                      <div class="cell-stack">
+                        <div class="sub-label">标的</div>
+                        <div class="stock-name">{{ item.stock_name }} {{ item.stock_code }}</div>
+                        <div class="sub-text tight">{{ item.market }} · 最近分析：{{ item.last_analysis_at or '暂无' }}</div>
+                      </div>
+                    </div>
                   </td>
-                  <td>
-                    <div>{{ '¥%.2f'|format(item.current_price) if item.current_price is not none else '暂无价格' }}</div>
-                    <div class="sub-text">PE {{ '%.2f'|format(item.pe) if item.pe is not none else '--' }}</div>
+                  <td class="price-column">
+                    <div class="cell-card price-card">
+                      <div class="cell-stack">
+                        <div class="sub-label">价格 / 估值</div>
+                        <div class="metric-value">{{ '¥%.2f'|format(item.current_price) if item.current_price is not none else '暂无价格' }}</div>
+                        <div class="sub-text tight">PE {{ '%.2f'|format(item.pe) if item.pe is not none else '--' }}</div>
+                      </div>
+                    </div>
                   </td>
-                  <td>
-                    <div>{{ item.industry or '未填写行业' }}</div>
-                    <div class="sub-text">{{ item.asset_type }}</div>
+                  <td class="meta-column">
+                    <div class="cell-card meta-card">
+                      <div class="cell-stack">
+                        <div class="sub-label">行业 / 类型</div>
+                        <div class="metric-muted">{{ item.industry or '未填写行业' }}</div>
+                        <div class="sub-text tight">{{ item.asset_type }}</div>
+                      </div>
+                    </div>
                   </td>
-                  <td>
-                    {% if item.current_stage %}<span class="tag tag-stage">{{ item.current_stage }}</span>{% endif %}
-                    {% if item.current_price_zone %}<span class="tag tag-zone">{{ item.current_price_zone }}</span>{% endif %}
-                    {% if not item.current_stage and not item.current_price_zone %}<span class="sub-text">暂无阶段信息</span>{% endif %}
+                  <td class="stage-column">
+                    <div class="cell-card stage-card">
+                      <div class="stage-stack">
+                        <div class="sub-label">阶段 / 区间</div>
+                        <div class="tag-row">
+                          {% if item.current_stage %}<span class="tag tag-stage">{{ item.current_stage }}</span>{% endif %}
+                          {% if item.current_price_zone %}<span class="tag tag-zone">{{ item.current_price_zone }}</span>{% endif %}
+                        </div>
+                        {% if not item.current_stage and not item.current_price_zone %}<span class="sub-text tight">暂无阶段信息</span>{% endif %}
+                      </div>
+                    </div>
                   </td>
-                  <td>
-                    {% if item.suggested_action %}
-                    <span class="tag {{ 'tag-action' if '计划' in item.suggested_action or '决策' in item.suggested_action else 'tag-watch' }}">{{ item.suggested_action }}</span>
-                    {% else %}
-                    <span class="tag tag-watch">继续观察</span>
-                    {% endif %}
-                    <div class="sub-text">状态：{{ item.status }}</div>
+                  <td class="suggestion-column">
+                    <div class="cell-card suggestion-card">
+                      <div class="suggestion-stack">
+                        <div class="sub-label">当前建议</div>
+                        <div class="tag-row">
+                          {% if item.suggested_action %}
+                          <span class="tag {{ 'tag-action' if '计划' in item.suggested_action or '决策' in item.suggested_action else 'tag-watch' }}">{{ item.suggested_action }}</span>
+                          {% else %}
+                          <span class="tag tag-watch">继续观察</span>
+                          {% endif %}
+                        </div>
+                        <div class="sub-text tight">状态：{{ item.status }}</div>
+                      </div>
+                    </div>
                   </td>
                   <td class="summary-column">
                     {% set latest_summary = item.last_conclusion_summary or '暂无结论摘要' %}
-                    <div class="summary-text compact" title="{{ latest_summary }}">{{ latest_summary[:60] ~ ('...' if latest_summary|length > 60 else '') }}</div>
-                    <div class="sub-text">来源：{{ item.source or '手工录入' }}</div>
+                    <div class="cell-card summary-card">
+                      <div class="cell-stack">
+                        <div class="sub-label">最新结论</div>
+                        <div class="summary-text compact" title="{{ latest_summary }}">{{ latest_summary[:72] ~ ('...' if latest_summary|length > 72 else '') }}</div>
+                        <div class="sub-text tight">来源：{{ item.source or '手工录入' }}</div>
+                      </div>
+                    </div>
                   </td>
-                  <td>
-                    <div class="action-group">
+                  <td class="action-column">
+                    <div class="action-card">
+                      <div class="action-group">
                       <a class="row-link primary" href="/entry-decision?watch_stock_id={{ item.id }}">进场决策</a>
                       <a class="row-link secondary" href="/holding-stocks?watch_stock_id={{ item.id }}">买入</a>
                       <a class="row-link secondary" href="/stock-analysis-record?watch_stock_id={{ item.id }}&code={{ item.stock_code }}&market={{ item.market }}">股票分析</a>
                       <a class="row-link secondary" href="/trade-plan-analysis?watch_stock_id={{ item.id }}">持仓计划分析</a>
                       <button class="row-link ghost" type="button" onclick="openEditDrawer('{{ item.id }}')">编辑</button>
                       <button class="row-link secondary" type="button" onclick="archiveWatchStock('{{ item.id }}')">归档</button>
+                    </div>
                     </div>
                   </td>
                 </tr>

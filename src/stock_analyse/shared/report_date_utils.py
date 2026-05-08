@@ -142,21 +142,18 @@ class ReportDateUtils:
             new_date = current_date - datetime.timedelta(days=days)
         target_date_str = new_date.strftime(format)
         return target_date_str
-    def get_report_last_five_year(self, date=None):
-        # 如果没有传入日期，使用当前日期
+    def get_report_last_n_year(self, date=None, years=5):
+        if years < 1:
+            raise ValueError('years must be greater than or equal to 1')
         if date is None:
             current_date = datetime.datetime.now()
         else:
-            # 将输入的日期字符串转换为datetime对象
             current_date = datetime.datetime.strptime(date, '%Y%m%d')
+        target_date = current_date.replace(year=current_date.year - years)
+        return target_date.strftime('%Y')
 
-        # 计算五年前的日期
-        five_years_ago = current_date.replace(year=current_date.year - 5)
-
-        # 将结果转换为字符串格式
-        target_date_str = five_years_ago.strftime('%Y')
-
-        return target_date_str
+    def get_report_last_five_year(self, date=None):
+        return self.get_report_last_n_year(date=date, years=5)
 
     def get_stock_code(self, market='usa',symbol='105.TSLA'):
         if market == 'usa':

@@ -1,6 +1,7 @@
 import akshare as ak
 import datetime
 import pandas as pd
+from stock_analyse.infrastructure.config.settings import get_settings
 from stock_analyse.infrastructure.data_sources.concepts.ths_concept_client import stockConceptData
 from stock_analyse.infrastructure.data_sources.news.eastmoney_news_client import stockNewsData
 from stock_analyse.infrastructure.data_sources.searxng_client import SearxngClient
@@ -8,12 +9,18 @@ from stock_analyse.infrastructure.analysis.technical_indicator_calculator import
 from stock_analyse.shared.report_date_utils import ReportDateUtils
 from stock_analyse.infrastructure.persistence.file_cache import FileCacheUtils
 from stock_analyse.infrastructure.services.concept_service import stockConcepService
+from stock_analyse.infrastructure.services.futu_market_data_provider import FutuMarketDataProvider
 import traceback
 from stock_analyse.infrastructure.persistence.mysql_cache import MySQLCache
 import time
 from tqdm import tqdm
 
 import logging
+
+try:
+    from futu import OpenQuoteContext
+except ImportError:
+    OpenQuoteContext = None
 
 # 个股相关信息查询
 """
@@ -40,12 +47,86 @@ class stockCompanyInfo:
         self.searxng = SearxngClient()
         self.mysql = MySQLCache()
 
+    def _normalized_market(self):
+        return get_settings().market_data.normalize_market(self.market)
+
+    def _should_use_futu_provider(self):
+        normalized_market = self._normalized_market()
+        if normalized_market == self.usa:
+            return FutuMarketDataProvider.is_enabled(normalized_market)
+        if normalized_market == self.HongKong:
+            return FutuMarketDataProvider.is_enabled(normalized_market) or FutuMarketDataProvider.is_enabled('HK')
+        return False
+
+    def _provider_market(self):
+        normalized_market = self._normalized_market()
+        if normalized_market == self.HongKong:
+            return 'HK' if FutuMarketDataProvider.is_enabled('HK') and not FutuMarketDataProvider.is_enabled(normalized_market) else normalized_market
+        return normalized_market
+
+    def _get_futu_provider(self):
+        provider_market = self._provider_market()
+        return FutuMarketDataProvider(provider_market)
+
+    def _normalize_symbol_for_provider(self, symbol=None):
+        target_symbol = self.symbol if symbol is None else symbol
+        if self._normalized_market() == self.usa:
+            parts = str(target_symbol).split('.', 1)
+            return parts[1] if len(parts) > 1 else str(target_symbol)
+        return str(target_symbol)
+
+    @staticmethod
+    def _get_first_non_empty(frame, columns):
+        if frame is None or frame.empty:
+            return ''
+        for column in columns:
+            if column in frame.columns:
+                series = frame[column].dropna()
+                if not series.empty:
+                    value = series.iloc[0]
+                    return '' if pd.isna(value) else value
+        return ''
+
+    def _build_futu_financial_snapshot(self, detail_df):
+        if detail_df is None or detail_df.empty:
+            return pd.DataFrame()
+        snapshot = pd.DataFrame([{
+            '股票代码': self._normalize_symbol_for_provider(),
+            '报告期': '',
+            '报告日期': '',
+            '总市值': self._get_first_non_empty(detail_df, ['总市值']),
+            '流通市值': self._get_first_non_empty(detail_df, ['流通市值']),
+            '市盈率': self._get_first_non_empty(detail_df, ['市盈率']),
+            '市盈率-TTM': self._get_first_non_empty(detail_df, ['市盈率-TTM']),
+            '市净率': self._get_first_non_empty(detail_df, ['市净率']),
+            '每股收益': self._get_first_non_empty(detail_df, ['每股收益']),
+            '每股净资产': self._get_first_non_empty(detail_df, ['每股净资产']),
+            '净利润': self._get_first_non_empty(detail_df, ['净利润']),
+            '净资产': self._get_first_non_empty(detail_df, ['净资产']),
+            '股息-TTM': self._get_first_non_empty(detail_df, ['股息-TTM']),
+            '股息率-TTM': self._get_first_non_empty(detail_df, ['股息率-TTM']),
+            '收益率': self._get_first_non_empty(detail_df, ['收益率']),
+            '上市日期': self._get_first_non_empty(detail_df, ['上市日期']),
+            '名称': self._get_first_non_empty(detail_df, ['名称']),
+        }])
+        return snapshot
+
+    def _get_futu_stock_name(self):
+        if not self._should_use_futu_provider() or OpenQuoteContext is None:
+            return ''
+        provider = self._get_futu_provider()
+        symbol = self._normalize_symbol_for_provider()
+        snapshot_df = provider.get_stock_snapshot_detail(symbol, self._normalized_market())
+        return str(self._get_first_non_empty(snapshot_df, ['名称'])).strip()
+
     #  获取概念板块名称
     def get_stock_board_all_concept_name(self):
         """
         获取概念板块名称
         :return:
         """
+        if self._should_use_futu_provider():
+            return self._get_futu_provider().get_plate_list(self._normalized_market(), 'concept')
         if self.market == self.HongKong or self.market == self.usa:
             return self.get_default_df()
         concept_sectors = self.mysql.read_from_cache(date='20250331', report_type='stock_concept_data')
@@ -60,6 +141,8 @@ class stockCompanyInfo:
         获取行业信息
         :return:
         """
+        if self._should_use_futu_provider():
+            return self._get_futu_provider().get_plate_list(self._normalized_market(), 'industry')
         if self.market == self.HongKong or self.market == self.usa:
             return self.get_default_df()
         industry_sectors = self.mysql.read_from_cache(date='20250331', report_type='stock_industry_data')
@@ -98,7 +181,7 @@ class stockCompanyInfo:
                                              conditions={"所属板块": concept_name})
         if df_data is  None or  df_data.empty:
             # 获取成分股
-            df_data = ak.stock_board_industry_cons_em(symbol=concept_name, df=industry_sectors)
+            df_data = ak.stock_board_industry_cons_em(symbol=concept_name)
             df_data["所属板块"] = concept_name
             df_data["板块类型"] = "行业"
             self.mysql.write_to_cache(date=date, report_type=report_type,
@@ -118,7 +201,7 @@ class stockCompanyInfo:
                                              conditions={"所属板块": concept_name})
         if df_data is None or df_data.empty:
             # 获取成分股
-            df_data = ak.stock_board_industry_cons_em(symbol=concept_name, df=industry_sectors)
+            df_data = ak.stock_board_industry_cons_em(symbol=concept_name)
             df_data["所属板块"] = concept_name
             df_data["板块类型"] = "行业"
             self.mysql.write_to_cache(date=date, report_type=report_type,
@@ -131,6 +214,13 @@ class stockCompanyInfo:
         :return:
         """
         border_name = ''
+        if self._should_use_futu_provider():
+            plate_df = self._get_futu_provider().get_stock_owner_plate(self._normalize_symbol_for_provider(code), self._normalized_market())
+            if plate_df is not None and not plate_df.empty:
+                industry_df = plate_df[plate_df['板块类型'].astype(str) == '行业'] if '板块类型' in plate_df.columns else pd.DataFrame()
+                if not industry_df.empty and '所属板块' in industry_df.columns:
+                    return ','.join(industry_df['所属板块'].astype(str).drop_duplicates())
+            return ""
         if self.market == self.HongKong or self.market == self.usa:
             return "行业"
         report_type = 'stock_industry_data'
@@ -153,6 +243,13 @@ class stockCompanyInfo:
         :return:
         """
         border_name = ''
+        if self._should_use_futu_provider():
+            plate_df = self._get_futu_provider().get_stock_owner_plate(self._normalize_symbol_for_provider(code), self._normalized_market())
+            if plate_df is not None and not plate_df.empty:
+                concept_df = plate_df[plate_df['板块类型'].astype(str) == '概念'] if '板块类型' in plate_df.columns else pd.DataFrame()
+                if not concept_df.empty and '所属板块' in concept_df.columns:
+                    return ','.join(concept_df['所属板块'].astype(str).drop_duplicates())
+            return ""
         if self.market == self.HongKong or self.market == self.usa:
             return "行业"
         report_type = 'stock_concept_data'
@@ -223,6 +320,8 @@ class stockCompanyInfo:
         try:
             if self.market == self.ETF:
                 stock_name = self.symbol
+            elif self._should_use_futu_provider():
+                stock_name = self._get_futu_stock_name() or self.symbol
             elif self.market == self.HongKong:
                 stock_individual = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol, token=self.xq_a_token)
                 stock_name = stock_individual[stock_individual['item'] == 'comcnname']['value'].values[0]
@@ -258,6 +357,8 @@ class stockCompanyInfo:
         try:
             if self.market == self.ETF:
                 result = self.get_default_df()
+            elif self._should_use_futu_provider():
+                result = self._get_futu_provider().get_stock_snapshot_detail(self._normalize_symbol_for_provider(), self._normalized_market())
             elif self.market == self.HongKong:
                 result = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol, token=self.xq_a_token)
             elif self.market == self.usa:
@@ -283,14 +384,17 @@ class stockCompanyInfo:
         default_industry = "None"
         try:
             if self.market == self.ETF:
-                # 创建一个默认的 DataFrame
                 default_industry = "EFT"
                 return default_df, default_list_date, default_industry
+            elif self._should_use_futu_provider():
+                stock_individual_info_em_df = self._get_futu_provider().get_stock_snapshot_detail(self._normalize_symbol_for_provider(), self._normalized_market())
+                list_date = str(self._get_first_non_empty(stock_individual_info_em_df, ['上市日期']) or default_list_date)
+                industry = self.get_stock_industry_by_code(self._normalize_symbol_for_provider()) or default_industry
+                return stock_individual_info_em_df, list_date, industry
             elif self.market == self.HongKong:
                 stock_individual_info_em_df = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol,
                                                                                    token=self.xq_a_token)
                 list_date = '2010-01-01'
-                # 提取行业
                 industry = ''
                 return stock_individual_info_em_df, list_date, industry
             elif self.market == self.usa:
@@ -301,11 +405,7 @@ class stockCompanyInfo:
                 return stock_individual_info_em_df, list_date, industry
             else:
                 stock_individual_info_em_df = ak.stock_individual_info_em(symbol=self.symbol)
-                # 提取上市时间
-                list_date = \
-                stock_individual_info_em_df[stock_individual_info_em_df['item'] == '上市时间']['value'].values[
-                    0]
-                # 提取行业
+                list_date = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '上市时间']['value'].values[0]
                 industry = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '行业']['value'].values[0]
                 return stock_individual_info_em_df, list_date, industry
         except Exception as e:
@@ -361,14 +461,16 @@ class stockCompanyInfo:
         current_date = self.reportUtils.get_current__history_date_str()
         report_type = f"{self.market}_{self.symbol}_individual_fund_flow"
         cached_data = self.cache_service.read_from_serialized(current_date, report_type)
-        if cached_data is not None:
+        if cached_data is not None and not getattr(cached_data, 'empty', False):
             return cached_data
         try:
             if not isinstance(self.market, str):
                 raise ValueError(f'market 必须是字符串，当前类型: {type(self.market).__name__}')
             normalized_market = self.market.strip()
             market_name = normalized_market.lower()
-            if(normalized_market == self.HongKong or normalized_market == self.usa):
+            if self._should_use_futu_provider():
+                result = self._get_futu_provider().get_stock_capital_flow(self._normalize_symbol_for_provider(), self._normalized_market())
+            elif(normalized_market == self.HongKong or normalized_market == self.usa):
                 result = self.get_default_df()
             else:
                 if(normalized_market == 'zq'):
@@ -378,7 +480,7 @@ class stockCompanyInfo:
                 sorted_data = stock_individual_fund_flow_df.sort_values(by='日期', ascending=False)
                 num_records = min(20, len(sorted_data))
                 result = sorted_data.head(num_records)
-            if result is not None:
+            if result is not None and not getattr(result, 'empty', False):
                 self.cache_service.write_to_cache_serialized(current_date, report_type, result)
             return result
         except Exception as e:
@@ -390,12 +492,15 @@ class stockCompanyInfo:
     def get_stock_financial_analysis_indicator(self,start_year="2024"):
 
         cache = True
-        report_type = self.market +"_" +self.symbol+'_financial_indicator'
-        current_date= start_year
+        report_type = self.market +"_" +self.symbol+'_financial_indicator_window'
+        current_date = f"{start_year}_5y"
         stock_financial_analysis_indicator_df = self.cache_service.read_from_serialized(current_date, report_type)
         if cache and stock_financial_analysis_indicator_df is not None:
             return stock_financial_analysis_indicator_df
-        if self.market  == self.HongKong:
+        if self._should_use_futu_provider():
+            detail_df = self._get_futu_provider().get_stock_snapshot_detail(self._normalize_symbol_for_provider(), self._normalized_market())
+            stock_financial_analysis_indicator_df = self._build_futu_financial_snapshot(detail_df)
+        elif self.market  == self.HongKong:
             #SECUCODE, SECURITY_CODE, SECURITY_NAME_ABBR, ORG_CODE, REPORT_DATE, DATE_TYPE_CODE, PER_NETCASH_OPERATE, PER_OI, BPS, BASIC_EPS, DILUTED_EPS, OPERATE_INCOME, OPERATE_INCOME_YOY, GROSS_PROFIT, GROSS_PROFIT_YOY, HOLDER_PROFIT, HOLDER_PROFIT_YOY, GROSS_PROFIT_RATIO, EPS_TTM, OPERATE_INCOME_QOQ, NET_PROFIT_RATIO, ROE_AVG, GROSS_PROFIT_QOQ, ROA, HOLDER_PROFIT_QOQ, ROE_YEARLY, ROIC_YEARLY, TAX_EBT, OCF_SALES, DEBT_ASSET_RATIO, CURRENT_RATIO, CURRENTDEBT_DEBT, START_DATE, FISCAL_YEAR, CURRENCY, IS_CNY_CODE
             # 证券代码, 股票代码, 股票简称, 机构代码, 报告日期, 数据类型代码, 经营活动每股净现金流量, 每股经营活动现金流量, 每股净资产, 基本每股收益, 稀释每股收益, 营业收入, 营业收入同比增长率, 毛利润, 毛利润同比增长率, 归属于母公司股东的净利润, 归属于母公司股东的净利润同比增长率, 毛利率, 滚动市盈率每股收益, 营业收入环比增长率, 净利率, 平均净资产收益率, 毛利润环比增长率, 总资产收益率, 归属于母公司股东的净利润环比增长率, 年度净资产收益率, 年度投入资本回报率, 息税前利润税负, 销售商品、提供劳务收到的现金占营业收入比重, 资产负债率, 流动比率, 流动负债占总负债比重, 起始日期, 会计年度, 货币类型, 是否人民币代码
             stock_financial_analysis_indicator_df = ak.stock_financial_hk_analysis_indicator_em(symbol=self.symbol)
@@ -413,18 +518,47 @@ class stockCompanyInfo:
             # date, diluted_eps(yuan), weighted_eps(yuan), adjusted_eps(yuan), eps_excluding_non_recurring(yuan), adjusted_net_assets_per_share_before(yuan), adjusted_net_assets_per_share_after(yuan), operating_cash_flow_per_share(yuan), capital_surplus_per_share(yuan), undistributed_profit_per_share(yuan), adjusted_net_assets_per_share(yuan), total_assets_profit_rate(%), main_business_profit_rate(%), total_assets_net_profit_rate(%), cost_expense_profit_rate(%), operating_profit_rate(%), main_business_cost_rate(%), sales_net_profit_rate(%), share_capital_remuneration_rate(%), net_assets_remuneration_rate(%), assets_remuneration_rate(%), gross_profit_rate(%), three_expenses_ratio, non_main_business_ratio, main_profit_ratio, dividend_payout_rate(%), investment_return_rate(%), main_business_profit(yuan), return_on_equity(%), weighted_return_on_equity(%), net_profit_excluding_non_recurring(yuan), main_business_income_growth_rate(%), net_profit_growth_rate(%), net_assets_growth_rate(%), total_assets_growth_rate(%), accounts_receivable_turnover(times), accounts_receivable_days(days), inventory_days(days), inventory_turnover(times), fixed_assets_turnover(times), total_assets_turnover(times), total_assets_days(days), current_assets_turnover(times), current_assets_days(days), shareholder_equity_turnover(times), current_ratio, quick_ratio, cash_ratio(%), interest_coverage_ratio, long_term_debt_to_working_capital_ratio(%), shareholder_equity_ratio(%), long_term_debt_ratio(%), shareholder_equity_to_fixed_assets_ratio(%), debt_to_equity_ratio(%), long_term_assets_to_long_term_funds_ratio(%), capitalization_ratio(%), fixed_assets_net_value_ratio(%), capital_immobilization_ratio(%), equity_ratio(%), liquidation_value_ratio(%), fixed_assets_ratio(%), asset_liability_ratio(%), total_assets(yuan), operating_cash_flow_to_sales_ratio(%), operating_cash_flow_return_on_assets(%), operating_cash_flow_to_net_profit_ratio(%), operating_cash_flow_to_debt_ratio(%), cash_flow_ratio(%), short_term_stock_investment(yuan), short_term_bond_investment(yuan), short_term_other_operating_investment(yuan), long_term_stock_investment(yuan), long_term_bond_investment(yuan), long_term_other_operating_investment(yuan), accounts_receivable_within_1_year(yuan), accounts_receivable_1-2_years(yuan), accounts_receivable_2-3_years(yuan), accounts_receivable_over_3_years(yuan), prepaid_purchases_within_1_year(yuan), prepaid_purchases_1-2_years(yuan), prepaid_purchases_2-3_years(yuan), prepaid_purchases_over_3_years(yuan), other_receivables_within_1_year(yuan), other_receivables_1-2_years(yuan), other_receivables_2-3_years(yuan), other_receivables_over_3_years(yuan)
             # stock_financial_analysis_indicator_df = ak.stock_financial_analysis_indicator(symbol=self.symbol, start_year=start_year)
             stock_financial_analysis_indicator_df = ak.stock_financial_abstract_ths(symbol=self.symbol, indicator="按报告期")
-
-
             stock_financial_analysis_indicator_df = self.report_util.financial_indicator_map_sh_fields(df = stock_financial_analysis_indicator_df)
             stock_financial_analysis_indicator_df['股票代码'] = self.symbol
+            stock_financial_analysis_indicator_df = self._filter_financial_indicator_window(
+                df=stock_financial_analysis_indicator_df,
+                start_year=start_year,
+            )
 
-        if cache and stock_financial_analysis_indicator_df is not None:
+        if cache and stock_financial_analysis_indicator_df is not None and not getattr(stock_financial_analysis_indicator_df, 'empty', False):
             self.cache_service.write_to_cache_serialized(current_date, report_type,stock_financial_analysis_indicator_df)
         return stock_financial_analysis_indicator_df
+
+    def _filter_financial_indicator_window(self, df, start_year):
+        if df is None or df.empty:
+            return df
+        start_year_int = int(start_year)
+        filtered_df = df.copy()
+        report_date_series = None
+        if '报告期' in filtered_df.columns:
+            report_date_series = pd.to_datetime(filtered_df['报告期'], errors='coerce')
+        elif '报告日期' in filtered_df.columns:
+            report_date_series = pd.to_datetime(filtered_df['报告日期'], errors='coerce')
+        if report_date_series is None:
+            return filtered_df
+        filtered_df['年份'] = report_date_series.dt.year
+        filtered_df = filtered_df[filtered_df['年份'].fillna(0).astype(int) >= start_year_int].copy()
+        if '报告期' in filtered_df.columns:
+            filtered_df['报告期'] = pd.to_datetime(filtered_df['报告期'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
+        elif '报告日期' in filtered_df.columns:
+            filtered_df['报告期'] = pd.to_datetime(filtered_df['报告日期'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
+        if '报告日期' in filtered_df.columns:
+            filtered_df['报告日期'] = pd.to_datetime(filtered_df['报告日期'], errors='coerce')
+        return filtered_df
 
     # 即时的个股资金流
     def get_stock_fund_flow_individual(self,stock_name = ''):
         # 即时的个股资金流
+        if self._should_use_futu_provider():
+            flow_df = self._get_futu_provider().get_stock_capital_flow(self._normalize_symbol_for_provider(), self._normalized_market())
+            if flow_df is None or flow_df.empty:
+                return self.get_default_df()
+            return flow_df.tail(1).to_string(index=False)
         if self.market  == self.usa:
             default_df = self.get_default_df()
             return default_df

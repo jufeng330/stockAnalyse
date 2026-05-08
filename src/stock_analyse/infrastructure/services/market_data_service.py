@@ -334,7 +334,7 @@ class stockBorderInfo:
             #
                 :return:
         """
-        cache_key = f"financial"
+        cache_key = "financial_indicator_5y_window"
         df_stock_financial = self.cache_service.read_from_serialized(date, cache_key)
         if df_stock_spot is None:
             df_stock_spot = self.get_stock_spot()
@@ -346,7 +346,7 @@ class stockBorderInfo:
                 # ['序号', '代码', '名称', '最新价', '涨跌额', '涨跌幅', '今开', '最高', '最低', '昨收', '成交量', '成交额']
             def get_report(stock_code):
                 stock_service = stockCompanyInfo(marker=market, symbol=stock_code)
-                start_year = self.reportUtils.get_report_last_five_year(date=date)
+                start_year = self.reportUtils.get_report_last_n_year(date=date, years=5)
                 return stock_service.get_stock_financial_analysis_indicator(start_year=start_year)
 
             df_stock_financial_all = self.process_stock_financial_reports(df_stock, get_report, batch_size=20)
@@ -616,7 +616,7 @@ class stockBorderInfo:
                         stock = futures[future]
                         self.logger.error(f"处理股票 {stock} 时出错：{str(e)}")
                 time.sleep(random.uniform(3, 5))
-                self.logger.info(f"已处理 {batch_idx}/{total_batches} 支股票的资产负债表")
+                self.logger.info(f"已处理 {batch_idx + 1}/{total_batches} 支股票的财务指标")
         return financial_all
 
 
@@ -881,16 +881,15 @@ class stockBorderInfo:
         :return:
         """
         df_fh = self.get_stock_fhps_yearly_info(date)
+        if df_fh is None or df_fh.empty or '最新公告日期' not in df_fh.columns:
+            return pd.DataFrame()
         date_start_str = date
         date_end_str = self.reportUtils.get_report_date_add_str(date_str=date, days=365)
-        # date_start = datetime.datetime.strptime(date_start_str, "%Y%m%d").date()
-        # date_end = datetime.datetime.strptime(date_end_str, "%Y%m%d").date()
-
         date_start = pd.to_datetime(date_start_str, format="%Y%m%d")
         date_end = pd.to_datetime(date_end_str, format="%Y%m%d")
-
+        df_fh['最新公告日期'] = pd.to_datetime(df_fh['最新公告日期'], errors='coerce')
         df_fh = df_fh[df_fh['最新公告日期'].between(date_start, date_end, inclusive='left')]
-        return df_fh;
+        return df_fh
 
     # 股息率的平均值
     def get_stock_fhps_group_info(self, date = '20251231'):
@@ -912,11 +911,10 @@ class stockBorderInfo:
         df_fh = self.cache_service.read_from_serialized(date, cache_key)
         if df_fh is not None:
             try:
-                df_fh['年份'] = df_fh['最新公告日期'].apply(lambda x: x.year)
                 date_columns = ['预案公告日', '股权登记日', '除权除息日', '最新公告日期']
                 for col in date_columns:
-                    # 将列转换为字符串，再转换为 datetime，确保所有非日期值转为 NaT
                     df_fh[col] = pd.to_datetime(df_fh[col].astype(str), errors='coerce')
+                df_fh['年份'] = df_fh['最新公告日期'].dt.year
                 numeric_cols = ['现金分红-股息率', '每股收益', '每股净资产', '每股公积金', '每股未分配利润',
                                 '净利润同比增长']
                 df_fh[numeric_cols] = df_fh[numeric_cols].fillna(0)
@@ -1028,11 +1026,10 @@ class stockBorderInfo:
         df_fh = self.cache_service.read_from_serialized(date, cache_key)
         if df_fh is not None:
             try:
-                df_fh['年份'] = df_fh['最新公告日期'].apply(lambda x: x.year)
                 date_columns = ['预案公告日', '股权登记日', '除权除息日', '最新公告日期']
                 for col in date_columns:
-                    # 将列转换为字符串，再转换为 datetime，确保所有非日期值转为 NaT
                     df_fh[col] = pd.to_datetime(df_fh[col].astype(str), errors='coerce')
+                df_fh['年份'] = df_fh['最新公告日期'].dt.year
                 numeric_cols = ['现金分红-股息率', '每股收益', '每股净资产', '每股公积金', '每股未分配利润',
                                 '净利润同比增长']
                 df_fh[numeric_cols] = df_fh[numeric_cols].fillna(0)

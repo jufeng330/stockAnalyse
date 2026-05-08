@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 import traceback
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
+from stock_analyse.infrastructure.config.settings import get_settings
 from stock_analyse.infrastructure.services.market_data_service import stockBorderInfo
 from stock_analyse.infrastructure.services.company_data_service import stockCompanyInfo
 from stock_analyse.domain.services.stock_strategy_service import StockStrategy
@@ -133,6 +134,7 @@ class TechnicalAnalysisWorkflow:
         stock_code = self._resolve_stock_code(stock, market)
         try:
             stock_service = stockCompanyInfo(marker=market, symbol=stock_code)
+            normalized_stock = self._build_analysis_stock_row(stock=stock, market=market, stock_code=stock_code, stock_service=stock_service)
             end_date_str = self.date_utils.get_current_history_date_st()
             start_date_str = self.date_utils.get_start_history_date_st()
             report_type = 'history_' + stock_code
@@ -144,11 +146,46 @@ class TechnicalAnalysisWorkflow:
                 df_history_data = stock_service.get_stock_history_data(start_date_str, end_date_str)
                 if self.cache_switch:
                     self.cache_service.write_to_csv(date, report_type, df_history_data)
-            return self.compute_result(df_history_data, stock, stock_code)
+            return self.compute_result(df_history_data, normalized_stock, stock_code)
         except Exception as exc:
             self.logger.error(f'分析股票 {stock_code} 失败：{exc}')
             traceback.print_exc()
             raise
+
+    def _build_analysis_stock_row(self, *, stock: Any, market: str, stock_code: str, stock_service: stockCompanyInfo):
+        if isinstance(stock, pd.Series):
+            row = stock.copy()
+        elif isinstance(stock, dict):
+            row = pd.Series(stock).copy()
+        else:
+            row = pd.Series(dtype='object')
+
+        normalized_market = get_settings().market_data.normalize_market(market)
+        configured_provider = get_settings().market_data.provider_for_market(normalized_market)
+        should_reuse_scan_row = configured_provider == 'futu' and normalized_market in {'H', 'HK', 'usa'}
+
+        if not should_reuse_scan_row:
+            detail_df = stock_service.get_stock_individual_info()
+            if detail_df is not None and not getattr(detail_df, 'empty', True):
+                detail_row = detail_df.iloc[0]
+                for key, value in detail_row.items():
+                    if key not in row.index or pd.isna(row.get(key)) or row.get(key) in ('', None):
+                        row[key] = value
+
+        if '股票简称' not in row.index and '名称' in row.index:
+            row['股票简称'] = row.get('名称', '')
+        if '名称' not in row.index and '股票简称' in row.index:
+            row['名称'] = row.get('股票简称', '')
+        if '代码' not in row.index:
+            row['代码'] = stock_code
+        if '股票代码' not in row.index:
+            row['股票代码'] = stock_code
+        if ('概念板块' not in row.index or not str(row.get('概念板块', '')).strip()) and not should_reuse_scan_row:
+            row['概念板块'] = stock_service.get_stock_concept_by_code(stock_code)
+        if ('行业板块' not in row.index or not str(row.get('行业板块', '')).strip()) and not should_reuse_scan_row:
+            row['行业板块'] = stock_service.get_stock_industry_by_code(stock_code)
+        row['market'] = market
+        return row
 
     def compute_result(self, df_history_data, stock, stock_code):
         if df_history_data is None or df_history_data.empty:
@@ -190,10 +227,14 @@ class TechnicalAnalysisWorkflow:
         return score2, ''
 
     def run(self, *, stock_code: str, market: str) -> tuple[int, dict]:
-        stock_border = stockBorderInfo(market=market)
-        df_stock = stock_border.get_stock_spot()
-        df_stock = df_stock[df_stock['股票代码'] == stock_code].copy()
-        df_stock['market'] = market
-        df_summary_data = self.analyze_stock(df_stock, market)
+        stock_service = stockCompanyInfo(marker=market, symbol=stock_code)
+        seed_stock = pd.Series({'代码': stock_code, '股票代码': stock_code, 'market': market})
+        normalized_stock = self._build_analysis_stock_row(
+            stock=seed_stock,
+            market=market,
+            stock_code=stock_code,
+            stock_service=stock_service,
+        )
+        df_summary_data = self.analyze_stock(normalized_stock, market)
         score = df_summary_data['score']
         return score, df_summary_data

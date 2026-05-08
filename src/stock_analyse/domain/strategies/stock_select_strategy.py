@@ -11,6 +11,7 @@ from stock_analyse.infrastructure.persistence.stock_file_utils import StockFileU
 from stock_analyse.infrastructure.services.market_data_service import stockBorderInfo
 from stock_analyse.domain.services.stock_strategy_service import StockStrategy
 from stock_analyse.shared.report_date_utils import ReportDateUtils
+from stock_analyse.shared.select_config_loader import load_select_config
 from stock_analyse.shared.stock_utils import StockUtils
 
 
@@ -24,6 +25,7 @@ class StockSelectStrategy:
         self.stock_strategy = StockStrategy()
         self.stock_utils = StockUtils()
         self.financial_filter_service = FinancialFilterService()
+        self.select_config = load_select_config()
         strategy_name = self.get_strategy_name(strategy_type)
         self.file_utils = StockFileUtils(market=self.market, name=strategy_name)
         self.logger = logging.getLogger(__name__)
@@ -134,3 +136,57 @@ class StockSelectStrategy:
             col_lrl=col_lrl,
             col_lr=col_lr,
         )
+
+    def get_strategy_config(self, strategy_type: int | str) -> dict:
+        strategy_key = str(strategy_type)
+        defaults = self.select_config.get('defaults', {})
+        strategies = self.select_config.get('strategies', {})
+        strategy_config = strategies.get(strategy_key, {})
+        market_key = 'H' if str(self.market).upper() == 'HK' else str(self.market)
+        market_overrides = (strategy_config.get('market_overrides') or {}).get(market_key, {})
+        merged = {
+            **defaults,
+            **strategy_config,
+        }
+        default_meta = defaults.get('meta', {})
+        strategy_meta = strategy_config.get('meta', {})
+        merged['meta'] = {
+            **default_meta,
+            **strategy_meta,
+        }
+        default_filters = defaults.get('filters', {})
+        strategy_filters = strategy_config.get('filters', {})
+        override_filters = market_overrides.get('filters', {})
+        merged['filters'] = {
+            **default_filters,
+            **strategy_filters,
+        }
+        for key, value in strategy_filters.items():
+            if isinstance(value, dict) and isinstance(default_filters.get(key), dict):
+                merged['filters'][key] = {
+                    **default_filters[key],
+                    **value,
+                }
+        for key, value in override_filters.items():
+            if isinstance(value, dict) and isinstance(merged['filters'].get(key), dict):
+                merged['filters'][key] = {
+                    **merged['filters'][key],
+                    **value,
+                }
+            else:
+                merged['filters'][key] = value
+        if market_overrides:
+            for key, value in market_overrides.items():
+                if key != 'filters':
+                    merged[key] = value
+        return merged
+
+    def get_threshold(self, strategy_type: int | str, path: str, default=None):
+        current = self.get_strategy_config(strategy_type)
+        for part in path.split('.'):
+            if not isinstance(current, dict):
+                return default
+            current = current.get(part)
+            if current is None:
+                return default
+        return current

@@ -68,18 +68,18 @@
     'entry-decision': { groupKey: 'watch-stocks-group', groupActive: true, currentKey: 'entry-decision', brandText: '决策动作页，统一承接买前研究与记录追踪。' },
     'stock-analysis-record': { groupKey: 'watch-stocks-group', groupActive: true, currentKey: 'stock-analysis-record', brandText: '决策动作页，统一承接买前研究与记录追踪。' },
     'trade-plan-analysis': { groupKey: 'watch-stocks-group', groupActive: true, currentKey: 'trade-plan-analysis', brandText: '决策动作页，统一承接买前研究与记录追踪。' },
-    'holding-stocks': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-table', brandText: '持有管理工作台，统一查看累计成本、买卖明细、决策记录与阶段复盘。' },
-    'holding-records': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-records', brandText: '持有管理工作台，统一查看二次分析、买卖决策与复盘历史记录。' },
-    'holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
-    'holding-reanalysis': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-reanalysis', brandText: '持有管理工作台，统一检查原逻辑是否成立、变化因素和计划影响。' },
-    'position-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
-    'add-position-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
-    'reduce-position-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
-    'sell-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
-    'holding-status-refresh': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-table', brandText: '持有管理工作台，状态刷新会回填到持仓列表当前摘要。' },
-    'weekly-holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
-    'monthly-holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
-    'quarterly-holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
+    'holding-stocks': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-table', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一查看累计成本、买卖明细、决策记录与阶段复盘。' },
+    'holding-records': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-records', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一查看二次分析、买卖决策与复盘历史记录。' },
+    'holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
+    'holding-reanalysis': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-reanalysis', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一检查原逻辑是否成立、变化因素和计划影响。' },
+    'position-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
+    'add-position-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
+    'reduce-position-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
+    'sell-decision': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'position-decision', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一承接补仓、减仓、卖出三类买卖决策。' },
+    'holding-status-refresh': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-table', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，状态刷新会回填到持仓列表当前摘要。' },
+    'weekly-holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
+    'monthly-holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
+    'quarterly-holding-review': { groupKey: 'holding-stocks-group', groupActive: true, currentKey: 'holding-review', expandedGroupKeys: ['watch-stocks-group', 'holding-stocks-group'], brandText: '持有管理工作台，统一沉淀复盘结论，并在页面内选择周、月或季度视角。' },
     'portfolio-review': { groupKey: 'portfolio-review-group', groupActive: true, currentKey: 'portfolio-review', brandText: '组合层视角的整体分析与阶段复盘入口。' },
     'ai-config': { groupKey: 'system-config-group', groupActive: true, currentKey: 'ai-config', brandText: '系统配置入口，统一查看 AI 与业务配置。' },
     'business-config': { groupKey: 'system-config-group', groupActive: true, currentKey: 'business-config', brandText: '系统配置入口，统一查看 AI 与业务配置。' },
@@ -89,8 +89,9 @@
     localStorage.setItem(storageKey, JSON.stringify(Array.from(collapsedState)));
   }
 
-  function shouldCollapsed(groupKey, currentGroupKey) {
+  function shouldCollapsed(groupKey, currentGroupKey, expandedGroupKeys = []) {
     if (groupKey === currentGroupKey) return false;
+    if (expandedGroupKeys.includes(groupKey)) return false;
     return collapsedState.has(groupKey);
   }
 
@@ -100,6 +101,7 @@
     const brandText = meta.brandText || '交易决策中心统一导航入口。';
     const currentGroupKey = meta.groupKey;
     const currentKey = meta.currentKey;
+    const expandedGroupKeys = Array.isArray(meta.expandedGroupKeys) ? meta.expandedGroupKeys : [];
 
     const brand = document.createElement('div');
     brand.className = 'brand';
@@ -115,7 +117,7 @@
     groups.forEach((group) => {
       const li = document.createElement('li');
       li.dataset.groupKey = group.key;
-      if (shouldCollapsed(group.key, currentGroupKey)) {
+      if (shouldCollapsed(group.key, currentGroupKey, expandedGroupKeys)) {
         li.classList.add('collapsed');
       }
 

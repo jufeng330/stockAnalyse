@@ -244,24 +244,164 @@
       line-height: 1.75;
       word-break: break-word;
     }
-    .md-content table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 16px 0;
-      min-width: 720px;
+    .table-container {
+      margin-top: 12px;
     }
-    .md-content th, .md-content td {
-      border: 1px solid #d1d5db;
-      padding: 10px 12px;
+    .table-scroll-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4338ca;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .result-table-shell {
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-bottom: 8px;
+      border: 1px solid #dbe4f0;
+      border-radius: 14px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+    }
+    .result-table-shell::-webkit-scrollbar {
+      height: 12px;
+    }
+    .result-table-shell::-webkit-scrollbar-track {
+      background: #e5e7eb;
+      border-radius: 999px;
+    }
+    .result-table-shell::-webkit-scrollbar-thumb {
+      background: #94a3b8;
+      border-radius: 999px;
+    }
+    .md-content table.result-table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin: 0;
+      table-layout: fixed;
+      font-size: 13px;
+    }
+    .md-content table.result-table th,
+    .md-content table.result-table td {
+      border-right: 1px solid #dbe4f0;
+      border-bottom: 1px solid #dbe4f0;
+      padding: 12px 14px;
       text-align: left;
       vertical-align: top;
+      background: #fff;
     }
-    .md-content th {
-      background: #f3f4f6;
+    .md-content table.result-table th {
+      position: sticky;
+      top: 0;
+      z-index: 4;
+      background: #eff6ff;
+      color: #0f172a;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
     }
-    .table-container {
-      overflow-x: auto;
-      margin-top: 12px;
+    .md-content table.result-table td {
+      color: #1f2937;
+    }
+    .md-content table.result-table tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+    .md-content table.result-table th:first-child,
+    .md-content table.result-table td:first-child {
+      border-left: none;
+    }
+    .md-content table.result-table tr:first-child th {
+      border-top: none;
+    }
+    .md-content table.result-table .cell-sticky-1,
+    .md-content table.result-table .cell-sticky-2 {
+      position: sticky;
+      z-index: 3;
+      background: inherit;
+    }
+    .md-content table.result-table th.cell-sticky-1,
+    .md-content table.result-table th.cell-sticky-2 {
+      z-index: 5;
+      background: #dbeafe;
+    }
+    .md-content table.result-table .cell-sticky-1 {
+      left: 0;
+      box-shadow: 1px 0 0 #cbd5e1;
+    }
+    .md-content table.result-table .cell-sticky-2 {
+      left: 148px;
+      box-shadow: 1px 0 0 #cbd5e1;
+    }
+    .md-content table.result-table .col-code {
+      min-width: 148px;
+      width: 148px;
+      white-space: nowrap;
+      font-weight: 700;
+      color: #111827;
+    }
+    .md-content table.result-table .col-score {
+      min-width: 88px;
+      width: 88px;
+      text-align: center;
+      white-space: nowrap;
+      font-weight: 800;
+      color: #4338ca;
+    }
+    .md-content table.result-table .col-name {
+      min-width: 150px;
+      width: 150px;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+    .md-content table.result-table .col-suggestion {
+      min-width: 170px;
+      width: 170px;
+      white-space: normal;
+      line-height: 1.65;
+    }
+    .md-content table.result-table .col-detail {
+      min-width: 460px;
+      width: 460px;
+      white-space: normal;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+    .md-content table.result-table .col-sector {
+      min-width: 180px;
+      width: 180px;
+      white-space: normal;
+    }
+    .md-content table.result-table .col-meta-wide {
+      min-width: 180px;
+      width: 180px;
+      white-space: normal;
+    }
+    .md-content table.result-table .col-number {
+      min-width: 126px;
+      width: 126px;
+      white-space: nowrap;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .md-content table.result-table .col-date {
+      min-width: 132px;
+      width: 132px;
+      white-space: nowrap;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .md-content table.result-table .col-default {
+      min-width: 140px;
+      width: 140px;
+      white-space: normal;
     }
     @media (max-width: 1280px) {
       .app-shell, .content-grid { grid-template-columns: 1fr; }
@@ -446,6 +586,15 @@
       `;
     }
 
+    function unpackSsePayload(event) {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        return payload && typeof payload === 'object' ? payload : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
     function initSSE() {
       if (sseConnection) {
         sseConnection.close();
@@ -467,6 +616,36 @@
           console.error('SSE 消息解析失败:', error);
         }
       };
+
+      sseConnection.addEventListener('log', function(event) {
+        const payload = unpackSsePayload(event);
+        handleSSEMessage(payload);
+      });
+
+      sseConnection.addEventListener('progress', function(event) {
+        const payload = unpackSsePayload(event);
+        handleSSEMessage(payload);
+      });
+
+      sseConnection.addEventListener('select_result', function(event) {
+        const payload = unpackSsePayload(event);
+        handleSSEMessage(payload);
+      });
+
+      sseConnection.addEventListener('analysis_complete', function(event) {
+        const payload = unpackSsePayload(event);
+        handleSSEMessage(payload);
+      });
+
+      sseConnection.addEventListener('analysis_error', function(event) {
+        const payload = unpackSsePayload(event);
+        handleSSEMessage(payload);
+      });
+
+      sseConnection.addEventListener('error', function(event) {
+        const payload = unpackSsePayload(event);
+        handleSSEMessage(payload);
+      });
 
       sseConnection.onerror = function() {
         updateSSEStatus(false);
@@ -508,6 +687,52 @@
       }
     }
 
+    function getColumnClass(headerText, index) {
+      const text = (headerText || '').trim();
+      if (index === 0 || text === '股票代码') return 'col-code cell-sticky-1';
+      if (index === 1 || text === '评分') return 'col-score cell-sticky-2';
+      if (text === '当前价格' || text === '涨跌幅' || text === 'ROE' || text === 'PE' || text === 'PB' || text === '动态市盈率' || text === '市销率' || text === '股息率' || text === '平均股息率' || text === 'DCF' || text === 'score_simple' || text === '市值' || text === '流通市值' || text === '股本数量' || text === '振幅' || text === '换手率' || text === '60日涨跌幅' || text === '年初至今涨跌幅') return 'col-number';
+      if (text === 'analysis_date') return 'col-date';
+      if (text === '投资建议') return 'col-suggestion';
+      if (text === '建议详情') return 'col-detail';
+      if (text === 'stock_name') return 'col-name';
+      if (text === '行业' || text === '概念板块') return 'col-sector';
+      if (text === '营业总收入' || text === '营业增长率' || text === '利润增长率' || text === '负债率' || text === '市值规模') return 'col-meta-wide';
+      return 'col-default';
+    }
+
+    function enhanceRenderedTables(rootElement) {
+      const tables = rootElement.querySelectorAll('table');
+      tables.forEach((table) => {
+        table.classList.add('result-table');
+        if (!table.parentElement.classList.contains('result-table-shell')) {
+          const shell = document.createElement('div');
+          shell.className = 'result-table-shell';
+          table.parentNode.insertBefore(shell, table);
+          shell.appendChild(table);
+        }
+        const hint = document.createElement('div');
+        hint.className = 'table-scroll-hint';
+        hint.textContent = '表格可左右滑动查看完整列';
+        const shell = table.parentElement;
+        if (!shell.previousElementSibling || !shell.previousElementSibling.classList.contains('table-scroll-hint')) {
+          shell.parentNode.insertBefore(hint, shell);
+        }
+
+        const headerCells = table.querySelectorAll('thead th');
+        headerCells.forEach((cell, index) => {
+          cell.classList.add(...getColumnClass(cell.textContent, index).split(' '));
+        });
+
+        table.querySelectorAll('tbody tr').forEach((row) => {
+          Array.from(row.children).forEach((cell, index) => {
+            const headerText = headerCells[index] ? headerCells[index].textContent : '';
+            cell.classList.add(...getColumnClass(headerText, index).split(' '));
+          });
+        });
+      });
+    }
+
     function displaySelectResults(data) {
       const resultsContent = document.getElementById('resultsContent');
       if (data.success !== true) {
@@ -530,6 +755,10 @@
         <div class="tab-content" id="recommend-analysis"><div class="md-content table-container">${summaryText}</div></div>
         <div class="tab-content" id="basic-analysis"><div class="md-content table-container">${allResults}</div></div>
       `;
+
+      document.querySelectorAll('#resultsContent .md-content').forEach((element) => {
+        enhanceRenderedTables(element);
+      });
 
       document.querySelectorAll('.tab-btn').forEach((button) => {
         button.addEventListener('click', () => {

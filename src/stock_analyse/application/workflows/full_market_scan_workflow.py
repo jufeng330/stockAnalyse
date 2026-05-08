@@ -12,8 +12,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from stock_analyse.application.workflows.technical_analysis_workflow import TechnicalAnalysisWorkflow
+from stock_analyse.domain.strategies.selection_strategy_service import SelectionStrategyService
 from stock_analyse.domain.strategies.stock_select_strategy import StockSelectStrategy
+from stock_analyse.infrastructure.config.settings import get_settings
 from stock_analyse.infrastructure.persistence.stock_file_utils import StockFileUtils
+from stock_analyse.infrastructure.services.futu_market_data_provider import FutuMarketDataProvider
 from stock_analyse.infrastructure.services.market_data_service import stockBorderInfo
 
 
@@ -49,6 +52,11 @@ class FullMarketScanWorkflow:
         selector = StockSelectStrategy(market=market, strategy_type=strategy_type)
         strategy_name = selector.get_strategy_name(strategy_type)
         file_utils = StockFileUtils(min_score=self.min_score, market=market, name=strategy_name)
+        normalized_market = get_settings().market_data.normalize_market(market)
+        configured_provider = get_settings().market_data.provider_for_market(normalized_market)
+        runtime_max_workers = self.max_workers
+        if configured_provider == 'futu' and normalized_market in {'H', 'HK', 'usa'}:
+            runtime_max_workers = min(self.max_workers, 4)
         runtime = FullMarketScanRuntime(
             market=market,
             strategy_type=strategy_type,
@@ -56,7 +64,7 @@ class FullMarketScanWorkflow:
             selector=selector,
             file_utils=file_utils,
             logger=self.logger,
-            max_workers=self.max_workers,
+            max_workers=runtime_max_workers,
             min_score=self.min_score,
         )
         return file_utils, runtime
@@ -64,14 +72,53 @@ class FullMarketScanWorkflow:
     def get_all_stocks(self, *, market: str) -> pd.DataFrame:
         try:
             stock = stockBorderInfo(market=market)
-            df_stock = stock.get_stock_border_info()
-            self.logger.info(f"完整股票列表获取到 {len(df_stock)} 支股票信息")
+            normalized_market = get_settings().market_data.normalize_market(market)
+            if normalized_market in {'SH', 'SZ'}:
+                df_stock = stock.get_stock_spot()
+                self.logger.info('Loaded A-share scan candidates from stock spot | market=%s | rows=%s', normalized_market, len(df_stock))
+            else:
+                df_stock = stock.get_stock_border_info()
+                self.logger.info('Loaded enriched scan candidates | market=%s | rows=%s', normalized_market, len(df_stock))
             self.logger.info(f"\n开始分析 {len(df_stock)} 支股票...")
             return df_stock
         except Exception as exc:
             self.logger.error(f"获取股票列表失败：{exc}")
             traceback.print_exc()
             raise
+
+    def _should_source_candidates_from_strategy(self, *, market: str) -> bool:
+        normalized_market = get_settings().market_data.normalize_market(market)
+        configured_provider = get_settings().market_data.provider_for_market(normalized_market)
+        return configured_provider == 'futu' and normalized_market in {'H', 'usa'}
+
+    def _get_scan_candidates(
+        self,
+        *,
+        runtime: FullMarketScanRuntime,
+        strategy_filter: str,
+    ) -> pd.DataFrame:
+        if self._should_source_candidates_from_strategy(market=runtime.market):
+            runtime.logger.info('Use strategy-driven Futu prefilter candidates | market=%s | strategy=%s', runtime.market, runtime.strategy_type)
+            df_selected = SelectionStrategyService().get_prefilter_candidates_or_raise(
+                market=runtime.market,
+                strategy_type=runtime.strategy_type,
+                strategy_filter=strategy_filter,
+            )
+            runtime.logger.info('Strategy prefilter returned %s candidate stocks', len(df_selected))
+            runtime.logger.info('Use throttled Futu scan runtime | market=%s | max_workers=%s', runtime.market, runtime.max_workers)
+            if df_selected.empty:
+                runtime.logger.info('Strategy prefilter produced no candidates | market=%s | strategy=%s', runtime.market, runtime.strategy_type)
+                return df_selected
+            return df_selected
+
+        df_stocks_data = self.get_all_stocks(market=runtime.market)
+        df_selected = runtime.selector.select_stock(
+            df_stocks_data,
+            strategy_type=runtime.strategy_type,
+            strategy_filter=strategy_filter,
+        )
+        selected_codes = set(df_selected['代码'])
+        return df_stocks_data[df_stocks_data['代码'].astype(str).isin(selected_codes)]
 
     def analyze_stock_safe(self, runtime: FullMarketScanRuntime, stock, max_retries: int = 3) -> Optional[dict]:
         stock_code = stock['代码']
@@ -146,14 +193,7 @@ class FullMarketScanWorkflow:
             self.min_score = min_score
         file_utils, runtime = self.build_runtime(market=market, strategy_type=strategy_type)
         try:
-            df_stocks_data = self.get_all_stocks(market=market)
-            df_selected = runtime.selector.select_stock(
-                df_stocks_data,
-                strategy_type=strategy_type,
-                strategy_filter=strategy_filter,
-            )
-            selected_codes = set(df_selected['代码'])
-            df_stocks_data = df_stocks_data[df_stocks_data['代码'].astype(str).isin(selected_codes)]
+            df_stocks_data = self._get_scan_candidates(runtime=runtime, strategy_filter=strategy_filter)
             results = self.scan_stock(runtime, batch_size=batch_size, df_stocks_data=df_stocks_data)
             if not results:
                 return file_utils, []

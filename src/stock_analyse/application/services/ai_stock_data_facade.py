@@ -65,17 +65,18 @@ class AIStockDataFacade:
         market_service = self._market_service_factory(market)
         start_date_str, end_date_str = self._resolve_dates(trade_date, start_date_str, end_date_str)
 
+        company_profile = self._safe_call(company_service.get_stock_individual_info)
         snapshot: dict[str, Any] = {
             'stock_code': stock_code,
             'market': market,
             'trade_date': trade_date or end_date_str,
             'date_range': {'start_date': start_date_str, 'end_date': end_date_str},
-            'company_profile': self._safe_call(company_service.get_stock_individual_info),
+            'company_profile': company_profile,
             'company_name': self._safe_call(company_service.get_stock_name, default=stock_code),
             'business_intro': self._safe_call(company_service.get_stock_zyjs),
             'industry': self._safe_call(lambda: company_service.get_stock_industry_by_code(stock_code), default=''),
             'concepts': self._safe_call(lambda: company_service.get_stock_concept_by_code(stock_code), default=''),
-            'market_context': self._build_market_context(market_service, stock_code),
+            'market_context': self._build_market_context(market_service, company_profile, stock_code),
             'news': self._build_news(stock_code),
             'financial_indicators': self._safe_call(company_service.get_stock_financial_analysis_indicator),
             'fund_flow': self._safe_call(company_service.get_stock_individual_fund_flow),
@@ -170,7 +171,14 @@ class AIStockDataFacade:
         preview = preview.replace('\n', ' ').replace('\r', ' ')
         return preview[:limit] + ('...' if len(preview) > limit else '')
 
-    def _build_market_context(self, market_service: Any, stock_code: str) -> dict[str, Any]:
+    def _build_market_context(self, market_service: Any, company_profile: Any, stock_code: str) -> dict[str, Any]:
+        if company_profile is not None and not getattr(company_profile, 'empty', True):
+            row = company_profile[company_profile['股票代码'] == stock_code] if '股票代码' in company_profile.columns else company_profile
+            if not getattr(row, 'empty', True):
+                try:
+                    return {'spot': row.iloc[0].to_dict()}
+                except Exception:
+                    pass
         spot_df = self._safe_call(market_service.get_stock_spot)
         if spot_df is not None and not getattr(spot_df, 'empty', True):
             row = spot_df[spot_df['股票代码'] == stock_code] if '股票代码' in spot_df.columns else spot_df

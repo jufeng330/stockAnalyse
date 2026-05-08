@@ -37,8 +37,8 @@
         "providers_by_market": {
             "SH": "akshare",
             "SZ": "akshare",
-            "H": "akshare",
-            "HK": "akshare",
+            "H": "futu",
+            "HK": "futu",
             "usa": "futu"
         },
         "providers": {

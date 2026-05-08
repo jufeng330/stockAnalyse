@@ -203,6 +203,8 @@ class StockAnalyzerService:
             self.logger.info(f'开始全盘扫描股票{market}_{strategy_type}……')
             self.streaming.send_log(f'\n开始全盘扫描股票{market}_{strategy_type}……')
             json_result = run_stock_selection_use_case.execute(market=market, strategy_code=strategy_code)
+            if not json_result.get('success', True):
+                raise RuntimeError(json_result.get('data') or json_result.get('message') or f'股票 {market}_{strategy_type} 分析出错')
             self.streaming.send_log(f'\n全盘扫描股票{market}_{strategy_type}完成……')
             self.streaming.send_progress('singleProgress', 95, '全盘扫描股票...')
             if json_result.get('high_score_text') == '未找到得分大于等于85分的股票。':

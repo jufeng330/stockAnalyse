@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "defaults": {
+    "meta": {
+      "enabled": true
+    },
+    "filters": {
+      "financial": {
+        "mode": "avg",
+        "lookback_years": 3,
+        "continuous_years": 3,
+        "profit_min": 0,
+        "profit_growth_min": 0,
+        "revenue_growth_min": 0
+      }
+    }
+  },
+  "strategies": {
+    "1": {
+      "meta": {
+        "code": 1,
+        "name": "高股息选股策略_1",
+        "enabled": true,
+        "markets": ["SH", "SZ", "H", "usa"]
+      },
+      "filters": {
+        "spot": {
+          "market_cap_min": 10000000000,
+          "pe_dynamic_max": 15,
+          "fallback_roe_avg_min": 15,
+          "fallback_revenue_growth_min": 20
+        },
+        "dividend": {
+          "dividend_yield_min": 0.03
+        },
+        "risk": {
+          "debt_ratio_max": 70
+        }
+      }
+    },
+    "2": {
+      "meta": {
+        "code": 2,
+        "name": "优质股筛选策略_2",
+        "enabled": true,
+        "markets": ["SH", "SZ", "H", "usa"]
+      },
+      "filters": {
+        "spot": {
+          "market_cap_min": 10000000000,
+          "pe_dynamic_max": 15,
+          "fallback_roe_avg_min": 15,
+          "fallback_revenue_growth_min": 20,
+          "fallback_net_profit_growth_min": 10,
+          "pb_max": 5,
+          "revenue_total_min": 1000000000
+        },
+        "risk": {
+          "debt_ratio_max": 80
+        },
+        "financial": {
+          "mode": "avg",
+          "lookback_years": 3,
+          "profit_min": 50000000,
+          "profit_growth_min": 0.05,
+          "revenue_growth_min": 0.05
+        }
+      }
+    },
+    "3": {
+      "meta": {
+        "code": 3,
+        "name": "保守型筛选策略_3",
+        "enabled": true,
+        "markets": ["SH", "SZ"]
+      },
+      "filters": {
+        "spot": {
+          "market_cap_min": 50000000000,
+          "pe_dynamic_max": 15
+        },
+        "risk": {
+          "debt_ratio_max": 60
+        },
+        "dividend": {
+          "mode": "avg",
+          "dividend_yield_min": 0.03,
+          "min_dividend_years": 5
+        }
+      }
+    },
+    "4": {
+      "meta": {
+        "code": 4,
+        "name": "成长型筛选策略_4",
+        "enabled": true,
+        "markets": ["SH", "SZ", "H", "usa"]
+      },
+      "filters": {
+        "spot": {
+          "revenue_total_min": 1000000000
+        },
+        "financial": {
+          "mode": "avg",
+          "lookback_years": 2,
+          "profit_min": 0,
+          "profit_growth_min": 0.2,
+          "revenue_growth_min": 0.3
+        }
+      },
+      "market_overrides": {
+        "usa": {
+          "filters": {
+            "financial": {
+              "profit_growth_min": 20,
+              "revenue_growth_min": 30
+            }
+          }
+        }
+      }
+    },
+    "5": {
+      "meta": {
+        "code": 5,
+        "name": "价值型筛选策略_5",
+        "enabled": true,
+        "markets": ["SH", "SZ", "H", "usa"]
+      },
+      "filters": {
+        "spot": {
+          "market_cap_min": 50000000000,
+          "pe_dynamic_max": 12,
+          "pb_max": 1.5
+        },
+        "financial": {
+          "mode": "avg",
+          "lookback_years": 3,
+          "profit_min": 0,
+          "profit_growth_min": 0,
+          "revenue_growth_min": 0,
+          "roe_min": 15
+        }
+      }
+    },
+    "6": {
+      "meta": {
+        "code": 6,
+        "name": "知名股票筛选策略_6",
+        "enabled": true,
+        "markets": ["SH", "SZ", "H", "usa"]
+      },
+      "filters": {
+        "spot": {
+          "pe_dynamic_max": 50
+        },
+        "financial": {
+          "mode": "avg",
+          "lookback_years": 3,
+          "profit_min": 0,
+          "profit_growth_min": 0.05,
+          "revenue_growth_min": 0.05
+        }
+      },
+      "market_overrides": {
+        "usa": {
+          "filters": {
+            "financial": {
+              "profit_growth_min": 5,
+              "revenue_growth_min": 10
+            }
+          }
+        }
+      }
+    }
+  }
+}

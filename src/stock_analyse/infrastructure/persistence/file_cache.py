@@ -34,7 +34,7 @@ class FileCacheUtils:
 
     def _get_cache_filepath(self, date, report_type ,file_type='csv'):
         """生成缓存文件路径"""
-        if report_type.endswith("_financial_indicator"):
+        if "financial_indicator" in report_type:
             data_dir = os.path.join(self.cache_dir, "financial_indicator")
         elif report_type.endswith("_stock_report"):
             data_dir = os.path.join(self.cache_dir, "stock_report")

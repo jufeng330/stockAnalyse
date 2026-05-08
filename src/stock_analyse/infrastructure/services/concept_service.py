@@ -55,7 +55,7 @@ class stockConcepService:
                 if df_data is not None and not df_data.empty and len(df_data) > 0:
                     continue
                 # 获取成分股
-                stocks = ak.stock_board_industry_cons_em(symbol=sector_name, df=industry_sectors)
+                stocks = ak.stock_board_industry_cons_em(symbol=sector_name)
                 stocks["所属板块"] = sector_name
                 stocks["板块类型"] = "行业"
                 self.mysql.write_to_cache(date='20250331', report_type='stock_industry_data',
@@ -75,7 +75,7 @@ class stockConcepService:
                 df_data = self.mysql.read_from_cache(date='20250331', report_type='stock_concept_data',conditions={"所属板块": sector_name})
                 if df_data is not None and not df_data.empty and len(df_data) > 0 :
                     continue
-                stocks = ak.stock_board_concept_cons_em(symbol=sector_name,df = concept_sectors)
+                stocks = ak.stock_board_concept_cons_em(symbol=sector_name)
                 stocks["所属板块"] = sector_name
                 stocks["板块类型"] = "概念"
                 self.mysql.write_to_cache(date='20250331', report_type='stock_concept_data',
