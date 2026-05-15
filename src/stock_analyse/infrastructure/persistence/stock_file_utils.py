@@ -112,6 +112,10 @@ class StockFileUtils:
                 category = self.format_price_category(price)
                 price_groups.setdefault(category, []).append(stock)
 
+            if not price_groups:
+                self.create_summary_file(price_groups)
+                return
+
             for category, stocks in price_groups.items():
                 output_lines = [
                     '=' * 80,
@@ -154,20 +158,27 @@ class StockFileUtils:
             ]
             total_stocks = sum(len(stocks) for stocks in price_groups.values())
             all_scores = [float(stock['评分']) for stocks in price_groups.values() for stock in stocks]
-            output_lines.extend([
-                '\n整体统计：',
-                f'1. 共筛选出 {total_stocks} 支高分股票（得分≥85）',
-                f'2. 平均评分: {np.mean(all_scores):.1f}',
-                f'3. 最高评分: {max(all_scores):.1f}',
-                '\n各价格区间分布：',
-                '-' * 80,
-            ])
-            for category, stocks in sorted(price_groups.items(), key=lambda x: int(re.findall(r'\d+', x[0])[0])):
+            if not all_scores:
                 output_lines.extend([
-                    f'\n价格区间 {category}元：',
-                    f'  - 股票数量: {len(stocks)}',
-                    f"  - 平均评分: {np.mean([float(stock['评分']) for stock in stocks]):.1f}",
+                    '\n整体统计：',
+                    '1. 共筛选出 0 支高分股票（得分≥85）',
+                    '2. 本次没有满足条件的候选股票。',
                 ])
+            else:
+                output_lines.extend([
+                    '\n整体统计：',
+                    f'1. 共筛选出 {total_stocks} 支高分股票（得分≥85）',
+                    f'2. 平均评分: {np.mean(all_scores):.1f}',
+                    f'3. 最高评分: {max(all_scores):.1f}',
+                    '\n各价格区间分布：',
+                    '-' * 80,
+                ])
+                for category, stocks in sorted(price_groups.items(), key=lambda x: int(re.findall(r'\d+', x[0])[0])):
+                    output_lines.extend([
+                        f'\n价格区间 {category}元：',
+                        f'  - 股票数量: {len(stocks)}',
+                        f"  - 平均评分: {np.mean([float(stock['评分']) for stock in stocks]):.1f}",
+                    ])
             filename = os.path.join(self.analyseFilePath, 'summary.txt')
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(output_lines))

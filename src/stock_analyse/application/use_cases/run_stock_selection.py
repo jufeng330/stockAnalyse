@@ -18,7 +18,11 @@ def execute(market: str, strategy_code: str, orchestrator: StockSelectionOrchest
         high_score_stocks_text = high_score_stocks.to_markdown()
 
     summary = file_utils.read_text_file('summary.txt')
+    if not summary:
+        summary = '本次扫描未产出高分股票，可能是策略预筛候选为空或所有股票评分均低于阈值。'
     all_results = file_utils.read_text_file('temp_results.txt')
+    if not all_results:
+        all_results = '本次扫描没有可展示的高分结果明细。'
     return {
         'success': True,
         'high_score_text': high_score_stocks_text,

@@ -44,11 +44,11 @@ class MySQLCache:
 
         self.engine = create_engine(
             f'mysql+pymysql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}',
-            pool_size=20,  # 连接池大小
-            max_overflow=10,  # 最大溢出连接数
-            pool_recycle=3600,  # 连接回收时间（秒）
-            pool_timeout=30,  # 获取连接超时时间
-            pool_pre_ping=True  # 使用前验证连接有效性
+            pool_size=5,  # 降低连接池大小，避免 Too many connections
+            max_overflow=0,  # 不允许溢出
+            pool_recycle=3600,
+            pool_timeout=60,  # 增加超时等待时间
+            pool_pre_ping=True
         )
 
     def write_to_cache(
@@ -243,8 +243,19 @@ class MySQLCache:
         df = df.copy()
         df['date_partition'] = date
 
+        # 针对不同市场的兼容性处理：补全缺失列名，以匹配已有的数据库架构
+        # 特别是针对 usa/HK 市场缺少 '报告期' 等字段的情况
+        if '报告期' not in df.columns:
+            if '报告日期' in df.columns:
+                df['报告期'] = df['报告日期']
+            elif 'date' in df.columns:
+                df['报告期'] = df['date']
+            else:
+                df['报告期'] = ''
+
         # 使用SQLAlchemy插入数据
         try:
+            # 自动过滤掉数据库表中不存在的列，或者手动处理
             df.to_sql(
                 name=table_name,
                 con=self._get_mysql_engine(),
@@ -253,6 +264,25 @@ class MySQLCache:
                 chunksize=1000  # 每批插入1000条记录
             )
         except Exception as e:
+            # 如果依然报错列不存在，尝试通过获取表结构动态筛选列
+            try:
+                with self._get_mysql_engine().connect() as conn:
+                    result = conn.execute(text(f"SHOW COLUMNS FROM `{table_name}`"))
+                    existing_columns = [row[0] for row in result.fetchall()]
+                    # 只保留表中存在的列
+                    df_final = df[[c for c in df.columns if c in existing_columns]]
+                    df_final.to_sql(
+                        name=table_name,
+                        con=self._get_mysql_engine(),
+                        if_exists='append',
+                        index=False,
+                        chunksize=1000
+                    )
+                    print(f"[MYSQL] 已通过列名过滤修复并成功写入: {table_name}")
+                    return
+            except:
+                pass
+            
             print(f"[MYSQL] 写入数据库失败: {table_name}, 错误: {e}")
             traceback.print_exc()
     def _read_from_mysql(self, table_name: str, date: str,conditions = None) -> pd.DataFrame:

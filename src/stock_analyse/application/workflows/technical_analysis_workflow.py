@@ -165,12 +165,30 @@ class TechnicalAnalysisWorkflow:
         should_reuse_scan_row = configured_provider == 'futu' and normalized_market in {'H', 'HK', 'usa'}
 
         if not should_reuse_scan_row:
+            # 增强财务数据获取：不仅获取基础个股信息，还尝试获取详细财务指标
             detail_df = stock_service.get_stock_individual_info()
             if detail_df is not None and not getattr(detail_df, 'empty', True):
                 detail_row = detail_df.iloc[0]
                 for key, value in detail_row.items():
-                    if key not in row.index or pd.isna(row.get(key)) or row.get(key) in ('', None):
+                    if key not in row.index or pd.isna(row.get(key)) or row.get(key) in ('', None, -1):
                         row[key] = value
+            
+            # 尝试通过 stockBorderInfo 获取最新的财务指标快照
+            try:
+                date = self.date_utils.get_current_report_year_st()
+                stock_border = stockBorderInfo(market=market)
+                df_fin_all = stock_border.get_stock_border_financial_indicator(market=market, date=date, df_stock_spot=pd.DataFrame([row]))
+                if df_fin_all is not None and not df_fin_all.empty:
+                    # 匹配当前股票的代码
+                    match_col = '股票代码' if '股票代码' in df_fin_all.columns else '代码'
+                    fin_row = df_fin_all[df_fin_all[match_col] == stock_code]
+                    if not fin_row.empty:
+                        fin_row = fin_row.iloc[0]
+                        for key, value in fin_row.items():
+                            if key not in row.index or pd.isna(row.get(key)) or row.get(key) in ('', None, -1):
+                                row[key] = value
+            except Exception as e:
+                self.logger.warning(f"Failed to enrich financial data for {stock_code}: {e}")
 
         if '股票简称' not in row.index and '名称' in row.index:
             row['股票简称'] = row.get('名称', '')

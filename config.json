@@ -8,7 +8,7 @@
             "notes": "如使用中转API，修改上述URL"
         },
         "model_plat":"qwen",
-        "model_name": "gpt-5.4",
+        "model_name": "qwen3.5-plus",
         "api_key":"sk-123456"
     },
     "analysis_weights": {

@@ -23,7 +23,7 @@ class StockStrategy:
         )
         self.logger = logging.getLogger(__name__)
 
-    def calculate_stock_data(self, df_history_data, df_stock_data, stock_code):
+    def calculate_stock_data(self, df_history_data, df_stock_data, stock_code, df_financial=None):
         """ 计算出结果
                 包含如下信息:  stock_code,suggestion,analysis_date,score,price,price_change,signal
                 增加如下列 基本信息: stock_name 市值、'流通市值',股本数量,行业、
@@ -37,6 +37,25 @@ class StockStrategy:
             #   【'市盈率-动态', '市净率', '总市值', '流通市值',ROE、】
             #   【营业增长率、利润增长率、负债率 】
         """
+        # 辅助函数：安全获取数据
+        def _get_val(keys, default=-1):
+            for key in keys:
+                if key in df_stock_data.index:
+                    val = df_stock_data.loc[key]
+                    if pd.notna(val) and val != -1 and val != '':
+                        return val
+            return default
+
+        # 辅助函数：转换为浮点数
+        def _to_float(v):
+            try:
+                if isinstance(v, str):
+                    v = v.replace('%', '').replace(',', '')
+                val = float(v)
+                return val if not np.isnan(val) else -1.0
+            except:
+                return -1.0
+
         market = df_stock_data['market']
         stock_name = next(
             (df_stock_data.loc[key] for key in ['股票简称', '名称_x', '名称'] if key in df_stock_data.index),
@@ -44,58 +63,72 @@ class StockStrategy:
         )
 
         # 处理股本数量（通过行索引获取，无需指定列名）
-        total_shares = df_stock_data.loc['总股本'] if '总股本' in df_stock_data.index else -1
-        total_shares = total_shares if pd.notna(total_shares) else -1  # 处理NaN
+        total_shares = _get_val(['总股本', '股本数量'], -1)
 
         # 处理市值相关字段
-        market_cap = df_stock_data.loc['总市值'] if '总市值' in df_stock_data.index else -1
-        circulating_cap = df_stock_data.loc['流通市值'] if '流通市值' in df_stock_data.index else -1
-        circulating_type = df_stock_data.loc['市值规模'] if '市值规模' in df_stock_data.index else -1
+        market_cap = _get_val(['总市值', '市值'], -1)
+        circulating_cap = _get_val(['流通市值'], -1)
+        circulating_type = _get_val(['市值规模'], '未知')
 
-        concept_name = df_stock_data.loc['概念板块'] if '概念板块' in df_stock_data.index else ''
-        border_name = df_stock_data.loc['行业板块'] if '行业板块' in df_stock_data.index else ''
-        gx_ratio = df_stock_data.loc['现金分红-股息率'] if '现金分红-股息率' in df_stock_data.index else 0
+        concept_name = _get_val(['概念板块'], '')
+        border_name = _get_val(['行业板块', '行业'], '')
+        gx_ratio = _get_val(['现金分红-股息率', '平均股息率'], 0)
 
-
-        # 处理行情数据（假设 df_history_data 按行索引存储）
-        price = df_stock_data.loc['最新价'] if '最新价' in df_stock_data.index else -1
-        price_change = df_stock_data.loc['涨跌幅'] if '涨跌幅' in df_stock_data.index else -1
-        amplitude = df_stock_data.loc['振幅'] if '振幅' in df_stock_data.index else -1000
-        turnover_rate = df_stock_data.loc['换手率'] if '换手率' in df_stock_data.index else -1
-        change_60d = df_stock_data.loc['60日涨跌幅'] if '60日涨跌幅' in df_stock_data.index else -1000
-        change_ytd = df_stock_data.loc['年初至今涨跌幅'] if '年初至今涨跌幅' in df_stock_data.index else -1000
-        price = float(df_stock_data.loc['今开'] if '今开' in df_stock_data.index else -1)
-        # 处理估值与财务指标（统一通过行索引访问）
-        roe = df_stock_data.loc['ROE'] if 'ROE' in df_stock_data.index else -1
-        if roe == -1:
-            roe = df_stock_data.loc['净资产收益率'] if '净资产收益率' in df_stock_data.index else -1
-        pe = df_stock_data.loc['市盈率-动态'] if '市盈率-动态' in df_stock_data.index else -1
-        if pe == -1:
-            pe_price = float(df_stock_data.loc['基本每股收益'] if '基本每股收益' in df_stock_data.index else -1)
+        # 处理行情数据
+        price = _get_val(['最新价', '今开', 'price'], -1)
+        price = _to_float(price)
+        price_change = _get_val(['涨跌幅', 'price_change'], -1)
+        amplitude = _get_val(['振幅'], -1000)
+        turnover_rate = _get_val(['换手率'], -1)
+        change_60d = _get_val(['60日涨跌幅'], -1000)
+        change_ytd = _get_val(['年初至今涨跌幅'], -1000)
+        
+        # 处理估值与财务指标
+        roe = _get_val(['ROE', '净资产收益率', '平均净资产收益率'])
+        pe = _get_val(['市盈率-动态', 'PE', '市盈率'])
+        if pe == -1 or _to_float(pe) <= 0:
+            pe_price = _to_float(_get_val(['基本每股收益'], 0))
             pe = (price / pe_price) if (price > 0 and pe_price > 0) else -1
-        pb = df_stock_data.loc['市净率'] if '市净率' in df_stock_data.index else -1
-        if pb == -1:
-            pb_price = float(df_stock_data.loc['每股净资产_x'] if '每股净资产_x' in df_stock_data.index else -1)
+            
+        pb = _get_val(['市净率', 'PB'])
+        if pb == -1 or _to_float(pb) <= 0:
+            pb_price = _to_float(_get_val(['每股净资产_x', '每股净资产'], 0))
             pb = (price / pb_price) if (price > 0 and pb_price > 0) else -1
-        dynamic_pe = df_stock_data.loc['市盈率-动态'] if '市盈率-动态' in df_stock_data.index else -1
-        ps_ratio = df_stock_data.loc['市销率'] if '市销率' in df_stock_data.index else -1
-        dividend_yield = df_stock_data.loc['股息率'] if '股息率' in df_stock_data.index else -1
+            
+        dynamic_pe = _get_val(['市盈率-动态', '动态市盈率'], pe)
+        ps_ratio = _get_val(['市销率', 'PS'])
+        dividend_yield = _get_val(['股息率', '现金分红-股息率'], 0)
 
-        revenue_total = df_stock_data.loc['营业总收入'] if '营业总收入' in df_stock_data.index else -1
-        revenue_growth = df_stock_data.loc['营业总收入同比'] if '营业总收入同比' in df_stock_data.index else -1
-        if revenue_growth == -1:
-            revenue_growth = df_stock_data.loc['营业总收入同比增长率'] if '营业总收入同比增长率' in df_stock_data.index else -1
+        revenue_total = _get_val(['营业总收入', '营业收入'])
+        revenue_growth = _get_val(['营业总收入同比', '营业总收入同比增长率', '营业收入同比增长率'])
+        profit_growth = _get_val(['净利润同比', '净利润同比增长率', '归属于母公司股东的净利润同比增长率_hk'])
+        debt_ratio = _get_val(['资产负债率'])
+        
+        # 统一转为浮点数
+        roe = _to_float(roe)
+        pe = _to_float(pe)
+        pb = _to_float(pb)
+        dynamic_pe = _to_float(dynamic_pe)
+        revenue_growth = _to_float(revenue_growth)
+        profit_growth = _to_float(profit_growth)
+        dividend_yield = _to_float(dividend_yield)
+        debt_ratio = _to_float(debt_ratio)
 
-        profit_growth = df_stock_data.loc['净利润同比'] if '净利润同比' in df_stock_data.index else -1
-        if profit_growth == -1:
-            profit_growth = df_stock_data.loc['净利润同比增长率'] if '净利润同比增长率' in df_stock_data.index else -1
-        debt_ratio = df_stock_data.loc['资产负债率'] if '资产负债率' in df_stock_data.index else -1
+        # 新增：计算基于财报节点的 PE 百分位
+        pe_percentile = self._calculate_financial_pe_percentile(df_financial, pe)
+        
+        # 计算分类、阶段和分区 (传入百分位)
+        stock_type = self._classify_stock_type(roe, revenue_growth, profit_growth, market_cap, dividend_yield, border_name, pe)
+        price_stage = self._classify_price_stage(pe, change_60d, profit_growth, pe_percentile=pe_percentile)
+        price_zone = self._classify_price_zone(pe, pe_dynamic=dynamic_pe, pe_percentile=pe_percentile)
+
+
         dcf = -1  # 保持空值
 
         result = {
             'stock_code': stock_code,
             'stock_name': stock_name,
-            '行业': border_name,  # 需额外数据填充，此处留空
+            '行业': border_name,
             '市值规模': circulating_type,
             'analysis_date': datetime.now().strftime('%Y-%m-%d'),
             '市值': market_cap,
@@ -119,47 +152,204 @@ class StockStrategy:
             '利润增长率': profit_growth,
             '负债率': debt_ratio,
             'DCF': dcf,
-            '概念板块': concept_name
+            '概念板块': concept_name,
+            '股票类型分类': stock_type,
+            '五阶段判断模型': price_stage,
+            '四区价格分区': price_zone
         }
+
+
 
         df_result = pd.DataFrame([result])
         return df_result
+
+    def _classify_stock_type(self, roe, revenue_growth, profit_growth, market_cap, dividend_yield, industry, pe):
+        """股票类型分类"""
+        try:
+            roe = float(roe)
+            revenue_growth = float(revenue_growth)
+            profit_growth = float(profit_growth)
+            market_cap = float(market_cap) / 1e8 if float(market_cap) > 0 else -1
+            dividend_yield = float(dividend_yield)
+            pe = float(pe)
+            
+            if profit_growth < -20 and roe < 0:
+                return "垃圾股 (Junk)"
+            
+            if market_cap > 0 and market_cap < 10:
+                if roe < 5 or profit_growth < 0:
+                    return "垃圾股 (Junk)"
+            
+            if dividend_yield >= 2.0 and roe >= 10 and -5 <= profit_growth <= 20:
+                return "成熟期 (Mature)"
+            
+            if revenue_growth >= 30 or profit_growth >= 20:
+                return "高增长期 (Growth)"
+            
+            cyclical_industries = {'煤炭', '钢铁', '有色金属', '化工', '石油', '房地产', '汽车', '航运'}
+            if any(c in str(industry) for c in cyclical_industries):
+                return "周期性 (Cyclical)"
+                
+            defensive_industries = {'食品饮料', '医药生物', '公用事业', '银行', '交通运输'}
+            if any(d in str(industry) for d in defensive_industries):
+                return "防守型 (Defensive)"
+                
+            if roe < 0 and revenue_growth > 0:
+                return "概念期 (Concept)"
+                
+            return "防守型 (Defensive)"
+        except:
+            return "未知"
+
+    def _calculate_financial_pe_percentile(self, df_financial, current_pe):
+        """
+        基于历史财报节点的 PE 百分位计算
+        df_financial: 包含历史财报数据的 DataFrame
+        current_pe: 当前市盈率
+        """
+        try:
+            if df_financial is None or df_financial.empty:
+                return 50
+            
+            # 寻找可能的 PE 列 (不同接口返回的列名不同)
+            pe_cols = ['市盈率-TTM', '滚动市盈率每股收益', 'PE', '市盈率']
+            pe_col = next((c for c in pe_cols if c in df_financial.columns), None)
+            
+            if not pe_col:
+                return 50
+                
+            # 提取历史财报节点的 PE 序列 (通常一季度一个点)
+            pe_history = pd.to_numeric(df_financial[pe_col], errors='coerce').dropna()
+            
+            if len(pe_history) < 4: # 至少需要一年的财报数据
+                return 50
+                
+            # 计算百分位
+            count_below = (pe_history < current_pe).sum()
+            percentile = (count_below / len(pe_history)) * 100
+            return percentile
+        except:
+            return 50
+
+    def _classify_price_stage(self, pe, change_60d, profit_growth, pe_percentile=None):
+        """五阶段判断 (引入 PE 百分位)"""
+        try:
+            pe = float(pe)
+            change_60d = float(change_60d)
+            profit_growth = float(profit_growth)
+            
+            # 使用百分位优化 困境期 和 透支期 的判断
+            is_low_valuation = pe_percentile < 20 if pe_percentile is not None else pe < 15
+            is_high_valuation = pe_percentile > 80 if pe_percentile is not None else pe > 50
+
+            if is_low_valuation and change_60d < -10:
+                return "A 困境期"
+            if profit_growth > 5 and -10 <= change_60d < 15:
+                return "B 修复初期"
+            if profit_growth > 15 and 15 <= change_60d < 30:
+                return "C 修复确认期"
+            if change_60d >= 30:
+                return "D 乐观定价期"
+            if is_high_valuation and change_60d < 5:
+                return "E 透支期"
+            return "B 修复初期" 
+        except:
+            return "未知"
+
+    def _classify_price_zone(self, pe, pe_dynamic, pe_percentile=None):
+        """四区价格分区 (优先使用财报历史百分位)"""
+        try:
+            if pe_percentile is not None:
+                if pe_percentile < 20: return "便宜区"
+                if 20 <= pe_percentile < 50: return "合理偏低区"
+                if 50 <= pe_percentile < 80: return "合理区"
+                return "高估区"
+            
+            # 兜底逻辑
+            pe_val = float(pe) if float(pe) > 0 else float(pe_dynamic)
+            if pe_val < 15: return "便宜区"
+            if 15 <= pe_val < 25: return "合理偏低区"
+            if 25 <= pe_val < 40: return "合理区"
+            return "高估区"
+        except:
+            return "未知"
+
     def calculate_score(self, df_history_data: pd.DataFrame, df_stock: pd.DataFrame, df_summary_data):
         """
         计算股票综合打分（基本打分满分100分），并根据 OBV 与随机指标调整±5分，
         使量化结果更全面。
-        基本打分逻辑不变：
-          趋势（30分）、RSI（20分）、MACD（20分）、成交量（30分）
-        附加指标调整：
-          OBV：OBV > OBV_MA10，+5分；反之，-5分；
-          随机指标：%K < 20为超卖，+5分；%K > 80为超买，-5分。
+        基本打分逻辑：
+          1. 价值-趋势矩阵分 (阶段 x 分区) - 权重核心
+          2. 股票类型溢价 (概念期/高增长等)
+          3. 技术面辅助分 (目前的技术打分)
         """
         try:
-            score, buy_signal_str = self.calculate_score_indicate(df_history_data,df_stock = df_stock)
-            return score, buy_signal_str
+            # 1. 获取基本面分类信息
+            stage = df_summary_data['五阶段判断模型'].iloc[0] if '五阶段判断模型' in df_summary_data.columns else "未知"
+            zone = df_summary_data['四区价格分区'].iloc[0] if '四区价格分区' in df_summary_data.columns else "未知"
+            stock_type = df_summary_data['股票类型分类'].iloc[0] if '股票类型分类' in df_summary_data.columns else "未知"
+
+            # 2. 计算价值-趋势矩阵基础分
+            matrix_score = self._calculate_matrix_score(stage, zone)
+            
+            # 3. 计算股票类型溢价
+            premium_score = self._calculate_type_premium(stock_type)
+            
+            # 4. 获取技术面信号分 (原有的 calculate_score_indicate)
+            tech_score, tech_msg = self.calculate_score_indicate(df_history_data, df_stock=df_stock)
+            
+            # 5. 综合总分计算
+            # 基础策略分 = 矩阵分 + 溢价分
+            # 透支期一票否决
+            if stage == "E 透支期":
+                total_score = 0
+            else:
+                # 总分 = 策略分 + 技术面修正 (技术面作为买入时机参考，给 20% 权重)
+                strategy_score = matrix_score + premium_score
+                total_score = strategy_score + (tech_score * 0.2)
+
+            buy_signal_str = f"策略得分:{matrix_score + premium_score}(矩阵:{matrix_score} 溢价:{premium_score}) | 技术分:{tech_score} | {tech_msg}"
+            
+            return total_score, buy_signal_str
         except Exception as e:
             self.logger.error(f"计算打分失败：{str(e)}")
             traceback.print_exc()
             raise
 
+    def _calculate_matrix_score(self, stage, zone):
+        """价值-趋势矩阵评分逻辑"""
+        matrix = {
+            "A 困境期": {"便宜区": 30, "合理偏低区": 20, "合理区": 10, "高估区": 0},
+            "B 修复初期": {"便宜区": 70, "合理偏低区": 60, "合理区": 40, "高估区": 10},
+            "C 修复确认期": {"便宜区": 100, "合理偏低区": 90, "合理区": 70, "高估区": 30},
+            "D 乐观定价期": {"便宜区": 50, "合理偏低区": 40, "合理区": 30, "高估区": 10},
+            "E 透支期": {"便宜区": 0, "合理偏低区": 0, "合理区": 0, "高估区": 0},
+        }
+        return matrix.get(stage, {}).get(zone, 0)
+
+    def _calculate_type_premium(self, stock_type):
+        """股票类型溢价评分逻辑"""
+        premium_map = {
+            "概念期 (Concept)": 30,
+            "高增长期 (Growth)": 20,
+            "成熟期 (Mature)": 10,
+            "周期性 (Cyclical)": 5,
+            "防守型 (Defensive)": 0,
+            "垃圾股 (Junk)": -50
+        }
+        # 处理可能包含括号的情况
+        for key, value in premium_map.items():
+            if key in str(stock_type):
+                return value
+        return 0
+
     def calculate_score_indicate(self, df_history_data: pd.DataFrame,df_stock = None):
         """
                计算股票综合打分（基本打分满分100分），并根据 OBV 与随机指标调整±5分，
-
-                RSI 策略	15      rsi_signal,rsi_signal_position
-                KDJ 策略	15      kdj_signal  kdj_signal_position
-                MACD 策略	30  macd_signal_index  macd_signal_position
-                均线策略	10    ma_signal  ma_signal_position
-                布林带策略	10   bb_signal  bb_signal_position
-                成交量策略	10   volume_signal volume_signal_position
-                威廉指标	5               williams_signal,williams_signal_position
-                ADX 策略	5          adx_signal adx_signal_position
-                突破策略 策略	5      breakout_signal  breakout_position
-                SAR 策略     5     'sar_signal', 'sar_position'
-                均值回归策略  5       'mean_signal', 'mean_signal_position'
-
-            输出：
         """
+        if df_history_data is None or df_history_data.empty:
+            return 0, "无历史数据，仅计算基本面得分"
+
         score = 0
         buy_signal_str = '买入的信号'
         stock_code_series = df_history_data['股票代码']
@@ -310,10 +500,15 @@ class StockStrategy:
             score = max(score, 10)  # 取最高分
         if current is not None and len(current)>0:
             process = self.date_utils.calculate_stock_progress()
+            # 安全获取成交量
+            current_vol = current.get('成交量', -1)
+            if current_vol == -1:
+                current_vol = current.get('成交额', 0) # 最后的兜底
+            
             if process> 0:
-                current_value = current['成交量'] /process
+                current_value = current_vol / process
             else:
-                current_value = current['成交量']
+                current_value = current_vol
             if current_value >= today[col_name] * ratio2:
                 score = max(score, 40)  # 取最高分
             elif current_value >= today[col_name]  * ratio:

@@ -294,6 +294,99 @@
             padding: 2px 6px;
             border-radius: 6px;
         }
+        .ai-summary-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .ai-summary-head {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 16px;
+        }
+        .ai-summary-title {
+            margin: 0 0 8px;
+            font-size: 20px;
+            color: #111827;
+        }
+        .ai-summary-meta {
+            margin: 6px 0;
+            color: #374151;
+            line-height: 1.75;
+        }
+        .ai-summary-section {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 16px;
+        }
+        .ai-summary-section h4 {
+            margin: 0 0 10px;
+            font-size: 16px;
+            color: #1f2937;
+        }
+        .ai-tree {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .ai-tree-item {
+            border-left: 2px solid #eef2f7;
+            padding-left: 8px;
+            margin-top: 4px;
+        }
+        .ai-tree-key {
+            font-size: 13px;
+            font-weight: 700;
+            color: #4b5563;
+            margin-bottom: 2px;
+        }
+        .ai-tree-value {
+            color: #1f2937;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 14px;
+        }
+        .ai-tree-list {
+            margin: 0;
+            padding-left: 18px;
+            color: #1f2937;
+            line-height: 1.75;
+        }
+        .ai-kv-table {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 4px 12px;
+        }
+        .ai-kv-row {
+            display: grid;
+            grid-template-columns: minmax(110px, 160px) minmax(0, 1fr);
+            gap: 8px;
+            align-items: baseline;
+            padding: 6px 0;
+            border-bottom: 1px dashed #e5e7eb;
+        }
+        .ai-kv-row:last-child {
+            border-bottom: none;
+        }
+        .ai-kv-key {
+            color: #6b7280;
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.5;
+        }
+        .ai-kv-value {
+            color: #111827;
+            font-size: 14px;
+            line-height: 1.5;
+            word-break: break-word;
+            margin: 0;
+        }
         .source-badge {
             display: inline-flex;
             align-items: center;
@@ -346,6 +439,7 @@
         @media (max-width: 720px) {
             .app-shell { padding: 16px; }
             .score-grid, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .ai-kv-row { grid-template-columns: minmax(90px, 140px) minmax(0, 1fr); }
         }
     </style>
 </head>
@@ -986,6 +1080,17 @@
 
         function renderSummaryTab(data) {
             if (typeof data.entry_decision_summary_markdown === 'string' && data.entry_decision_summary_markdown.trim()) {
+                const structuredSummary = tryParseStructuredSummary(data.entry_decision_summary_markdown);
+                if (structuredSummary && typeof structuredSummary === 'object' && !Array.isArray(structuredSummary)) {
+                    return `
+                        <div class="result-stack">
+                            ${renderAiStandardSummary(structuredSummary)}
+                            ${renderRawJsonBlock('查看快照原始数据', data.snapshot || {})}
+                            ${renderRawJsonBlock('查看手工补充输入', data.manual_inputs || {})}
+                            ${renderRawJsonBlock('查看完整结果 JSON', data)}
+                        </div>
+                    `;
+                }
                 const renderedMarkdown = typeof marked !== 'undefined'
                     ? marked.parse(data.entry_decision_summary_markdown)
                     : `<pre>${escapeHtml(data.entry_decision_summary_markdown)}</pre>`;
@@ -1019,6 +1124,126 @@
             cards.push(renderRawJsonBlock('查看手工补充输入', data.manual_inputs || {}));
             cards.push(renderRawJsonBlock('查看完整结果 JSON', data));
             return `<div class="result-stack">${cards.filter(Boolean).join('')}</div>`;
+        }
+
+        function tryParseStructuredSummary(text) {
+            const raw = String(text || '').trim();
+            if (!raw || (!raw.startsWith('{') && !raw.startsWith('['))) {
+                return null;
+            }
+            const parseAttempts = [
+                raw,
+                raw
+                    .replace(/\bTrue\b/g, 'true')
+                    .replace(/\bFalse\b/g, 'false')
+                    .replace(/\bNone\b/g, 'null'),
+                raw
+                    .replace(/\bTrue\b/g, 'true')
+                    .replace(/\bFalse\b/g, 'false')
+                    .replace(/\bNone\b/g, 'null')
+                    .replace(/'/g, '"')
+            ];
+            for (const candidate of parseAttempts) {
+                try {
+                    return JSON.parse(candidate);
+                } catch (error) {
+                    continue;
+                }
+            }
+            return null;
+        }
+
+        function renderAiStandardSummary(summaryObj) {
+            const title = summaryObj.title || '进场决策总结';
+            const purpose = summaryObj.purpose || '';
+            const goal = summaryObj.goal || '';
+            const usageMethod = summaryObj.usage_method || '';
+            const sections = summaryObj.sections || {};
+            const sectionCards = Object.entries(sections)
+                .map(([sectionTitle, sectionContent]) => `
+                    <section class="ai-summary-section">
+                        <h4>${escapeHtml(humanizeKey(sectionTitle))}</h4>
+                        ${renderAiSummaryTree(sectionContent)}
+                    </section>
+                `)
+                .join('');
+            return `
+                <div class="ai-summary-wrap">
+                    <section class="ai-summary-head">
+                        <h3 class="ai-summary-title">${escapeHtml(title)}</h3>
+                        ${purpose ? `<p class="ai-summary-meta"><strong>用途：</strong>${escapeHtml(purpose)}</p>` : ''}
+                        ${goal ? `<p class="ai-summary-meta"><strong>目标：</strong>${escapeHtml(goal)}</p>` : ''}
+                        ${usageMethod ? `<p class="ai-summary-meta"><strong>使用方式：</strong>${escapeHtml(usageMethod)}</p>` : ''}
+                    </section>
+                    ${sectionCards || '<section class="ai-summary-section"><div class="ai-tree-value">暂无章节内容</div></section>'}
+                </div>
+            `;
+        }
+
+        function renderAiSummaryTree(value) {
+            if (Array.isArray(value)) {
+                return `<ul class="ai-tree-list">${value.map(item => `<li>${escapeHtml(formatCompactValue(item))}</li>`).join('')}</ul>`;
+            }
+            if (value && typeof value === 'object') {
+                const entries = Object.entries(value);
+                if (!entries.length) {
+                    return '<div class="ai-tree-value">-</div>';
+                }
+                const scalarEntries = entries.filter(([, child]) => isSimpleValue(child));
+                const nestedEntries = entries.filter(([, child]) => !isSimpleValue(child));
+                const scalarTable = scalarEntries.length
+                    ? `<div class="ai-kv-table">${scalarEntries.map(([key, child]) => `
+                        <div class="ai-kv-row">
+                            <div class="ai-kv-key">${escapeHtml(humanizeKey(key))}</div>
+                            <div class="ai-kv-value">${escapeHtml(formatCompactValue(child))}</div>
+                        </div>
+                    `).join('')}</div>`
+                    : '';
+                const nestedTree = nestedEntries.length
+                    ? `<div class="ai-tree" style="${scalarEntries.length ? 'margin-top: 8px;' : ''}">${nestedEntries.map(([key, child]) => `
+                        <div class="ai-tree-item">
+                            <div class="ai-tree-key">${escapeHtml(humanizeKey(key))}</div>
+                            <div class="ai-tree-value">${renderAiSummaryTree(child)}</div>
+                        </div>
+                    `).join('')}</div>`
+                    : '';
+                return scalarTable + nestedTree;
+            }
+            return escapeHtml(formatCompactValue(value));
+        }
+
+        function isSimpleValue(value) {
+            if (value === null || value === undefined) {
+                return true;
+            }
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                return true;
+            }
+            if (Array.isArray(value)) {
+                return value.every(item => item === null || item === undefined || typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean');
+            }
+            return false;
+        }
+
+        function formatCompactValue(value) {
+            if (value === null || value === undefined || value === '') {
+                return '-';
+            }
+            if (typeof value === 'boolean') {
+                return value ? '是' : '否';
+            }
+            if (Array.isArray(value)) {
+                return value.map(item => formatCompactValue(item)).join('、');
+            }
+            if (typeof value === 'object') {
+                const entries = Object.entries(value);
+                if (!entries.length) return '-';
+                if (entries.every(([, v]) => isSimpleValue(v))) {
+                    return entries.map(([k, v]) => `${humanizeKey(k)}: ${formatCompactValue(v)}`).join('，');
+                }
+                return safeJsonStringify(value);
+            }
+            return String(value);
         }
 
         function renderStructuredSection(title, value) {

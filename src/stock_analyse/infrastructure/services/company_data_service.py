@@ -297,7 +297,8 @@ class stockCompanyInfo:
 
     # 主营业务介绍 根据主营业务网络搜索相关事件报道
     def get_stock_zyjs(self):
-        current_date = self.reportUtils.get_current__history_date_str()
+        # 修改：将日期改为固定值 'total'，实现跨日期持久化缓存
+        current_date = 'total'
         report_type = f"{self.market}_{self.symbol}_stock_zyjs"
         cached_data = self.cache_service.read_from_serialized(current_date, report_type)
         if cached_data is not None:
@@ -312,7 +313,8 @@ class stockCompanyInfo:
 
     def get_stock_name(self):
         """ 获取股票名称"""
-        current_date = self.reportUtils.get_current__history_date_str()
+        # 修改：将日期改为固定值 'total'，实现跨日期持久化缓存
+        current_date = 'total'
         report_type = f"{self.market}_{self.symbol}_stock_name"
         cached_data = self.cache_service.read_from_serialized(current_date, report_type)
         if cached_data is not None:
@@ -349,7 +351,8 @@ class stockCompanyInfo:
 
         :return:
         """
-        current_date = self.reportUtils.get_current__history_date_str()
+        # 修改：将日期改为固定值 'total'，实现跨日期持久化缓存
+        current_date = 'total'
         report_type = f"{self.market}_{self.symbol}_stock_individual_info"
         cached_data = self.cache_service.read_from_serialized(current_date, report_type)
         if cached_data is not None:

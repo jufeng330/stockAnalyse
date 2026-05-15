@@ -20,6 +20,7 @@ STRATEGY_NAMES = {
     4: '成长型筛选策略_4',
     5: '价值型筛选策略_5',
     6: '知名股票筛选策略_6',
+    7: '深度价值成长策略_7',
 }
 
 
@@ -130,6 +131,13 @@ class SelectionStrategyService:
                 strategy_filter=strategy_filter,
                 selector=selector,
             )
+        if strategy_type == 7:
+            return self.deep_value_growth_strategy(
+                df_stock=df_stock,
+                market=market,
+                strategy_filter=strategy_filter,
+                selector=selector,
+            )
         return selector.select_stock(df_stock, strategy_type=strategy_type, strategy_filter=strategy_filter)
 
     def _apply_market_prefilter(
@@ -155,19 +163,21 @@ class SelectionStrategyService:
                 strategy_config=strategy_config,
             )
         except Exception as exc:
-            if not allow_local_fallback:
-                error_message = str(exc)
-                if 'Futu OpenD unavailable' in error_message or 'futu-api is not installed' in error_message:
-                    raise RuntimeError(error_message) from exc
-                raise RuntimeError(
-                    f'Futu stock prefilter failed for market={normalized_market} strategy={strategy_type}: {error_message}'
-                ) from exc
+            # 即使禁止 fallback，如果是由于网络中断引起的，我们也可以记录警告并返回 None，
+            # 让上层尝试使用 get_stock_spot() 等其他本地方法获取。
             selector.logger.warning(
-                'Failed to apply Futu stock prefilter | market=%s | strategy=%s | fallback=local | error=%s',
+                'Futu stock prefilter failed | market=%s | strategy=%s | error=%s',
                 normalized_market,
                 strategy_type,
                 exc,
             )
+            if not allow_local_fallback:
+                # 检查是否是严重错误。如果是网络断开，有时返回 None 让上层走本地库可能更稳健
+                if "Remote end closed connection" in str(exc) or "Connection aborted" in str(exc):
+                    return None
+                raise RuntimeError(
+                    f'Futu stock prefilter failed for market={normalized_market} strategy={strategy_type}: {str(exc)}'
+                ) from exc
             return None
 
     def get_prefilter_candidates_or_raise(
@@ -185,10 +195,19 @@ class SelectionStrategyService:
             selector=selector,
             allow_local_fallback=False,
         )
+        
+        # 优化：如果远程预筛选失败（返回 None），则自动尝试获取本地全量行情作为备选
         if df_stock is None:
-            raise RuntimeError(f'No provider prefilter candidates for market={market} strategy={strategy_type}')
-        if df_stock.empty:
-            return df_stock.copy()
+            selector.logger.info(f'Remote prefilter failed for {market}, falling back to local full market spot...')
+            try:
+                df_stock = selector.stock.get_stock_spot()
+            except Exception as e:
+                selector.logger.error(f'Local fallback also failed: {e}')
+                
+        if df_stock is None or df_stock.empty:
+            # 如果本地也拿不到数据，才抛出错误
+            raise RuntimeError(f'No candidates (remote or local) for market={market} strategy={strategy_type}')
+            
         return selector.select_stock(df_stock, strategy_type=strategy_type, strategy_filter=strategy_filter)
 
     def normal_strategy(
@@ -643,6 +662,118 @@ class SelectionStrategyService:
 
         selector.logger.info(f"价值型策略 - 最终筛选股票数量：{len(df_filtered)}")
         return df_filtered
+
+    def deep_value_growth_strategy(
+        self,
+        df_stock: pd.DataFrame | None,
+        market: str,
+        strategy_filter: str = 'avg',
+        selector: StockSelectStrategy | None = None,
+    ) -> pd.DataFrame:
+        """实现深度价值成长策略_7。
+        
+        逻辑：
+        1. 基础筛选：排除垃圾股，选择主板优质标的。
+        2. 财务计算：利用 StockStrategy.calculate_stock_data 获取分类、阶段和分区。
+        3. 评分系统：调用 StockStrategy.calculate_score (新矩阵计分逻辑)。
+        """
+        selector = selector or self._create_selector(market=market, strategy_type=7)
+        
+        # 1. 获取初始股票池
+        if df_stock is None:
+            prefetched_df = self._apply_market_prefilter(df_stock=None, market=market, strategy_type=7, selector=selector)
+            if prefetched_df is None:
+                df_stock = selector.stock.get_stock_spot()
+            else:
+                df_stock = prefetched_df
+        df_stock = df_stock.copy()
+        df_stock['代码'] = df_stock['代码'].astype(str)
+        df_stock = self._normalize_spot_filter_columns(df_stock)
+        
+        selector.logger.info(f"深度价值成长策略_7 - 初始股票数量：{len(df_stock)}")
+
+        # 2. 逐个计算基本面分类和评分
+        results = []
+        
+        # 兼容性处理：寻找 PE 和 市值相关的列
+        def _get_frame_val(row, keys, default=0):
+            for k in keys:
+                if k in row.index and pd.notna(row[k]):
+                    try:
+                        return float(str(row[k]).replace(',', ''))
+                    except: continue
+            return default
+
+        # 预先获取可能的财务数据 (为了计算百分位)
+        # 为了性能，我们在循环外部不获取全量，而是在循环内部按需获取或批量获取（如果支持）
+        
+        selector.logger.info(f"深度价值成长策略_7 - 开始对股票池进行深度评分...")
+
+        for _, row in df_stock.iterrows():
+            stock_code = row['代码']
+            
+            # 基础初筛逻辑移入循环或使用兼容列名
+            pe_val = _get_frame_val(row, ['市盈率-动态', '市盈率', 'PE'], -1)
+            mkt_cap = _get_frame_val(row, ['总市值', '市值'], 0)
+            
+            # 初筛：排除 PE 无效或市值过小的
+            if pe_val <= 0 or pe_val > 60 or mkt_cap < 10 * 1e8:
+                continue
+                
+            try:
+                # 转换 row 为 calculate_stock_data 期望的格式
+                s_data = row.copy()
+                s_data['market'] = market
+                
+                # 获取该股票的历史财报数据（用于计算 PE 分位）
+                df_financial = selector.stock.get_stock_border_financial_indicator(
+                    market=market, df_stock_spot=pd.DataFrame([row])
+                )
+                
+                # A. 计算分类 (股票类型、五阶段、四区)
+                df_analysis = selector.stock_strategy.calculate_stock_data(
+                    df_history_data=None, 
+                    df_stock_data=s_data,
+                    stock_code=stock_code,
+                    df_financial=df_financial
+                )
+                
+                if df_analysis.empty:
+                    continue
+                
+                # B. 调用最新的 calculate_score 逻辑
+                score, signal_msg = selector.stock_strategy.calculate_score(
+                    df_history_data=pd.DataFrame(), 
+                    df_stock=pd.DataFrame([row]),
+                    df_summary_data=df_analysis
+                )
+                
+                # C. 收集结果
+                res_row = df_analysis.iloc[0].to_dict()
+                res_row['score'] = score
+                res_row['signal'] = signal_msg
+                # 显式映射列名，以兼容全盘扫描工作流的要求
+                res_row['代码'] = res_row.get('stock_code', stock_code)
+                res_row['名称'] = res_row.get('stock_name', row.get('名称', ''))
+                results.append(res_row)
+            except Exception as e:
+                selector.logger.debug(f"评分跳过 {stock_code}: {str(e)}")
+                continue
+
+
+        if not results:
+            return pd.DataFrame()
+
+        df_result = pd.DataFrame(results)
+        
+        # 3. 筛选和排序
+        # 排除透支期和垃圾股 (已经在评分逻辑中得分为0)
+        df_result = df_result[df_result['score'] > 0]
+        df_result = df_result.sort_values(by='score', ascending=False)
+        
+        selector.logger.info(f"深度价值成长策略_7 - 最终选出股票数量：{len(df_result)}")
+        return df_result
+
 
     def find_financial_stock_data(
         self,

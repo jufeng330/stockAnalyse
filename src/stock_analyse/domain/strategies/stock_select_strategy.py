@@ -44,6 +44,8 @@ class StockSelectStrategy:
             return '价值型筛选策略_5'
         elif strategy_type == 6:
             return '知名股票筛选策略_6'
+        elif strategy_type == 7:
+            return '深度价值成长策略_7'
         return '未知_' + str(strategy_type)
 
     def select_stock(self, df_stock, strategy_type=1, strategy_filter='continnue') -> pd.DataFrame:
@@ -59,6 +61,8 @@ class StockSelectStrategy:
             return self.value_strategy(df_stock)
         elif strategy_type == 6:
             return self.famous_stock_strategy(df_stock)
+        elif strategy_type == 7:
+            return self.deep_value_growth_strategy(df_stock)
         return pd.DataFrame()
 
     def normal_strategy(self, df_stock: Optional[pd.DataFrame] = None, strategy_filter: str = 'avg') -> pd.DataFrame:
@@ -103,6 +107,14 @@ class StockSelectStrategy:
 
     def famous_stock_strategy(self, df_stock: Optional[pd.DataFrame] = None, strategy_filter: str = 'avg') -> pd.DataFrame:
         return SelectionStrategyService().famous_stock_strategy(
+            df_stock=df_stock,
+            market=self.market,
+            strategy_filter=strategy_filter,
+            selector=self,
+        )
+
+    def deep_value_growth_strategy(self, df_stock: Optional[pd.DataFrame] = None, strategy_filter: str = 'avg') -> pd.DataFrame:
+        return SelectionStrategyService().deep_value_growth_strategy(
             df_stock=df_stock,
             market=self.market,
             strategy_filter=strategy_filter,
