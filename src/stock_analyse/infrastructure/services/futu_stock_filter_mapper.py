@@ -48,9 +48,9 @@ class FutuStockFilterMapper:
         roe_min = cls._number(financial.get('roe_min'))
         dividend_yield_min = cls._number(dividend.get('dividend_yield_min'))
 
-        if strategy_code in {1, 2, 3, 5} and market_cap_min is not None:
+        if strategy_code in {1, 2, 3, 5, 7} and market_cap_min is not None:
             filters.append(cls._simple(StockField.MARKET_VAL, filter_min=market_cap_min))
-        if strategy_code in {1, 2, 3, 5, 6} and pe_dynamic_max is not None:
+        if strategy_code in {1, 2, 3, 5, 6, 7} and pe_dynamic_max is not None:
             filters.append(cls._simple(StockField.PE_TTM, filter_max=pe_dynamic_max))
         if strategy_code in {2, 5} and pb_max is not None:
             filters.append(cls._simple(StockField.PB_RATE, filter_max=pb_max))

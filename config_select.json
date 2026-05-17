@@ -171,6 +171,29 @@
           }
         }
       }
+    },
+    "7": {
+      "meta": {
+        "code": 7,
+        "name": "深度价值成长策略_7",
+        "enabled": true,
+        "markets": ["SH", "SZ", "H", "usa"]
+      },
+      "filters": {
+        "spot": {
+          "market_cap_min": 1000000000,
+          "pe_dynamic_max": 100
+        }
+      },
+      "market_overrides": {
+        "usa": {
+          "filters": {
+            "spot": {
+              "market_cap_min": 100000000
+            }
+          }
+        }
+      }
     }
   }
 }

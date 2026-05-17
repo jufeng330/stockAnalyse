@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 
 class FutuMarketDataProvider(MarketSpotProvider):
     HISTORY_NUMERIC_COLUMNS = ['开盘', '收盘', '最高', '最低', '成交量', '成交额', '换手率', '涨跌幅', '昨收']
-    SPOT_NUMERIC_COLUMNS = ['最新价', '涨跌幅', '涨跌额', '今开', '最高', '最低', '昨收', '成交量', '成交额', '换手率', '市盈率-动态', '总市值', '市净率']
+    SPOT_NUMERIC_COLUMNS = [
+        '最新价', '涨跌幅', '涨跌额', '今开', '最高', '最低', '昨收', '成交量', '成交额', '换手率', 
+        '市盈率-动态', '总市值', '市净率', '振幅', '60日涨跌幅', '年初至今涨跌幅', '流通市值'
+    ]
     DETAIL_NUMERIC_COLUMNS = [
         '最新价', '今开', '最高', '最低', '昨收', '成交量', '成交额', '换手率', '每手股数', '振幅', '均价', '量比',
         '52周最高', '52周最低', '历史最高', '历史最低', '已发行股份', '流通股本', '总市值', '流通市值', '净资产',
@@ -263,6 +266,10 @@ class FutuMarketDataProvider(MarketSpotProvider):
             '市盈率-动态': self._first_series(frame, ['pe_ttm_ratio', 'pe_ratio']),
             '总市值': self._first_series(frame, ['total_market_val', 'market_val']),
             '市净率': self._first_series(frame, ['pb_ratio']),
+            '振幅': self._first_series(frame, ['amplitude']),
+            '60日涨跌幅': self._first_series(frame, ['change_60d_rate']),
+            '年初至今涨跌幅': self._first_series(frame, ['change_year_rate']),
+            '流通市值': self._first_series(frame, ['circular_market_val', 'circulating_market_val']),
         })
         return self._normalize_output_schema(mapped, market)
 

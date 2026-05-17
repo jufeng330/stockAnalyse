@@ -18,6 +18,10 @@ class FutuQuoteClient:
     SNAPSHOT_RATE_LIMIT_MAX_CALLS = 60
     SNAPSHOT_SAFE_CALLS_PER_WINDOW = 45
 
+    FILTER_RATE_LIMIT_WINDOW_SECONDS = 30.0
+    FILTER_RATE_LIMIT_MAX_CALLS = 10
+    FILTER_SAFE_CALLS_PER_WINDOW = 8
+
     def __init__(self, host: str | None = None, port: int | None = None, *, batch_size: int = 200) -> None:
         settings = get_settings().market_data
         self.host = host or settings.futu_host
@@ -25,6 +29,8 @@ class FutuQuoteClient:
         self.batch_size = batch_size
         self.snapshot_min_interval_seconds = self.SNAPSHOT_RATE_LIMIT_WINDOW_SECONDS / self.SNAPSHOT_SAFE_CALLS_PER_WINDOW
         self._last_snapshot_call_at = 0.0
+        self.filter_min_interval_seconds = self.FILTER_RATE_LIMIT_WINDOW_SECONDS / self.FILTER_SAFE_CALLS_PER_WINDOW
+        self._last_filter_call_at = 0.0
 
     def get_market_snapshot(self, codes: list[str], *, skip_unsupported: bool = False) -> pd.DataFrame:
         quote_ctx, ret_ok = self._open_quote_context()
@@ -32,18 +38,44 @@ class FutuQuoteClient:
         try:
             for start in range(0, len(codes), self.batch_size):
                 batch = codes[start:start + self.batch_size]
-                ret, data = self._request_market_snapshot(quote_ctx, batch)
-                if ret != ret_ok:
+                # 预过滤明显的 OTC 或无效代码
+                if skip_unsupported:
+                    original_len = len(batch)
+                    batch = [c for c in batch if not self._is_likely_unsupported(c)]
+                    if len(batch) < original_len:
+                        logger.debug("Pre-filtered %d likely unsupported codes from batch", original_len - len(batch))
+                
+                if not batch:
+                    continue
+
+                retry_count = 0
+                max_retries = 10 # 每批最多剔除10个后再报错，防止死循环
+                
+                while True:
+                    ret, data = self._request_market_snapshot(quote_ctx, batch)
+                    if ret == ret_ok:
+                        if data is not None and not data.empty:
+                            frames.append(data.copy())
+                        break
+                    
+                    # 处理报错
                     error_message = str(data)
-                    if skip_unsupported and len(batch) > 1:
-                        frames.extend(self._get_market_snapshot_resilient(quote_ctx, ret_ok, batch, batch_error=error_message))
-                        continue
                     if skip_unsupported and self._is_unsupported_snapshot_error(error_message):
-                        logger.warning('Skip unsupported Futu snapshot code | code=%s | error=%s', ','.join(batch), error_message)
-                        continue
-                    raise RuntimeError(error_message)
-                if data is not None and not data.empty:
-                    frames.append(data.copy())
+                        # 尝试提取报错的具体代码
+                        failed_code = self._extract_code_from_error(error_message)
+                        if failed_code and failed_code in batch:
+                            logger.warning('Removing unsupported code from batch and retrying: %s', failed_code)
+                            batch.remove(failed_code)
+                            retry_count += 1
+                            if batch and retry_count < max_retries:
+                                continue # 剔除后重试当前批量请求
+                        
+                        # 如果无法提取具体代码或重试过多，则进入精细化退避逻辑
+                        if len(batch) > 1:
+                            frames.extend(self._get_market_snapshot_resilient(quote_ctx, ret_ok, batch, batch_error=error_message))
+                        break
+                    else:
+                        raise RuntimeError(error_message)
         finally:
             quote_ctx.close()
         if not frames:
@@ -54,24 +86,70 @@ class FutuQuoteClient:
         frames: list[pd.DataFrame] = []
         if batch_error and self._is_rate_limit_snapshot_error(batch_error):
             raise RuntimeError(batch_error)
-        for code in codes:
-            ret, data = self._request_market_snapshot(quote_ctx, [code])
-            if ret != ret_ok:
-                error_message = str(data)
-                if self._is_unsupported_snapshot_error(error_message):
-                    logger.warning('Skip unsupported Futu snapshot code | code=%s | error=%s', code, error_message)
-                    continue
-                if self._is_rate_limit_snapshot_error(error_message):
-                    raise RuntimeError(f'Futu market snapshot rate limit exceeded while fetching {code}: {error_message}')
-                raise RuntimeError(f'Futu market snapshot failed for {code}: {error_message}')
-            if data is not None and not data.empty:
-                frames.append(data.copy())
+        
+        # 即使在退避逻辑中，也先拆成更小的组（例如 20 个一组）而不是 1 对 1，提高效率
+        sub_batch_size = 20
+        for i in range(0, len(codes), sub_batch_size):
+            sub_batch = codes[i:i + sub_batch_size]
+            if len(sub_batch) == 1:
+                ret, data = self._request_market_snapshot(quote_ctx, sub_batch)
+                if ret != ret_ok:
+                    error_message = str(data)
+                    if self._is_unsupported_snapshot_error(error_message):
+                        logger.warning('Skip unsupported Futu snapshot code | code=%s | error=%s', sub_batch[0], error_message)
+                        continue
+                    raise RuntimeError(f'Futu market snapshot failed for {sub_batch[0]}: {error_message}')
+                if data is not None and not data.empty:
+                    frames.append(data.copy())
+            else:
+                # 递归尝试更小的批次
+                try:
+                    for code in sub_batch:
+                        ret, data = self._request_market_snapshot(quote_ctx, [code])
+                        if ret == ret_ok:
+                            if data is not None and not data.empty:
+                                frames.append(data.copy())
+                        else:
+                            error_message = str(data)
+                            if self._is_unsupported_snapshot_error(error_message):
+                                logger.warning('Skip unsupported Futu snapshot code | code=%s | error=%s', code, error_message)
+                                continue
+                            raise RuntimeError(f'Futu market snapshot failed for {code}: {error_message}')
+                except Exception as e:
+                    if self._is_rate_limit_snapshot_error(str(e)):
+                        raise
+                    logger.error("Resilient sub-batch failed: %s", e)
         return frames
 
     @staticmethod
     def _is_unsupported_snapshot_error(error_message: str) -> bool:
         message = str(error_message or '')
-        return '暂不提供美股 OTC 市场行情' in message or 'not support' in message.lower()
+        return '暂不提供美股 OTC' in message or 'not support' in message.lower() or '暂不提供' in message
+
+    @staticmethod
+    def _is_likely_unsupported(code: str) -> bool:
+        """启发式判断是否为可能不支持的代码（如美股 OTC）"""
+        if not code.startswith('US.'):
+            return False
+        symbol = code[3:]
+        # 5位及以上代码通常是 OTC (如 LMED, CAMVF)
+        # 典型的 OTC 后缀: F (Foreign), Y (ADR)
+        if len(symbol) >= 5:
+            return True
+        return False
+
+    @staticmethod
+    def _extract_code_from_error(error_message: str) -> str | None:
+        """从错误信息中提取代码，例如 '... OTC 市场行情 LMED' -> 'US.LMED'"""
+        import re
+        # 匹配报错信息末尾的股票代码
+        match = re.search(r'市场行情\s+([A-Z0-9.]+)', error_message)
+        if match:
+            code = match.group(1)
+            if not code.startswith('US.') and 'OTC' in error_message:
+                return f'US.{code}'
+            return code
+        return None
 
     @staticmethod
     def _is_rate_limit_snapshot_error(error_message: str) -> bool:
@@ -148,6 +226,7 @@ class FutuQuoteClient:
         cursor = int(begin or 0)
         try:
             while True:
+                self._sleep_for_filter_rate_limit()
                 ret, data = quote_ctx.get_stock_filter(
                     market=market,
                     filter_list=filter_list or [],
@@ -197,6 +276,15 @@ class FutuQuoteClient:
             time.sleep(remaining)
             now = time.monotonic()
         self._last_snapshot_call_at = now
+
+    def _sleep_for_filter_rate_limit(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_filter_call_at
+        remaining = self.filter_min_interval_seconds - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+            now = time.monotonic()
+        self._last_filter_call_at = now
 
     def _open_quote_context(self):
         try:
