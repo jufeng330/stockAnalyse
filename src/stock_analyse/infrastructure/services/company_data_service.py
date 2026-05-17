@@ -210,59 +210,139 @@ class stockCompanyInfo:
 
     def get_stock_industry_by_code(self, code, date='2025-08-06'):
         """
-        获取概念板块名称
+        获取行业板块名称
         :return:
         """
         border_name = ''
+        normalized_market = self._normalized_market()
+        
+        # 1. 尝试从 Futu 供应者获取
         if self._should_use_futu_provider():
-            plate_df = self._get_futu_provider().get_stock_owner_plate(self._normalize_symbol_for_provider(code), self._normalized_market())
+            plate_df = self._get_futu_provider().get_stock_owner_plate(self._normalize_symbol_for_provider(code), normalized_market)
             if plate_df is not None and not plate_df.empty:
                 industry_df = plate_df[plate_df['板块类型'].astype(str) == '行业'] if '板块类型' in plate_df.columns else pd.DataFrame()
                 if not industry_df.empty and '所属板块' in industry_df.columns:
                     return ','.join(industry_df['所属板块'].astype(str).drop_duplicates())
-            return ""
-        if self.market == self.HongKong or self.market == self.usa:
-            return "行业"
-        report_type = 'stock_industry_data'
-        date = '20250331'
-        try:
-            # select * from   stock_industry_data_SH where 代码 = '839729' limit 10
-            df_data = self.mysql.read_from_cache(date=date, report_type=report_type,
-                                                 conditions={"代码": code})
-            if df_data is not None and not df_data.empty:
-                border_name = ','.join(df_data['所属板块'].astype(str))if '所属板块' in df_data.columns else ''
-                # 获取成分股
+        
+        # 2. 如果 Futu 未获取到，或者未启用 Futu，则尝试本地 MySQL
+        # 确定表类型和列名适配
+        if normalized_market == 'SH':
+            report_type = 'stock_industry_data'
+            code_col = '代码'
+            plate_col = '所属板块'
+        else:
+            report_type = 'stock_industry_data' # MySQLCache 会映射到 stock_industry_usa/H
+            code_col = 'code'
+            plate_col = 'plate_name'
 
-            return border_name
+        date_cache = '20250331'
+        if normalized_market == 'SH': date_cache = '20260517' # 对应我们刚才 Seed 的数据
+        
+        # 处理代码逻辑：兼容前缀
+        search_codes = [code]
+        clean_code = code
+        if '.' in code:
+            clean_code = code.split('.')[-1]
+            search_codes.append(clean_code)
+        
+        # 补全前缀逻辑
+        if normalized_market == 'usa':
+            if not code.startswith('US.'): search_codes.append(f'US.{clean_code}')
+        elif normalized_market == 'H':
+            if not code.startswith('HK.'): search_codes.append(f'HK.{clean_code}')
+        
+        try:
+            unique_search_codes = list(dict.fromkeys(search_codes))
+            for c in unique_search_codes:
+                df_data = self.mysql.read_from_cache(date=date_cache, report_type=report_type,
+                                                     market=normalized_market,
+                                                     conditions={code_col: c})
+                if df_data is not None and not df_data.empty:
+                    # 针对 A 股原生 data 表的额外过滤
+                    if normalized_market == 'SH' and '板块类型' in df_data.columns:
+                        df_data = df_data[df_data['板块类型'].astype(str) == '行业']
+                    
+                    # 针对港美股的过滤
+                    if normalized_market in ('H', 'usa') and 'plate_type' in df_data.columns:
+                        df_data = df_data[df_data['plate_type'].astype(str) == '行业']
+                    
+                    if df_data.empty: continue
+
+                    for col in [plate_col, '所属板块', 'plate_name', '板块名称']:
+                        if col in df_data.columns:
+                            border_name = ','.join(df_data[col].astype(str).drop_duplicates())
+                            if border_name:
+                                return border_name
         except Exception as e:
-            logging.warn(f"获取{code}成分股失败: {e}")
-        return "行业"
+            self.logger.warning(f"获取 {code} 行业信息失败 (MySQL): {e}")
+            
+        return "行业" if not border_name else border_name
+
     def get_stock_concept_by_code(self, code, date='2025-08-06'):
         """
         获取概念板块名称
         :return:
         """
-        border_name = ''
+        concept_name = ''
+        normalized_market = self._normalized_market()
+        
+        # 1. 尝试从 Futu 供应者获取
         if self._should_use_futu_provider():
-            plate_df = self._get_futu_provider().get_stock_owner_plate(self._normalize_symbol_for_provider(code), self._normalized_market())
+            plate_df = self._get_futu_provider().get_stock_owner_plate(self._normalize_symbol_for_provider(code), normalized_market)
             if plate_df is not None and not plate_df.empty:
                 concept_df = plate_df[plate_df['板块类型'].astype(str) == '概念'] if '板块类型' in plate_df.columns else pd.DataFrame()
                 if not concept_df.empty and '所属板块' in concept_df.columns:
                     return ','.join(concept_df['所属板块'].astype(str).drop_duplicates())
-            return ""
-        if self.market == self.HongKong or self.market == self.usa:
-            return "行业"
-        report_type = 'stock_concept_data'
-        date = '20250331'
-        # select * from   stock_industry_data_SH where 代码 = '839729' limit 10
-        df_data = self.mysql.read_from_cache(date=date, report_type=report_type,
-                                             conditions={"代码": code})
-        if df_data is not None and not df_data.empty:
-            border_name = ','.join(df_data['所属板块'].astype(str)) if '所属板块' in df_data.columns else ''
-            # 获取成分股
+        
+        # 2. 尝试本地 MySQL
+        if normalized_market == 'SH':
+            report_type = 'stock_concept_data'
+            code_col = '代码'
+            plate_col = '所属板块'
+        else:
+            report_type = 'stock_industry_data'
+            code_col = 'code'
+            plate_col = 'plate_name'
 
-        return border_name
+        date_cache = '20250331'
+        if normalized_market == 'SH': date_cache = '20260517'
 
+        search_codes = [code]
+        clean_code = code
+        if '.' in code:
+            clean_code = code.split('.')[-1]
+            search_codes.append(clean_code)
+            
+        if normalized_market == 'usa':
+            if not code.startswith('US.'): search_codes.append(f'US.{clean_code}')
+        elif normalized_market == 'H':
+            if not code.startswith('HK.'): search_codes.append(f'HK.{clean_code}')
+
+        try:
+            unique_search_codes = list(dict.fromkeys(search_codes))
+            for c in unique_search_codes:
+                df_data = self.mysql.read_from_cache(date=date_cache, report_type=report_type,
+                                                     market=normalized_market,
+                                                     conditions={code_col: c})
+                if df_data is not None and not df_data.empty:
+                    # 针对 A 股
+                    if normalized_market == 'SH' and '板块类型' in df_data.columns:
+                        df_data = df_data[df_data['板块类型'].astype(str) == '概念']
+                    # 针对港美股
+                    if normalized_market in ('H', 'usa') and 'plate_type' in df_data.columns:
+                        df_data = df_data[df_data['plate_type'].astype(str) == '概念']
+                    
+                    if df_data.empty: continue
+
+                    for col in [plate_col, '所属板块', 'plate_name', '板块名称']:
+                        if col in df_data.columns:
+                            concept_name = ','.join(df_data[col].astype(str).drop_duplicates())
+                            if concept_name:
+                                return concept_name
+        except Exception as e:
+            self.logger.warning(f"获取 {code} 概念信息失败 (MySQL): {e}")
+            
+        return "" if not concept_name else concept_name
     def save_stock_board_all_concept_name(self):
         """
         获取概念板块名称
@@ -398,13 +478,13 @@ class stockCompanyInfo:
                 stock_individual_info_em_df = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol,
                                                                                    token=self.xq_a_token)
                 list_date = '2010-01-01'
-                industry = ''
+                industry = self.get_stock_industry_by_code(self.symbol) or ''
                 return stock_individual_info_em_df, list_date, industry
             elif self.market == self.usa:
                 symbol = self.get_usa_code()
                 stock_individual_info_em_df = ak.stock_individual_basic_info_us_xq(symbol=symbol, token=self.xq_a_token)
                 list_date = '2010-01-01'
-                industry = ''
+                industry = self.get_stock_industry_by_code(symbol) or ''
                 return stock_individual_info_em_df, list_date, industry
             else:
                 stock_individual_info_em_df = ak.stock_individual_info_em(symbol=self.symbol)

@@ -100,8 +100,6 @@ class stockBorderInfo:
     def get_stock_spot(self):
         """
         获取股票的实时成交数据
-        stock_hk_spot_em 数据内容太多
-        :return:
         """
         cache = True
         current_date = self.reportUtils.get_current__history_date_str()
@@ -110,91 +108,81 @@ class stockBorderInfo:
         configured_provider = get_settings().market_data.provider_for_market(normalized_market)
         use_futu_provider = configured_provider == 'futu' and FutuMarketDataProvider.is_enabled(normalized_market)
 
-        stock_zh_a_spot_em_df = self.cache_service.read_from_serialized(current_date, report_type)
-        if stock_zh_a_spot_em_df is not None and cache:
-            code_col = '代码'
-            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].astype(str).str.replace(
-                r'^(bj|sz|sh)', '', case=False, regex=True
-            ).str.upper()
-            if self.market == 'usa':
-                stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码'].apply(
-                    lambda x: self.reportUtils.get_stock_code(market=self.market, symbol=x))
-            else:
-                stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码']
-            self.logger.info(
-                'Loaded stock spot from cache | market=%s | provider=%s | rows=%s',
-                normalized_market,
-                configured_provider,
-                len(stock_zh_a_spot_em_df),
-            )
-            return stock_zh_a_spot_em_df
+        # 1. 优先尝试读取今日缓存
+        stock_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if stock_df is not None and not stock_df.empty:
+            self.logger.info('Loaded stock spot from today\'s cache | market=%s', normalized_market)
+            return self._format_spot_df(stock_df)
 
+        # 2. 如果配置了 Futu 且可用，尝试从 Futu 获取
         if use_futu_provider:
             try:
-                provider_df = FutuMarketDataProvider(normalized_market).get_stock_spot(normalized_market)
-                if provider_df is not None and not provider_df.empty:
-                    self.logger.info(
-                        'Loaded stock spot via provider | market=%s | provider=%s | rows=%s',
-                        normalized_market,
-                        configured_provider,
-                        len(provider_df),
-                    )
-                    return provider_df
+                stock_df = FutuMarketDataProvider(normalized_market).get_stock_spot(normalized_market)
+                if stock_df is not None and not stock_df.empty:
+                    self.logger.info('Loaded stock spot via Futu | market=%s', normalized_market)
+                    return stock_df
             except Exception as exc:
-                self.logger.warning(
-                    'Failed to load stock spot via provider | market=%s | provider=%s | fallback=akshare | error=%s',
-                    normalized_market,
-                    configured_provider,
-                    exc,
-                )
+                self.logger.warning('Futu provider failed, fallback to AkShare: %s', exc)
 
-        if configured_provider == 'futu' and not use_futu_provider:
-            self.logger.info(
-                'Configured provider unavailable, fallback to AkShare | market=%s | provider=%s | fallback=akshare',
-                normalized_market,
-                configured_provider,
-            )
+        # 3. 尝试从实时接口获取 (SH/SZ, usa, H)
+        stock_df = pd.DataFrame()
+        try:
+            if self.market == 'SH' or self.market == 'SZ':
+                stock_df = self.get_stock_zh_a_spot_em_df()
+            elif self.market == 'usa':
+                stock_df = ak.stock_us_spot_em()
+            elif self.market == 'H' or self.market == 'HK':
+                stock_df = ak.stock_hk_main_board_spot_em()
+            else:
+                stock_df = ak.stock_zh_a_spot_em()
+        except Exception as e:
+            self.logger.warning('Live fetch failed for %s: %s', self.market, e)
 
-        stock_zh_a_spot_em_df = self.cache_service.read_from_serialized(current_date, report_type)
-        if stock_zh_a_spot_em_df is not None and cache:
-            code_col = '代码'
-            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].astype(str).str.replace(
+        # 4. 如果实时获取失败，尝试加载历史缓存 (前3天)
+        if stock_df is None or stock_df.empty:
+            self.logger.warning('No live data, attempting historic cache fallback...')
+            for i in range(1, 4):
+                past_date = self.reportUtils.get_current__history_date_str(days=i)
+                stock_df = self.cache_service.read_from_serialized(past_date, report_type)
+                if stock_df is not None and not stock_df.empty:
+                    self.logger.info('Successfully fell back to historic cache from %s', past_date)
+                    break
+
+        # 5. 最终校验与格式化
+        if stock_df is None or stock_df.empty:
+            self.logger.error('Final attempt: No spot data available for %s', self.market)
+            return pd.DataFrame()
+
+        # 格式化并保存今日缓存
+        stock_df = self._format_spot_df(stock_df)
+        if cache:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, stock_df)
+        
+        return stock_df
+
+    def _format_spot_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """统一格式化行情数据列名"""
+        if df is None or df.empty:
+            return pd.DataFrame()
+            
+        df = df.copy()
+        code_col = '代码'
+        if code_col in df.columns:
+            # 移除 A 股代码前缀
+            df[code_col] = df[code_col].astype(str).str.replace(
                 r'^(bj|sz|sh)', '', case=False, regex=True
             ).str.upper()
+            
+            # 生成统一的 '股票代码' 列
             if self.market == 'usa':
-                stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码'].apply(
+                df['股票代码'] = df[code_col].apply(
                     lambda x: self.reportUtils.get_stock_code(market=self.market, symbol=x))
             else:
-                stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码']
-            return stock_zh_a_spot_em_df
-
-        if use_futu_provider:
-            self.logger.info('Provider fallback reached AkShare live path | market=%s | provider=futu', normalized_market)
-
-        if self.market == 'SH' or self.market == 'SZ':
-            stock_zh_a_spot_em_df = self.get_stock_zh_a_spot_em_df()
-            code_col = '代码'
-            stock_zh_a_spot_em_df[code_col] = stock_zh_a_spot_em_df[code_col].astype(str).str.replace(
-                r'^(bj|sz|sh)', '', case=False, regex=True
-            ).str.upper()
-        elif self.market == 'usa':
-            stock_zh_a_spot_em_df = ak.stock_us_spot_em()
-            stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码'].apply(
-                lambda x: self.reportUtils.get_stock_code(market=self.market, symbol=x))
-        elif self.market == 'H' or self.market == 'HK':
-            stock_zh_a_spot_em_df = ak.stock_hk_main_board_spot_em()
-        else:
-            stock_zh_a_spot_em_df = ak.stock_zh_a_spot_em()
-
-        if self.market == 'usa':
-            stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码'].apply(
-                lambda x: self.reportUtils.get_stock_code(market=self.market, symbol=x))
-        else:
-            stock_zh_a_spot_em_df['股票代码'] = stock_zh_a_spot_em_df['代码']
-        if cache:
-            self.cache_service.write_to_cache_serialized(current_date, report_type,stock_zh_a_spot_em_df)
-
-        return stock_zh_a_spot_em_df
+                df['股票代码'] = df[code_col]
+        elif '股票代码' not in df.columns:
+             self.logger.warning('Column "代码" not found in dataframe during formatting')
+             
+        return df
 
         # 获取所有股票的财务报表
         # 资产负债表   序号   股票代码  股票简称      资产-货币资金      资产-应收账款        资产-存货       资产-总资产    资产-总资产同比      负债-应付账款       负债-预收账款       负债-总负债    负债-总负债同比      资产负债率        股东权益合计       公告日期

@@ -16,6 +16,7 @@ class StockFileUtils:
         self.min_score = min_score
         self.logger = logging.getLogger(__name__)
         self.market = market
+        self.currency_symbol = '$' if str(market).lower() == 'usa' else '¥'
         now = datetime.now()
         self.time_str = now.strftime('%Y%m%d%H')
         current_dir = os.path.dirname(__file__)
@@ -32,6 +33,23 @@ class StockFileUtils:
             return f'{x:.1f}'
         return x
 
+    def _prepare_df_for_markdown(self, df: pd.DataFrame) -> pd.DataFrame:
+        """准备用于 Markdown 输出的 DataFrame，转义特殊字符。"""
+        if df is None or df.empty:
+            return df
+        
+        # 复制一份以避免修改原始数据
+        df_display = df.copy()
+        
+        # 遍历所有对象（字符串）类型的列
+        for col in df_display.select_dtypes(include=['object']):
+            # 将列中的 | 替换为 \|，防止 Markdown 表格乱序
+            # 同时将换行符替换为 <br> 以在单行单元格内显示换行
+            df_display[col] = df_display[col].apply(
+                lambda x: str(x).replace('|', '\|').replace('\n', '<br>') if x is not None else x
+            )
+        return df_display
+
     def save_intermediate_results(self, results: List[Dict]) -> None:
         try:
             df = pd.DataFrame(results)
@@ -47,16 +65,19 @@ class StockFileUtils:
             for _, row in high_score_stocks.iterrows():
                 output_lines.extend([
                     f"\n股票代码: {row['stock_code']}",
-                    f"建议:{row['suggestion']} |得分: {row['score']:.1f} | 价格: ¥{row['price']} | 涨跌幅: {row['price_change']}% \n{row['signal']}",
+                    f"建议:{row['suggestion']} |得分: {row['score']:.1f} | 价格: {self.currency_symbol}{row['price']} | 涨跌幅: {row['price_change']}% \n{row['signal']}",
                 ])
 
             tmp_file = os.path.join(self.filePath, 'temp_results.txt')
             with open(tmp_file, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(output_lines))
+            
+            # 处理 Markdown 格式
+            df_markdown = self._prepare_df_for_markdown(df)
             result_file = os.path.join(self.analyseFilePath, 'results_all.txt')
             with open(result_file, 'w', encoding='utf-8') as f:
                 with pd.option_context('display.float_format', lambda x: f'{x:.2f}'):
-                    f.write(df.to_markdown())
+                    f.write(df_markdown.to_markdown())
         except Exception as exc:
             self.logger.error(f'保存中间结果失败：{exc}')
             traceback.print_exc()
@@ -70,7 +91,7 @@ class StockFileUtils:
                 formatted_row = {
                     '股票代码': row['stock_code'],
                     '评分': f"{row['score']:.1f}",
-                    '当前价格': f"¥{row['price']}",
+                    '当前价格': f"{self.currency_symbol}{row['price']}",
                     '涨跌幅': f"{row['price_change']}%",
                     '投资建议': row['suggestion'],
                     '建议详情': row['signal'],
@@ -80,10 +101,13 @@ class StockFileUtils:
                     if col not in exclude_fields:
                         formatted_row[col] = row[col]
                 formatted_results.append(formatted_row)
+            
+            # 处理 Markdown 格式
+            high_score_markdown = self._prepare_df_for_markdown(high_score_stocks)
             result_file = os.path.join(self.analyseFilePath, 'results_high_score.txt')
             with open(result_file, 'w', encoding='utf-8') as f:
                 with pd.option_context('display.float_format', lambda x: f'{x:.2f}'):
-                    f.write(high_score_stocks.to_markdown())
+                    f.write(high_score_markdown.to_markdown())
             return formatted_results
         except Exception as exc:
             self.logger.error(f'保存中间结果失败：{exc}')
@@ -106,7 +130,8 @@ class StockFileUtils:
             os.makedirs('scanner', exist_ok=True)
             price_groups = {}
             for stock in results:
-                price = float(stock['当前价格'].replace('¥', ''))
+                price_str = str(stock['当前价格']).replace('¥', '').replace('$', '')
+                price = float(price_str) if price_str else 0.0
                 if price is None:
                     price = 0.0
                 category = self.format_price_category(price)
@@ -204,7 +229,10 @@ class StockFileUtils:
         if df is None:
             return
         filename = os.path.join(self.analyseFilePath, f'{file_name}.md')
-        file_content = df.to_markdown()
+        
+        # 处理 Markdown 格式
+        df_markdown = self._prepare_df_for_markdown(df)
+        file_content = df_markdown.to_markdown()
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(file_content)
 

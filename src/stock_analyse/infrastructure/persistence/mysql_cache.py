@@ -226,75 +226,55 @@ class MySQLCache:
 
     def _table_has_data(self, table_name: str, date: str, conditions: dict = None) -> bool:
         """检查特定日期是否已有数据（支持任意字段的自定义条件）"""
+        # 默认使用日期分区过滤
         query = f"SELECT COUNT(*) FROM `{table_name}` WHERE `date_partition` = :date"
         params = {"date": date}
 
+        # 如果是行业、概念等全量表，可能没有日期分区
+        is_universal_table = table_name.startswith("stock_industry") or table_name.startswith("stock_concept")
+        if is_universal_table:
+            query = f"SELECT COUNT(*) FROM `{table_name}` WHERE 1=1"
+            params = {}
+
         if conditions:
             for field, value in conditions.items():
-                query += f" AND `{field}` = :{field}"  # 动态添加字段条件
+                query += f" AND `{field}` = :{field}"
                 params[field] = value
 
-        with self._get_mysql_engine().connect() as conn:
-            result = conn.execute(text(query), params).scalar()
-            return result > 0
-    def _insert_data_to_table(self, table_name: str, df: pd.DataFrame, date: str):
-        """将DataFrame数据插入到MySQL表"""
-        # 添加日期分区列
-        df = df.copy()
-        df['date_partition'] = date
-
-        # 针对不同市场的兼容性处理：补全缺失列名，以匹配已有的数据库架构
-        # 特别是针对 usa/HK 市场缺少 '报告期' 等字段的情况
-        if '报告期' not in df.columns:
-            if '报告日期' in df.columns:
-                df['报告期'] = df['报告日期']
-            elif 'date' in df.columns:
-                df['报告期'] = df['date']
-            else:
-                df['报告期'] = ''
-
-        # 使用SQLAlchemy插入数据
         try:
-            # 自动过滤掉数据库表中不存在的列，或者手动处理
-            df.to_sql(
-                name=table_name,
-                con=self._get_mysql_engine(),
-                if_exists='append',
-                index=False,
-                chunksize=1000  # 每批插入1000条记录
-            )
+            with self._get_mysql_engine().connect() as conn:
+                result = conn.execute(text(query), params).scalar()
+                return result > 0
         except Exception as e:
-            # 如果依然报错列不存在，尝试通过获取表结构动态筛选列
-            try:
+            # 如果报错列不存在，尝试不带日期分区的查询（降级）
+            if "Unknown column 'date_partition'" in str(e) and not is_universal_table:
+                query = f"SELECT COUNT(*) FROM `{table_name}` WHERE 1=1"
+                params = {}
+                if conditions:
+                    for field, value in conditions.items():
+                        query += f" AND `{field}` = :{field}"
+                        params[field] = value
                 with self._get_mysql_engine().connect() as conn:
-                    result = conn.execute(text(f"SHOW COLUMNS FROM `{table_name}`"))
-                    existing_columns = [row[0] for row in result.fetchall()]
-                    # 只保留表中存在的列
-                    df_final = df[[c for c in df.columns if c in existing_columns]]
-                    df_final.to_sql(
-                        name=table_name,
-                        con=self._get_mysql_engine(),
-                        if_exists='append',
-                        index=False,
-                        chunksize=1000
-                    )
-                    print(f"[MYSQL] 已通过列名过滤修复并成功写入: {table_name}")
-                    return
-            except:
-                pass
-            
-            print(f"[MYSQL] 写入数据库失败: {table_name}, 错误: {e}")
-            traceback.print_exc()
-    def _read_from_mysql(self, table_name: str, date: str,conditions = None) -> pd.DataFrame:
+                    result = conn.execute(text(query), params).scalar()
+                    return result > 0
+            raise e
+
+    def _read_from_mysql(self, table_name: str, date: str, conditions: dict = None) -> pd.DataFrame:
         """从MySQL读取数据"""
         engine = self._get_mysql_engine()
-        sql = f"SELECT * FROM `{table_name}` WHERE `date_partition` = :date"
-        params = {"date": date}
+        
+        # 初始 SQL 和参数
+        is_universal_table = table_name.startswith("stock_industry") or table_name.startswith("stock_concept")
+        if is_universal_table:
+            sql = f"SELECT * FROM `{table_name}` WHERE 1=1"
+            params = {}
+        else:
+            sql = f"SELECT * FROM `{table_name}` WHERE `date_partition` = :date"
+            params = {"date": date}
 
-        params = {"date": date}
         if conditions:
             for field, value in conditions.items():
-                sql += f" AND `{field}` = :{field}"  # 动态添加字段条件
+                sql += f" AND `{field}` = :{field}"
                 params[field] = value
 
         try:
@@ -302,6 +282,16 @@ class MySQLCache:
             df = pd.read_sql(query, engine, params=params)
             return df
         except Exception as e:
+            # 降级逻辑：如果报错找不到 date_partition 且刚才带了日期条件
+            if "Unknown column 'date_partition'" in str(e) and not is_universal_table:
+                sql = f"SELECT * FROM `{table_name}` WHERE 1=1"
+                params = {}
+                if conditions:
+                    for field, value in conditions.items():
+                        sql += f" AND `{field}` = :{field}"
+                        params[field] = value
+                df = pd.read_sql(text(sql), engine, params=params)
+                return df
             print(f"[MYSQL] 读取数据库失败: {table_name}, 错误: {e}")
             return pd.DataFrame()
 
