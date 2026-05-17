@@ -188,6 +188,8 @@ class SelectionStrategyService:
         strategy_filter: str = 'avg',
     ) -> pd.DataFrame:
         selector = self._create_selector(market=market, strategy_type=strategy_type)
+        
+        # 针对美股/港股，优先尝试远程 Provider (如 Futu)
         df_stock = self._apply_market_prefilter(
             df_stock=None,
             market=market,
@@ -196,17 +198,26 @@ class SelectionStrategyService:
             allow_local_fallback=False,
         )
         
-        # 优化：如果远程预筛选失败（返回 None），则自动尝试获取本地全量行情作为备选
-        if df_stock is None:
-            selector.logger.info(f'Remote prefilter failed for {market}, falling back to local full market spot...')
+        # 如果远程失败，彻底执行保底逻辑
+        if df_stock is None or df_stock.empty:
+            selector.logger.info(f'Remote prefilter unavailable for {market}, switching to local full scanner...')
             try:
-                df_stock = selector.stock.get_stock_spot()
+                # 显式尝试从 akshare 获取全量股票快照作为保底
+                import akshare as ak
+                if market == 'usa':
+                    df_stock = ak.stock_us_spot_em()
+                    # 归一化代码列
+                    if df_stock is not None:
+                        df_stock['代码'] = df_stock['代码'].apply(lambda x: selector.reportUtils.get_stock_code(market='usa', symbol=str(x)))
+                elif market in ('H', 'HK'):
+                    df_stock = ak.stock_hk_main_board_spot_em()
+                else:
+                    df_stock = selector.stock.get_stock_spot()
             except Exception as e:
-                selector.logger.error(f'Local fallback also failed: {e}')
+                selector.logger.error(f'Critical local fallback failed for {market}: {e}')
                 
         if df_stock is None or df_stock.empty:
-            # 如果本地也拿不到数据，才抛出错误
-            raise RuntimeError(f'No candidates (remote or local) for market={market} strategy={strategy_type}')
+            raise RuntimeError(f'No stock candidates found (remote/local) for {market} strategy {strategy_type}')
             
         return selector.select_stock(df_stock, strategy_type=strategy_type, strategy_filter=strategy_filter)
 
@@ -709,15 +720,19 @@ class SelectionStrategyService:
         
         selector.logger.info(f"深度价值成长策略_7 - 开始对股票池进行深度评分...")
 
+        # 初筛逻辑：放松过滤条件，防止在数据缺失时过滤掉所有股票
         for _, row in df_stock.iterrows():
             stock_code = row['代码']
             
-            # 基础初筛逻辑移入循环或使用兼容列名
-            pe_val = _get_frame_val(row, ['市盈率-动态', '市盈率', 'PE'], -1)
-            mkt_cap = _get_frame_val(row, ['总市值', '市值'], 0)
+            # 兼容性处理：寻找 PE 和 市值相关的列
+            pe_val = _get_frame_val(row, ['市盈率-动态', '市盈率', 'PE', 'pe_ttm'], -1)
+            mkt_cap = _get_frame_val(row, ['总市值', '市值', 'market_val'], 0)
             
-            # 初筛：排除 PE 无效或市值过小的
-            if pe_val <= 0 or pe_val > 60 or mkt_cap < 10 * 1e8:
+            # 放宽阈值：如果 pe 为 0 (可能缺失) 且不是 A 股，或者 pe 在合理范围内
+            is_valid_pe = (pe_val > 0 and pe_val <= 150) or pe_val == -1 or pe_val == 0
+            is_valid_cap = mkt_cap >= (5e7 if market == 'usa' else 5e8) or mkt_cap <= 0
+            
+            if not (is_valid_pe and is_valid_cap):
                 continue
                 
             try:
@@ -726,11 +741,41 @@ class SelectionStrategyService:
                 s_data['market'] = market
                 
                 # 获取该股票的历史财报数据（用于计算 PE 分位）
+                # 确保获取逻辑一致
                 df_financial = selector.stock.get_stock_border_financial_indicator(
                     market=market, df_stock_spot=pd.DataFrame([row])
                 )
                 
-                # A. 计算分类 (股票类型、五阶段、四区)
+                # 针对美股/港股，如果财报为空，尝试从 Snapshot Detail 获取（Futu Provider 特有）
+                if (df_financial is None or df_financial.empty) and market in ('usa', 'H', 'HK'):
+                    try:
+                        # 尝试调用 Futu 的详情接口作为保底财务数据
+                        from stock_analyse.infrastructure.services.futu_market_data_provider import FutuMarketDataProvider
+                        futu_provider = FutuMarketDataProvider(market)
+                        detail_df = futu_provider.get_stock_snapshot_detail(stock_code, market)
+                        if not detail_df.empty:
+                            df_financial = detail_df
+                    except: pass
+                
+                # A. 丰富数据：将财务指标回填到 s_data 中，避免 calculate_stock_data 取到 -1
+                if df_financial is not None and not df_financial.empty:
+                    # 获取最新的一行财务数据
+                    latest_fin = df_financial.iloc[0]
+                    # 回填常见字段
+                    field_map = {
+                        '平均净资产收益率': ['roe', 'ROE', '平均净资产收益率'],
+                        '净利润同比增长率': ['net_profit_growth', '利润增长率', '净利润同比增长率'],
+                        '营业总收入同比增长率': ['revenue_growth', '营收增长率', '营业总收入同比增长率'],
+                        '资产负债率': ['debt_ratio', '负债率', '资产负债率'],
+                        '市盈率': ['pe', 'PE', '市盈率'],
+                    }
+                    for target, sources in field_map.items():
+                        for src in sources:
+                            if src in latest_fin.index and pd.notna(latest_fin[src]):
+                                s_data[target] = latest_fin[src]
+                                break
+
+                # B. 计算分类 (股票类型、五阶段、四区)
                 df_analysis = selector.stock_strategy.calculate_stock_data(
                     df_history_data=None, 
                     df_stock_data=s_data,
@@ -762,7 +807,9 @@ class SelectionStrategyService:
 
 
         if not results:
-            return pd.DataFrame()
+            selector.logger.warning(f"深度价值成长策略_7 - 没有任何股票满足初筛条件 (PE/市值)")
+            # 返回一个带列名的空 DataFrame，防止上游 KeyError
+            return pd.DataFrame(columns=df_stock.columns.tolist() + ['score', 'signal'])
 
         df_result = pd.DataFrame(results)
         

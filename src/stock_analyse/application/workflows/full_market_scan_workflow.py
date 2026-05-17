@@ -109,6 +109,13 @@ class FullMarketScanWorkflow:
             if df_selected.empty:
                 runtime.logger.info('Strategy prefilter produced no candidates | market=%s | strategy=%s', runtime.market, runtime.strategy_type)
                 return df_selected
+            
+            # 标准化 Futu 返回的结果，确保有名为 '代码' 的列
+            if '代码' not in df_selected.columns:
+                for col in ['股票代码', 'code', 'stock_code']:
+                    if col in df_selected.columns:
+                        df_selected['代码'] = df_selected[col]
+                        break
             return df_selected
 
         df_stocks_data = self.get_all_stocks(market=runtime.market)
@@ -117,8 +124,33 @@ class FullMarketScanWorkflow:
             strategy_type=runtime.strategy_type,
             strategy_filter=strategy_filter,
         )
-        selected_codes = set(df_selected['代码'])
-        return df_stocks_data[df_stocks_data['代码'].astype(str).isin(selected_codes)]
+        
+        # 调试输出
+        if df_selected.empty:
+            runtime.logger.warning('select_stock returned empty dataframe. Original columns: %s', df_stocks_data.columns.tolist())
+            # 如果是空的且没有列名，尝试打印原始数据的样本
+            if not df_stocks_data.empty:
+                runtime.logger.info('Original data sample (first 5 rows):\n%s', df_stocks_data.head(5).to_string())
+
+        # 兼容多种列名获取代码集合
+        possible_code_cols = ['代码', '股票代码', 'code', 'stock_code']
+        code_col = next((col for col in possible_code_cols if col in df_selected.columns), None)
+        
+        if code_col is None:
+            runtime.logger.error('Could not find code column in selected stocks. Columns available: %s', df_selected.columns.tolist())
+            return pd.DataFrame()
+
+        selected_codes = set(df_selected[code_col].astype(str))
+        
+        # 同样适配原始数据的列名
+        base_code_col = next((col for col in possible_code_cols if col in df_stocks_data.columns), '代码')
+        df_final = df_stocks_data[df_stocks_data[base_code_col].astype(str).isin(selected_codes)].copy()
+
+        # 标准化结果，确保下游可以通过 '代码' 访问
+        if '代码' not in df_final.columns and base_code_col != '代码':
+            df_final['代码'] = df_final[base_code_col]
+        
+        return df_final
 
     def analyze_stock_safe(self, runtime: FullMarketScanRuntime, stock, max_retries: int = 3) -> Optional[dict]:
         stock_code = stock['代码']

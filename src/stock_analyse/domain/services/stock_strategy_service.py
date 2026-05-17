@@ -351,7 +351,7 @@ class StockStrategy:
             return 0, "无历史数据，仅计算基本面得分"
 
         score = 0
-        buy_signal_str = '买入的信号'
+        signals: list[str] = []
         stock_code_series = df_history_data['股票代码']
         if hasattr(stock_code_series, 'iloc'):  # 检查是否是 pandas Series
             stock_code = stock_code_series.iloc[0] if not df_history_data.empty else ""
@@ -368,105 +368,73 @@ class StockStrategy:
             last_trend = '未知趋势'
         else:
             wave_percent = pd.to_numeric(df_wave['波动百分比'], errors='coerce').fillna(0).iloc[-1]
+            
         if total_trend == '上升':
             if last_trend == '翻转中':
-                if wave_percent<3:
-                    score += 70
-                elif wave_percent<5:
-                    score += 60
-                elif wave_percent<10:
-                    score += 40
-                else:
-                    score += 30
-                buy_signal_str += f"股票趋势:{total_trend} 阶段:{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+                if wave_percent<3: score += 70
+                elif wave_percent<5: score += 60
+                elif wave_percent<10: score += 40
+                else: score += 30
+                signals.append(f"趋势:{total_trend} 阶段:{last_trend}")
             elif last_trend == '探底中':
-                if wave_percent>20:
-                    score += 40
-                elif wave_percent>10:
-                    score += 30
-                else:
-                    score += 20
-
-                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+                if wave_percent>20: score += 40
+                elif wave_percent>10: score += 30
+                else: score += 20
+                signals.append(f"趋势:{total_trend} 阶段:{last_trend}")
         elif total_trend == '下降':
             if last_trend == '翻转中':
-                if wave_percent<3:
-                    score += 30
-                elif wave_percent<5:
-                    score += 20
-                else:
-                    score += 10
-
-                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+                if wave_percent<3: score += 30
+                elif wave_percent<5: score += 20
+                else: score += 10
+                signals.append(f"趋势:{total_trend} 阶段:{last_trend}")
             elif last_trend == '探底中':
-                score += 0
-                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+                signals.append(f"趋势:{total_trend} 阶段:{last_trend}")
         else:
             if last_trend == '翻转中':
-                if wave_percent < 3:
-                    score +=20
-                else:
-                    score += 10
-                buy_signal_str += f"股票趋势{total_trend} 阶段{last_trend}，score: {score} df_wave: {df_wave.iloc[-1]}\n"
+                if wave_percent < 3: score +=20
+                else: score += 10
+                signals.append(f"趋势:{total_trend} 阶段:{last_trend}")
 
         result = self.has_recent_buy_signal(df=df_history_data, signal_column='macd_signal_index')
         if (result):
             df_result_accuracy = self.find_macd_inc_stock(df_history_data, stock_code)
             score_value = df_result_accuracy['score'].iloc[0]
             score += score_value
-            buy_signal_str += f"MACD 信号 触发买入 {score_value}\n"
+            signals.append(f"MACD买入({score_value})")
 
         result_inc = self.calculate_vol_inc(df=df_history_data, ratio=1.5,df_stock = df_stock)
         if (result_inc > 0):
             df_result_acc = self.find_vol_inc_stock(df_history_data, stock_code)
             score_inc = df_result_acc['成交量股价上涨得分'].iloc[0]
             score += score_inc+result_inc
-            buy_signal_str += f"成交量放大:{result_inc} 触发买入  score: {score_inc}\n"
+            signals.append(f"放量买入({result_inc})")
 
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='rsi_signal')
-        if (result):
+        if self.has_recent_buy_signal(df=df_history_data, signal_column='rsi_signal'):
             score += 10
-            buy_signal_str += f"RSI 信号 触发买入\n"
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='kdj_signal')
-        if (result):
+            signals.append("RSI买入")
+        if self.has_recent_buy_signal(df=df_history_data, signal_column='kdj_signal'):
             score += 5
-            buy_signal_str += f"KDJ 信号 触发买入\n"
-
-        result = self.has_recent_buy_signal(df = df_history_data, signal_column='breakout_signal')
-        if(result):
+            signals.append("KDJ买入")
+        if self.has_recent_buy_signal(df = df_history_data, signal_column='breakout_signal'):
             score += 5
-            buy_signal_str += f"均线策略 信号 触发买入\n"
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='bb_signal')
-        if (result):
+            signals.append("均线破位")
+        if self.has_recent_buy_signal(df=df_history_data, signal_column='bb_signal'):
             score += 10
-            buy_signal_str += f"布林带策略 信号 触发买入\n"
-
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='volume_signal')
-        if (result):
+            signals.append("布林带买入")
+        if self.has_recent_buy_signal(df=df_history_data, signal_column='volume_signal'):
             score += 5
-            buy_signal_str += f"成交量策略 信号 触发买入\n"
-
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='williams_signal')
-        if (result):
+            signals.append("量能突破")
+        if self.has_recent_buy_signal(df=df_history_data, signal_column='williams_signal'):
             score += 5
-            buy_signal_str += f"威廉指标 信号 触发买入\n"
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='adx_signal')
-        if (result):
+            signals.append("威廉买入")
+        if self.has_recent_buy_signal(df=df_history_data, signal_column='adx_signal'):
             score += 5
-            buy_signal_str += f"ADX策略 信号 触发买入\n"
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='breakout_signal')
-        if (result):
+            signals.append("ADX买入")
+        if self.has_recent_buy_signal(df=df_history_data, signal_column='mean_signal'):
             score += 5
-            buy_signal_str += f"突破策略 信号 触发买入\n"
-        result = self.has_recent_buy_signal(df=df_history_data, signal_column='mean_signal')
-        if (result):
-            score += 5
-            buy_signal_str += f"均值回归策略 信号 触发买入\n"
+            signals.append("均值回归")
 
-
-
-        # stock = StockWaveAnalyzer()
-        buy_signal_str = buy_signal_str.replace('\n', '    ')
+        buy_signal_str = "\n ".join(signals)
         return score, buy_signal_str
 
     def calculate_vol_inc(self, df: pd.DataFrame, ratio=1.5,df_stock = None):
