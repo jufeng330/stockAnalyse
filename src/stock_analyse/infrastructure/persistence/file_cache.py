@@ -12,6 +12,8 @@ from stock_analyse.infrastructure.persistence.mysql_cache import MySQLCache
   获取所有板块信息: stock_board = stock_concept_service.stock_board_concept_name_ths()
 """
 class FileCacheUtils:
+    _MYSQL_CACHE: MySQLCache | None = None
+
     def __init__(self, market='SZ', cache_dir=None):
         # 定义 current_date 并格式化
         self.market = market
@@ -30,7 +32,9 @@ class FileCacheUtils:
 
         self.logger = logging.getLogger(__name__)
 
-        self.mysql = MySQLCache()
+        if FileCacheUtils._MYSQL_CACHE is None:
+            FileCacheUtils._MYSQL_CACHE = MySQLCache()
+        self.mysql = FileCacheUtils._MYSQL_CACHE
 
     def _get_cache_filepath(self, date, report_type ,file_type='csv'):
         """生成缓存文件路径"""

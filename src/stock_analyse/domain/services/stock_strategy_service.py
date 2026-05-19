@@ -85,8 +85,9 @@ class StockStrategy:
         
         # 处理估值与财务指标
         roe = _get_val(['ROE', '净资产收益率', '平均净资产收益率'])
-        pe = _get_val(['市盈率-动态', 'PE', '市盈率'])
+        pe = _get_val(['PE_TTM', 'PE_静态', '市盈率-动态', 'PE', '市盈率'])
         if pe == -1 or _to_float(pe) <= 0:
+
             pe_price = _to_float(_get_val(['基本每股收益'], 0))
             pe = (price / pe_price) if (price > 0 and pe_price > 0) else -1
             
@@ -95,7 +96,7 @@ class StockStrategy:
             pb_price = _to_float(_get_val(['每股净资产_x', '每股净资产'], 0))
             pb = (price / pb_price) if (price > 0 and pb_price > 0) else -1
             
-        dynamic_pe = _get_val(['市盈率-动态', '动态市盈率'], pe)
+        dynamic_pe = _get_val(['PE_TTM', '市盈率-动态', '动态市盈率'], pe)
         ps_ratio = _get_val(['市销率', 'PS'])
         dividend_yield = _get_val(['股息率', '现金分红-股息率'], 0)
 
@@ -164,38 +165,47 @@ class StockStrategy:
         return df_result
 
     def _classify_stock_type(self, roe, revenue_growth, profit_growth, market_cap, dividend_yield, industry, pe):
-        """股票类型分类"""
+        """股票类型分类 - 对齐文档方案"""
         try:
             roe = float(roe)
             revenue_growth = float(revenue_growth)
             profit_growth = float(profit_growth)
-            market_cap = float(market_cap) / 1e8 if float(market_cap) > 0 else -1
+            market_cap_bn = float(market_cap) / 1e8 if float(market_cap) > 0 else -1
             dividend_yield = float(dividend_yield)
             pe = float(pe)
             
+            # 1. 垃圾股 (Junk)
             if profit_growth < -20 and roe < 0:
                 return "垃圾股 (Junk)"
             
-            if market_cap > 0 and market_cap < 10:
+            if 0 < market_cap_bn < 10:  # 小市值陷阱
                 if roe < 5 or profit_growth < 0:
                     return "垃圾股 (Junk)"
             
+            # 2. 成熟期 (Mature)
             if dividend_yield >= 2.0 and roe >= 10 and -5 <= profit_growth <= 20:
                 return "成熟期 (Mature)"
             
-            if revenue_growth >= 30 or profit_growth >= 20:
+            # 3. 高增长期 (Growth)
+            # 营收增速 >= 30% 或 利润增速 >= 20%，估值虽然可以高，但最好不要极端变态 (>100)
+            if (revenue_growth >= 30 or profit_growth >= 20) and (0 < pe < 100 or pe < 0):
                 return "高增长期 (Growth)"
             
-            cyclical_industries = {'煤炭', '钢铁', '有色金属', '化工', '石油', '房地产', '汽车', '航运'}
+            # 4. 周期性 (Cyclical)
+            cyclical_industries = {'煤炭', '钢铁', '有色金属', '化工', '石油', '房地产', '汽车', '航运', '水泥', '玻璃', '航空', '电力设备'}
             if any(c in str(industry) for c in cyclical_industries):
                 return "周期性 (Cyclical)"
                 
-            defensive_industries = {'食品饮料', '医药生物', '公用事业', '银行', '交通运输'}
+            # 5. 防守型 (Defensive)
+            defensive_industries = {'食品饮料', '医药生物', '公用事业', '银行', '交通运输', '建筑装饰'}
             if any(d in str(industry) for d in defensive_industries):
                 return "防守型 (Defensive)"
                 
+            # 6. 概念期 (Concept) - 尚未盈利但有营收增速，且多在科技类
+            concept_industries = {'半导体', '软件', 'IT', '通信', '互联网', '传媒', '电子', '新能源', '人工智能', '医药'}
             if roe < 0 and revenue_growth > 0:
-                return "概念期 (Concept)"
+                if any(c in str(industry) for c in concept_industries):
+                    return "概念期 (Concept)"
                 
             return "防守型 (Defensive)"
         except:
@@ -211,15 +221,25 @@ class StockStrategy:
             if df_financial is None or df_financial.empty:
                 return 50
             
-            # 寻找可能的 PE 列 (不同接口返回的列名不同)
-            pe_cols = ['市盈率-TTM', '滚动市盈率每股收益', 'PE', '市盈率']
+            # 寻找可能的 PE 列
+            pe_cols = ['PE_TTM', 'PE_静态', '市盈率-TTM', '滚动市盈率每股收益', 'PE', '市盈率']
             pe_col = next((c for c in pe_cols if c in df_financial.columns), None)
+            
+            # 针对 A 股：如果 df_financial 是原始财报数据且没有 PE 列，尝试根据股价和利润动态计算历史 PE 序列
+            if not pe_col and '净利润' in df_financial.columns and '总市值' in df_financial.columns:
+                # 这种情况下，df_financial 每一行通常是一个财报节点，且我们在 market_data_service 中已回填了当时的市值或利润
+                df_financial = df_financial.copy()
+                df_financial['PE_CALC'] = df_financial['总市值'] / df_financial['净利润']
+                pe_col = 'PE_CALC'
             
             if not pe_col:
                 return 50
                 
             # 提取历史财报节点的 PE 序列 (通常一季度一个点)
             pe_history = pd.to_numeric(df_financial[pe_col], errors='coerce').dropna()
+            
+            # 过滤掉极端异常值 (如亏损导致的负 PE 或 极大的 PE)
+            pe_history = pe_history[(pe_history > 0) & (pe_history < 300)]
             
             if len(pe_history) < 4: # 至少需要一年的财报数据
                 return 50
@@ -229,47 +249,56 @@ class StockStrategy:
             percentile = (count_below / len(pe_history)) * 100
             return percentile
         except:
-            return 50
+            return -1
 
     def _classify_price_stage(self, pe, change_60d, profit_growth, pe_percentile=None):
-        """五阶段判断 (引入 PE 百分位)"""
+        """五阶段判断 - 对齐文档方案 (引入 PE 百分位优先)"""
         try:
             pe = float(pe)
             change_60d = float(change_60d)
             profit_growth = float(profit_growth)
             
-            # 使用百分位优化 困境期 和 透支期 的判断
-            is_low_valuation = pe_percentile < 20 if pe_percentile is not None else pe < 15
-            is_high_valuation = pe_percentile > 80 if pe_percentile is not None else pe > 50
-
-            if is_low_valuation and change_60d < -10:
+            # A 困境期: 便宜但还在跌 (百分位 < 30% 或 PE < 15)
+            is_low_val = pe_percentile < 30 if pe_percentile is not None and pe_percentile >= 0 else (0 < pe < 15)
+            if is_low_val and change_60d < -5:
                 return "A 困境期"
-            if profit_growth > 5 and -10 <= change_60d < 15:
-                return "B 修复初期"
-            if profit_growth > 15 and 15 <= change_60d < 30:
-                return "C 修复确认期"
+                
+            # E 透支期: 价格远超基本面 (百分位 > 80% 或 PE > 80)
+            is_extreme_high = pe_percentile > 80 if pe_percentile is not None and pe_percentile >= 0 else pe > 80
+            # 若处于历史极端高位且涨幅已放缓或滞涨
+            if is_extreme_high and change_60d < 10:
+                return "E 透支期"
+
+            # D 乐观定价期: 加速上涨 (涨幅大)
             if change_60d >= 30:
                 return "D 乐观定价期"
-            if is_high_valuation and change_60d < 5:
-                return "E 透支期"
+
+            # C 修复确认期: 趋势形成 (增速好 + 中位估值 + 稳步上涨)
+            is_mid_val = 30 <= pe_percentile <= 75 if pe_percentile is not None and pe_percentile >= 0 else 15 <= pe <= 40
+            if profit_growth > 15 and change_60d >= 10 and is_mid_val:
+                return "C 修复确认期"
+
+            # B 修复初期: 拐点出现 (增速转正 + 价格企稳)
             return "B 修复初期" 
         except:
             return "未知"
 
     def _classify_price_zone(self, pe, pe_dynamic, pe_percentile=None):
-        """四区价格分区 (优先使用财报历史百分位)"""
+        """四区价格分区 - 严格对齐方案文档阈值"""
         try:
-            if pe_percentile is not None:
-                if pe_percentile < 20: return "便宜区"
-                if 20 <= pe_percentile < 50: return "合理偏低区"
-                if 50 <= pe_percentile < 80: return "合理区"
+            # 1. 优先使用百分位 (25/40/75 分界)
+            if pe_percentile is not None and pe_percentile >= 0:
+                if pe_percentile < 25: return "便宜区"
+                if 25 <= pe_percentile < 40: return "合理偏低区"
+                if 40 <= pe_percentile < 75: return "合理区"
                 return "高估区"
             
-            # 兜底逻辑
+            # 2. 兜底逻辑 (使用绝对 PE 阈值 15/25/45)
             pe_val = float(pe) if float(pe) > 0 else float(pe_dynamic)
+            if pe_val <= 0: return "未知"
             if pe_val < 15: return "便宜区"
             if 15 <= pe_val < 25: return "合理偏低区"
-            if 25 <= pe_val < 40: return "合理区"
+            if 25 <= pe_val < 45: return "合理区"
             return "高估区"
         except:
             return "未知"
@@ -308,7 +337,7 @@ class StockStrategy:
                 strategy_score = matrix_score + premium_score
                 total_score = strategy_score + (tech_score * 0.2)
 
-            buy_signal_str = f"策略得分:{matrix_score + premium_score}(矩阵:{matrix_score} 溢价:{premium_score}) | 技术分:{tech_score} | {tech_msg}"
+            buy_signal_str = f"策略得分:{matrix_score + premium_score}(矩阵:{matrix_score} 溢价:{premium_score}) /n 技术分:{tech_score} /n {tech_msg}"
             
             return total_score, buy_signal_str
         except Exception as e:

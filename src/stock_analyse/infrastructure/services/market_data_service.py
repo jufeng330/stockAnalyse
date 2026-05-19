@@ -322,7 +322,7 @@ class stockBorderInfo:
             #
                 :return:
         """
-        cache_key = "financial_indicator_5y_window"
+        cache_key = f"financial_indicator_5y_window_{market}"
         df_stock_financial = self.cache_service.read_from_serialized(date, cache_key)
         if df_stock_spot is None:
             df_stock_spot = self.get_stock_spot()
@@ -347,19 +347,43 @@ class stockBorderInfo:
         else:
             df_stock_financial_all = df_stock_financial
 
+        # 只保留当前请求股票的财务数据，避免复用全量缓存后出现跨股票串值
+        if df_stock_spot is not None and not df_stock_spot.empty and '股票代码' in df_stock_financial_all.columns:
+            request_codes = set()
+            if '股票代码' in df_stock_spot.columns:
+                request_codes.update(df_stock_spot['股票代码'].astype(str).tolist())
+            if '代码' in df_stock_spot.columns:
+                request_codes.update(df_stock_spot['代码'].astype(str).tolist())
+
+            def _normalize_code(value):
+                text = str(value).strip().upper()
+                for suffix in ['.US', '.HK', '.SH', '.SZ']:
+                    if text.endswith(suffix):
+                        return text[:text.rfind(suffix)]
+                return text
+
+            normalized_request_codes = {_normalize_code(code) for code in request_codes if str(code).strip()}
+            normalized_fin_codes = df_stock_financial_all['股票代码'].astype(str).map(_normalize_code)
+            df_stock_financial_all = df_stock_financial_all[normalized_fin_codes.isin(normalized_request_codes)].copy()
+
         if '报告期' not in df_stock_financial_all.columns and '报告日期' in df_stock_financial_all.columns :
             # 转换并填充缺失值
             df_stock_financial_all['报告日期'] = pd.to_datetime(df_stock_financial_all['报告日期'],errors='coerce')
             df_stock_financial_all['报告期'] = df_stock_financial_all['报告日期'].dt.strftime('%Y-%m-%d').fillna('')
 
         if market == 'H' or market == 'usa':
-            """
-                |    | 证券代码   |   股票代码 | 股票简称     |   机构代码 | 报告日期            |   DATE_TYPE_CODE |   经营活动每股净现金流量_hk |   每股经营活动现金流量_hk |
-                每股净资产_hk |   基本每股收益 |   稀释每股收益 |    营业收入 |   营业收入同比增长率 |      毛利润 |   毛利润同比增长率 |   归属于母公司股东净利润 |   归属于母公司股东的净利润同比增长率_hk |   毛利率 |   滚动市盈率每股收益_hk |   
-                营业收入环比增长率_hk |   净利率_hk |   平均净资产收益率 |    毛利润环比增长率_hk |   总资产收益率 |   归属于母公司股东的净利润环比增长率_hk |   
-                 年度净资产收益率_hk |   年度投入资本回报率_hk |   息税前利润税负_hk |   销售商品、提供劳务收到的现金占营业收入比重_hk | 
-                 资产负债率 |   流动比率 |   流动负债占总负债比重_hk | 起始日期_hk         | 会计年度_hk   | 货币类型_hk   |   是否人民币代码_hk | 报告期     
-            """
+            # 兼容性处理：如果是美股，某些字段名可能不同
+            if market == 'usa':
+                if '市盈率-TTM' in df_stock_financial_all.columns and 'PE_TTM' not in df_stock_financial_all.columns:
+                    df_stock_financial_all['PE_TTM'] = df_stock_financial_all['市盈率-TTM']
+                if '市盈率' in df_stock_financial_all.columns and 'PE' not in df_stock_financial_all.columns:
+                    df_stock_financial_all['PE'] = df_stock_financial_all['市盈率']
+                # 计算 ROE
+                if '净利润' in df_stock_financial_all.columns and '净资产' in df_stock_financial_all.columns:
+                    # 避免除以 0
+                    mask = (df_stock_financial_all['净资产'].notna()) & (df_stock_financial_all['净资产'] != 0)
+                    df_stock_financial_all.loc[mask, 'ROE'] = (df_stock_financial_all.loc[mask, '净利润'] / df_stock_financial_all.loc[mask, '净资产']) * 100
+
             if  '归属于母公司股东净利润' in df_stock_financial_all.columns and '净利润' not in df_stock_financial_all.columns :
                 df_stock_financial_all['净利润'] = df_stock_financial_all['归属于母公司股东净利润']
             if  '归属于母公司股东的净利润同比增长率_hk' in df_stock_financial_all.columns and '净利润同比增长率' not in df_stock_financial_all.columns :
@@ -368,6 +392,8 @@ class stockBorderInfo:
                 df_stock_financial_all.rename(columns={'营业收入': '营业总收入'}, inplace=True)
             if '营业收入同比增长率' in df_stock_financial_all.columns and '营业总收入同比增长率' not in df_stock_financial_all.columns:
                 df_stock_financial_all.rename(columns={'营业收入同比增长率': '营业总收入同比增长率'}, inplace=True)
+            if '平均净资产收益率' in df_stock_financial_all.columns and '净资产收益率' not in df_stock_financial_all.columns:
+                df_stock_financial_all['净资产收益率'] = df_stock_financial_all['平均净资产收益率']
             if  '资产负债率' in df_stock_financial_all.columns :
                 df_stock_financial_all['资产负债率'] = df_stock_financial_all['资产负债率']/100
 
@@ -378,9 +404,169 @@ class stockBorderInfo:
                 dates.dt.year.astype(str),
                 np.nan  # 处理无效日期
             )
-        if '营业总收入' in df_stock_financial_all.columns:
-            df_stock_financial_all = self.stock_utils.pd_convert_to_float(df_stock_financial_all, '营业总收入')
+
+        # 转换数值列
+        convert_cols = ['营业总收入', '净利润', '扣非净利润', '总资产', '股东权益合计', '基本每股收益', '净资产收益率', 'ROE', '平均净资产收益率']
+        for col in convert_cols:
+            if col in df_stock_financial_all.columns:
+                df_stock_financial_all = self.stock_utils.pd_convert_to_float(df_stock_financial_all, col)
+
+        # 计算 A 股 TTM 净利润
+        if market == 'SH' or market == 'SZ':
+            df_stock_financial_all = self._calculate_ttm_net_profit(df_stock_financial_all)
+
+        # 补充 PE 计算逻辑：使用 map 机制实现 1对多计算，不污染原始对象结构
+        if df_stock_all is not None and not df_stock_all.empty:
+            # 1. 准备行情映射表 (处理代码和别名)
+            spot_df = df_stock_all.copy()
+            if '股票代码' not in spot_df.columns and '代码' in spot_df.columns:
+                spot_df['股票代码'] = spot_df['代码'].astype(str)
+            elif '股票代码' in spot_df.columns:
+                spot_df['股票代码'] = spot_df['股票代码'].astype(str)
+            
+            # 统一核心列
+            mkt_cap_aliases = ['总市值', '市值', 'market_cap', 'total_mv', 'market_val']
+            price_aliases = ['最新价', '价格', '收盘价', 'price', 'last_price']
+            
+            found_mkt = next((a for a in mkt_cap_aliases if a in spot_df.columns), None)
+            found_price = next((a for a in price_aliases if a in spot_df.columns), None)
+            
+            # 2. 将行情映射为与财务表等长的 Series (广播)
+            # 针对美股/港股，代码中可能包含 .US 或 .HK 后缀，需要清洗以便匹配
+            def clean_code(c):
+                c = str(c).upper()
+                for suffix in ['.US', '.HK', '.SH', '.SZ']:
+                    if c.endswith(suffix):
+                        return c[:c.rfind(suffix)]
+                return c
+
+            code_series_clean = df_stock_financial_all['股票代码'].apply(clean_code)
+            spot_df['股票代码_clean'] = spot_df['股票代码'].apply(clean_code)
+            
+            if found_mkt:
+                mkt_map = spot_df.set_index('股票代码_clean')[found_mkt]
+                temp_df = pd.DataFrame({'val': code_series_clean.map(mkt_map)})
+                temp_df = self.stock_utils.pd_convert_to_float(temp_df, 'val')
+                df_stock_financial_all['总市值'] = temp_df['val']
+                
+            if found_price:
+                price_map = spot_df.set_index('股票代码_clean')[found_price]
+                temp_df = pd.DataFrame({'val': code_series_clean.map(price_map)})
+                temp_df = self.stock_utils.pd_convert_to_float(temp_df, 'val')
+                df_stock_financial_all['最新价'] = temp_df['val']
+
+            # 3. 核心计算 (在 df_stock_financial_all 内部 Series 间进行 1对1 运算)
+            if '总市值' in df_stock_financial_all.columns and df_stock_financial_all['总市值'].notna().any():
+                if '净利润_TTM' in df_stock_financial_all.columns:
+                    df_stock_financial_all['PE_TTM'] = df_stock_financial_all['总市值'] / df_stock_financial_all['净利润_TTM']
+                if '净利润_年报' in df_stock_financial_all.columns:
+                    df_stock_financial_all['PE_静态'] = df_stock_financial_all['总市值'] / df_stock_financial_all['净利润_年报']
+                elif '净利润' in df_stock_financial_all.columns:
+                    df_stock_financial_all['PE_静态'] = df_stock_financial_all['总市值'] / df_stock_financial_all['净利润']
+            
+            # 4. 兜底逻辑：基于最新价 / 每股收益_TTM
+            if ('PE_TTM' not in df_stock_financial_all.columns or df_stock_financial_all['PE_TTM'].isna().all()) \
+               and '最新价' in df_stock_financial_all.columns and '每股收益_TTM' in df_stock_financial_all.columns:
+                df_stock_financial_all['PE_TTM'] = df_stock_financial_all['最新价'] / df_stock_financial_all['每股收益_TTM']
+
+            # 5. 港股专用逻辑
+            if '滚动市盈率每股收益_hk' in df_stock_financial_all.columns and '最新价' in df_stock_financial_all.columns:
+                df_stock_financial_all['PE_TTM'] = df_stock_financial_all['最新价'] / df_stock_financial_all['滚动市盈率每股收益_hk']
+
+        # 6. 最终字段名称二次对齐
+        for col in df_stock_financial_all.columns:
+            if col in ['净资产收益率', '平均净资产收益率'] and 'ROE' not in df_stock_financial_all.columns:
+                df_stock_financial_all['ROE'] = df_stock_financial_all[col]
+            if col in ['归属于母公司股东的净利润同比增长率_hk'] and '净利润同比增长率' not in df_stock_financial_all.columns:
+                df_stock_financial_all['净利润同比增长率'] = df_stock_financial_all[col]
+
+        # 10. 强制转换核心指标为浮点数并统一单位 (0.1 -> 10)
+        final_convert_cols = ['ROE', '净资产收益率', 'PE_TTM', 'PE_静态', '净利润同比增长率', '营业总收入同比增长率', '最新价', '总市值']
+        for col in final_convert_cols:
+            if col in df_stock_financial_all.columns:
+                df_stock_financial_all = self.stock_utils.pd_convert_to_float(df_stock_financial_all, col)
+                # 统一单位：如果是小数形式 (绝对值 < 1 且不为 0)，转换为百分数形式
+                if col in ['ROE', '净资产收益率', '净利润同比增长率', '营业总收入同比增长率']:
+                    mask = (df_stock_financial_all[col].abs() > 0) & (df_stock_financial_all[col].abs() < 1.0)
+                    df_stock_financial_all.loc[mask, col] = df_stock_financial_all.loc[mask, col] * 100
+
+        # 11. 最终兜底：如果 PE_TTM 仍然缺失，且有最新价和每股收益，则强制计算
+        if 'PE_TTM' in df_stock_financial_all.columns:
+            # A. 处理最新价缺失导致 PE 为空的场景：尝试用总市值/净利润_TTM 再次填充
+            if '总市值' in df_stock_financial_all.columns and '净利润_TTM' in df_stock_financial_all.columns:
+                mask = df_stock_financial_all['PE_TTM'].isna() & df_stock_financial_all['总市值'].notna() & (df_stock_financial_all['净利润_TTM'] != 0)
+                df_stock_financial_all.loc[mask, 'PE_TTM'] = df_stock_financial_all.loc[mask, '总市值'] / df_stock_financial_all['净利润_TTM']
+            
+            # B. 处理总市值缺失但有最新价的场景：最新价 / 每股收益_TTM
+            if '最新价' in df_stock_financial_all.columns and '每股收益_TTM' in df_stock_financial_all.columns:
+                mask = df_stock_financial_all['PE_TTM'].isna() & df_stock_financial_all['最新价'].notna() & (df_stock_financial_all['每股收益_TTM'] != 0)
+                df_stock_financial_all.loc[mask, 'PE_TTM'] = df_stock_financial_all.loc[mask, '最新价'] / df_stock_financial_all['每股收益_TTM']
+
         return df_stock_financial_all
+
+    def _calculate_ttm_net_profit(self, df):
+        """
+        计算 A 股 TTM 净利润（针对累计财报数据）
+        TTM = 当前季度累计 + (上一年度全年 - 上一年度同期累计)
+        """
+        if df is None or df.empty or '净利润' not in df.columns or '报告期' not in df.columns or '股票代码' not in df.columns:
+            return df
+
+        df = df.copy()
+        df['报告期_dt'] = pd.to_datetime(df['报告期'])
+        df = df.sort_values(['股票代码', '报告期_dt'])
+
+        df['year'] = df['报告期_dt'].dt.year
+        df['month'] = df['报告期_dt'].dt.month
+
+        # 获取上一年度全年的利润（12-31）
+        last_full_year_profit = df[df['month'] == 12][['股票代码', 'year', '净利润']].copy()
+        last_full_year_profit = last_full_year_profit.rename(columns={'净利润': '净利润_去年', 'year': 'prev_year'})
+
+        df['prev_year'] = df['year'] - 1
+        df = pd.merge(df, last_full_year_profit, on=['股票代码', 'prev_year'], how='left')
+
+        # 获取上一年度同期累计利润
+        prev_year_same_q = df[['股票代码', '报告期_dt', '净利润']].copy()
+        prev_year_same_q['报告期_dt'] = prev_year_same_q['报告期_dt'] + pd.DateOffset(years=1)
+        prev_year_same_q = prev_year_same_q.rename(columns={'净利润': 'prev_year_same_q_profit'})
+
+        df = pd.merge(df, prev_year_same_q, left_on=['股票代码', '报告期_dt'], right_on=['股票代码', '报告期_dt'], how='left')
+
+        mask_q4 = df['month'] == 12
+        df.loc[mask_q4, '净利润_TTM'] = df.loc[mask_q4, '净利润']
+
+        mask_other = ~mask_q4
+        # TTM = current + (last_full_year - last_year_same_quarter)
+        df.loc[mask_other, '净利润_TTM'] = df.loc[mask_other, '净利润'] + \
+                                         df.loc[mask_other, '净利润_去年'] - \
+                                         df.loc[mask_other, 'prev_year_same_q_profit']
+        
+        # 增加 EPS TTM 计算
+        if '基本每股收益' in df.columns:
+            last_full_year_eps = df[df['month'] == 12][['股票代码', 'year', '基本每股收益']].copy()
+            last_full_year_eps = last_full_year_eps.rename(columns={'基本每股收益': 'eps_去年', 'year': 'prev_year'})
+            df = pd.merge(df, last_full_year_eps, on=['股票代码', 'prev_year'], how='left')
+            
+            prev_year_same_q_eps = df[['股票代码', '报告期_dt', '基本每股收益']].copy()
+            prev_year_same_q_eps['报告期_dt'] = prev_year_same_q_eps['报告期_dt'] + pd.DateOffset(years=1)
+            prev_year_same_q_eps = prev_year_same_q_eps.rename(columns={'基本每股收益': 'prev_year_same_q_eps'})
+            df = pd.merge(df, prev_year_same_q_eps, on=['股票代码', '报告期_dt'], how='left')
+            
+            df.loc[mask_q4, '每股收益_TTM'] = df.loc[mask_q4, '基本每股收益']
+            df.loc[mask_other, '每股收益_TTM'] = df.loc[mask_other, '基本每股收益'] + \
+                                             df.loc[mask_other, 'eps_去年'] - \
+                                             df.loc[mask_other, 'prev_year_same_q_eps']
+
+        # 计算用于静态 PE 的年报净利润
+        df['净利润_年报'] = np.where(df['month'] == 12, df['净利润'], df['净利润_去年'])
+
+        # 兜底方案：如果没有足够数据计算 TTM，使用年化估计
+        df.loc[df['净利润_TTM'].isna(), '净利润_TTM'] = df['净利润'] * (12 / df['month'])
+
+        # 清理中间列
+        drop_cols = ['报告期_dt', 'year', 'month', 'prev_year', 'prev_year_same_q_profit', '净利润_去年']
+        return df.drop(columns=[c for c in drop_cols if c in df.columns])
 
     #获取所有的板块信息  日期         概念名称 成分股数量  网址     代码
     def get_stock_board_all_concept_name(self):
@@ -785,6 +971,23 @@ class stockBorderInfo:
             df_merge['ROE'] = df_merge['平均净资产收益率']
             df_merge = self.stock_utils.pd_convert_to_float(df=df_merge, col_name='ROE')
 
+        # 计算市盈率 (PE)
+        if '最新价' in df_merge.columns and '总市值' in df_merge.columns:
+            df_merge = self.stock_utils.pd_convert_to_float(df_merge, '最新价')
+            df_merge = self.stock_utils.pd_convert_to_float(df_merge, '总市值')
+            
+            # 计算 PE (静态)
+            if '净利润_年报' in df_merge.columns:
+                df_merge['PE_静态'] = df_merge['总市值'] / df_merge['净利润_年报']
+            elif '净利润' in df_merge.columns:
+                df_merge['PE_静态'] = df_merge['总市值'] / df_merge['净利润']
+            
+            # 计算 PE (TTM)
+            if '净利润_TTM' in df_merge.columns:
+                df_merge['PE_TTM'] = df_merge['总市值'] / df_merge['净利润_TTM']
+            elif '滚动市盈率每股收益_hk' in df_merge.columns:
+                # 港股处理
+                df_merge['PE_TTM'] = df_merge['最新价'] / df_merge['滚动市盈率每股收益_hk']
 
         return df_merge
 

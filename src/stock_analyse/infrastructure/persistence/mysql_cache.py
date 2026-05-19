@@ -11,6 +11,8 @@ from sqlalchemy import text  # 新增导入
 class MySQLCache:
     """MySQL缓存类，用于将DataFrame数据缓存到文件和MySQL数据库"""
 
+    _ENGINE_CACHE: dict[tuple[str, str, str, str, str, int, int], object] = {}
+
     def __init__(
             self,
             db_user: str = 'aloo',
@@ -32,6 +34,12 @@ class MySQLCache:
             db_name: 数据库名称
             cache_dir: 缓存文件存储目录
         """
+        from stock_analyse.infrastructure.config.settings import get_settings
+        settings = get_settings()
+        mysql_config = settings.market_data.mysql or {}
+        pool_size = mysql_config.get('pool_size', 5)
+        max_overflow = mysql_config.get('max_overflow', 0)
+
         self.db_user = db_user
         self.db_password = db_password
         self.db_host = db_host
@@ -42,14 +50,25 @@ class MySQLCache:
         self.market = market
         self.cache_switch = True
 
-        self.engine = create_engine(
-            f'mysql+pymysql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}',
-            pool_size=5,  # 降低连接池大小，避免 Too many connections
-            max_overflow=0,  # 不允许溢出
-            pool_recycle=3600,
-            pool_timeout=60,  # 增加超时等待时间
-            pool_pre_ping=True
+        engine_key = (
+            self.db_user,
+            self.db_password,
+            self.db_host,
+            str(self.db_port),
+            self.db_name,
+            int(pool_size),
+            int(max_overflow),
         )
+        if engine_key not in self._ENGINE_CACHE:
+            self._ENGINE_CACHE[engine_key] = create_engine(
+                f'mysql+pymysql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}',
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                pool_recycle=3600,
+                pool_timeout=60,
+                pool_pre_ping=True,
+            )
+        self.engine = self._ENGINE_CACHE[engine_key]
 
     def write_to_cache(
             self,

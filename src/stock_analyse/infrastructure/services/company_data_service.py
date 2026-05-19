@@ -29,6 +29,8 @@ except ImportError:
   获取所有板块信息: stock_board = stock_concept_service.stock_board_concept_name_ths()
 """
 class stockCompanyInfo:
+    _MYSQL_CACHE: MySQLCache | None = None
+
     def __init__(self, marker='sz', symbol="002624"):
         # 定义 current_date 并格式化
         self.market = marker
@@ -45,7 +47,9 @@ class stockCompanyInfo:
         self.reportUtils = self.report_util
         self.cache_service = FileCacheUtils(market=self.market)
         self.searxng = SearxngClient()
-        self.mysql = MySQLCache()
+        if stockCompanyInfo._MYSQL_CACHE is None:
+            stockCompanyInfo._MYSQL_CACHE = MySQLCache()
+        self.mysql = stockCompanyInfo._MYSQL_CACHE
 
     def _normalized_market(self):
         return get_settings().market_data.normalize_market(self.market)
@@ -789,6 +793,23 @@ class stockCompanyInfo:
                 df_indicator['total_mv'] = df_indicator_Total['total_mv']
                 df_indicator['股票代码'] = self.symbol
                 # return df_indicator
+            elif self.market == 'usa':
+                # 美股：从财报指标中提取估值序列
+                df_fin = self.get_stock_financial_analysis_indicator()
+                if df_fin is not None and not df_fin.empty:
+                    # 映射美股字段到统一指标名
+                    df_indicator = df_fin.copy()
+                    # 确保 PE 和 ROE 存在
+                    if 'PE' not in df_indicator.columns and '市盈率' in df_indicator.columns:
+                        df_indicator['pe'] = df_indicator['市盈率']
+                    if 'roe' not in df_indicator.columns:
+                        for roe_col in ['平均净资产收益率', '净资产收益率', 'ROE']:
+                            if roe_col in df_indicator.columns:
+                                df_indicator['roe'] = df_indicator[roe_col]
+                                break
+                    df_indicator['股票代码'] = self.symbol
+                else:
+                    df_indicator = pd.DataFrame()
             else:
                 df_indicator = pd.DataFrame()
             if cache and df_indicator.empty == False:

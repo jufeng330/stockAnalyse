@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from stock_analyse.application.workflows.dividend_analysis_workflow import StockFenHengAnalyser
 from stock_analyse.domain.strategies.financial_filter_service import FinancialFilterService
@@ -715,17 +716,12 @@ class SelectionStrategyService:
                     except: continue
             return default
 
-        # 预先获取可能的财务数据 (为了计算百分位)
-        # 为了性能，我们在循环外部不获取全量，而是在循环内部按需获取或批量获取（如果支持）
-        
-        selector.logger.info(f"深度价值成长策略_7 - 开始对股票池进行深度评分...")
-
-        # 初筛逻辑：放松过滤条件，防止在数据缺失时过滤掉所有股票
-        for _, row in df_stock.iterrows():
+        def _worker(row_tuple):
+            _, row = row_tuple
             stock_code = row['代码']
             
             # 兼容性处理：寻找 PE 和 市值相关的列
-            pe_val = _get_frame_val(row, ['市盈率-动态', '市盈率', 'PE', 'pe_ttm'], -1)
+            pe_val = _get_frame_val(row, ['PE_TTM', 'PE_静态', '市盈率-动态', '市盈率', 'PE', 'pe_ttm'], -1)
             mkt_cap = _get_frame_val(row, ['总市值', '市值', 'market_val'], 0)
             
             # 放宽阈值：如果 pe 为 0 (可能缺失) 且不是 A 股，或者 pe 在合理范围内
@@ -733,7 +729,7 @@ class SelectionStrategyService:
             is_valid_cap = mkt_cap >= (5e7 if market == 'usa' else 5e8) or mkt_cap <= 0
             
             if not (is_valid_pe and is_valid_cap):
-                continue
+                return None
                 
             try:
                 # 转换 row 为 calculate_stock_data 期望的格式
@@ -741,7 +737,6 @@ class SelectionStrategyService:
                 s_data['market'] = market
                 
                 # 获取该股票的历史财报数据（用于计算 PE 分位）
-                # 确保获取逻辑一致
                 df_financial = selector.stock.get_stock_border_financial_indicator(
                     market=market, df_stock_spot=pd.DataFrame([row])
                 )
@@ -749,7 +744,6 @@ class SelectionStrategyService:
                 # 针对美股/港股，如果财报为空，尝试从 Snapshot Detail 获取（Futu Provider 特有）
                 if (df_financial is None or df_financial.empty) and market in ('usa', 'H', 'HK'):
                     try:
-                        # 尝试调用 Futu 的详情接口作为保底财务数据
                         from stock_analyse.infrastructure.services.futu_market_data_provider import FutuMarketDataProvider
                         futu_provider = FutuMarketDataProvider(market)
                         detail_df = futu_provider.get_stock_snapshot_detail(stock_code, market)
@@ -759,15 +753,29 @@ class SelectionStrategyService:
                 
                 # A. 丰富数据：将财务指标回填到 s_data 中，避免 calculate_stock_data 取到 -1
                 if df_financial is not None and not df_financial.empty:
-                    # 获取最新的一行财务数据
                     latest_fin = df_financial.iloc[0]
-                    # 回填常见字段
+                    if '股票代码' in df_financial.columns:
+                        normalized_stock_code = str(stock_code).strip().upper()
+                        fin_codes = df_financial['股票代码'].astype(str).str.strip().str.upper()
+                        matched_fin = df_financial[fin_codes == normalized_stock_code]
+                        if matched_fin.empty:
+                            def _normalize_code(value):
+                                text = str(value).strip().upper()
+                                for suffix in ['.US', '.HK', '.SH', '.SZ']:
+                                    if text.endswith(suffix):
+                                        return text[:text.rfind(suffix)]
+                                return text
+                            matched_fin = df_financial[
+                                df_financial['股票代码'].astype(str).map(_normalize_code) == _normalize_code(stock_code)
+                            ]
+                        if not matched_fin.empty:
+                            latest_fin = matched_fin.iloc[0]
                     field_map = {
-                        '平均净资产收益率': ['roe', 'ROE', '平均净资产收益率'],
+                        'ROE': ['roe', 'ROE', '净资产收益率', '平均净资产收益率'],
                         '净利润同比增长率': ['net_profit_growth', '利润增长率', '净利润同比增长率'],
                         '营业总收入同比增长率': ['revenue_growth', '营收增长率', '营业总收入同比增长率'],
                         '资产负债率': ['debt_ratio', '负债率', '资产负债率'],
-                        '市盈率': ['pe', 'PE', '市盈率'],
+                        'PE_TTM': ['PE_TTM', 'pe_ttm', 'pe', 'PE', '市盈率-TTM', '市盈率'],
                     }
                     for target, sources in field_map.items():
                         for src in sources:
@@ -784,7 +792,7 @@ class SelectionStrategyService:
                 )
                 
                 if df_analysis.empty:
-                    continue
+                    return None
                 
                 # B. 调用最新的 calculate_score 逻辑
                 score, signal_msg = selector.stock_strategy.calculate_score(
@@ -800,10 +808,32 @@ class SelectionStrategyService:
                 # 显式映射列名，以兼容全盘扫描工作流的要求
                 res_row['代码'] = res_row.get('stock_code', stock_code)
                 res_row['名称'] = res_row.get('stock_name', row.get('名称', ''))
-                results.append(res_row)
+                return res_row
             except Exception as e:
                 selector.logger.debug(f"评分跳过 {stock_code}: {str(e)}")
-                continue
+                return None
+
+        total_stocks = len(df_stock)
+        selector.logger.info(f"深度价值成长策略_7 - 开始对股票池进行深度评分，总数: {total_stocks}")
+
+        # 使用线程池并发执行，提升 IO 密集型任务性能
+        max_workers = 10
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_stock = {executor.submit(_worker, row_tuple): row_tuple[1] for row_tuple in df_stock.iterrows()}
+            
+            processed_count = 0
+            for future in as_completed(future_to_stock):
+                processed_count += 1
+                if processed_count % 10 == 0 or processed_count == total_stocks:
+                    selector.logger.info(f"深度价值成长策略_7 - 处理进度: {processed_count}/{total_stocks}")
+                
+                try:
+                    res = future.result()
+                    if res:
+                        results.append(res)
+                except Exception as e:
+                    stock_row = future_to_stock[future]
+                    selector.logger.error(f"处理股票 {stock_row.get('代码')} 时发生异常: {e}")
 
 
         if not results:

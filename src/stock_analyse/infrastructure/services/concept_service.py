@@ -10,6 +10,7 @@ from stock_analyse.infrastructure.persistence.file_cache import FileCacheUtils
 from stock_analyse.infrastructure.persistence.mysql_cache import MySQLCache
 
 class stockConcepService:
+    _MYSQL_CACHE: MySQLCache | None = None
 
     def __init__(self, max_workers: int = 20, min_score: float = 30, market = 'SH'):
         """
@@ -24,7 +25,9 @@ class stockConcepService:
         self.logger = logging.getLogger(__name__)
         self.market = market
         self.cache_service = FileCacheUtils(market=self.market, cache_dir='history_' + market)
-        self.mysql = MySQLCache()
+        if stockConcepService._MYSQL_CACHE is None:
+            stockConcepService._MYSQL_CACHE = MySQLCache()
+        self.mysql = stockConcepService._MYSQL_CACHE
 
     def get_all_sectors_and_stocks(self):
 
