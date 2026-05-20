@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import threading
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -22,6 +23,10 @@ class FutuQuoteClient:
     FILTER_RATE_LIMIT_MAX_CALLS = 10
     FILTER_SAFE_CALLS_PER_WINDOW = 8
 
+    _shared_quote_ctx = None
+    _shared_ret_ok = None
+    _quote_ctx_lock = threading.RLock()
+
     def __init__(self, host: str | None = None, port: int | None = None, *, batch_size: int = 200) -> None:
         settings = get_settings().market_data
         self.host = host or settings.futu_host
@@ -33,51 +38,44 @@ class FutuQuoteClient:
         self._last_filter_call_at = 0.0
 
     def get_market_snapshot(self, codes: list[str], *, skip_unsupported: bool = False) -> pd.DataFrame:
-        quote_ctx, ret_ok = self._open_quote_context()
-        frames: list[pd.DataFrame] = []
-        try:
+        def _run(quote_ctx, ret_ok):
+            frames: list[pd.DataFrame] = []
             for start in range(0, len(codes), self.batch_size):
                 batch = codes[start:start + self.batch_size]
-                # 预过滤明显的 OTC 或无效代码
                 if skip_unsupported:
                     original_len = len(batch)
                     batch = [c for c in batch if not self._is_likely_unsupported(c)]
                     if len(batch) < original_len:
                         logger.debug("Pre-filtered %d likely unsupported codes from batch", original_len - len(batch))
-                
+
                 if not batch:
                     continue
 
                 retry_count = 0
-                max_retries = 10 # 每批最多剔除10个后再报错，防止死循环
-                
+                max_retries = 10
                 while True:
                     ret, data = self._request_market_snapshot(quote_ctx, batch)
                     if ret == ret_ok:
                         if data is not None and not data.empty:
                             frames.append(data.copy())
                         break
-                    
-                    # 处理报错
+
                     error_message = str(data)
                     if skip_unsupported and self._is_unsupported_snapshot_error(error_message):
-                        # 尝试提取报错的具体代码
                         failed_code = self._extract_code_from_error(error_message)
                         if failed_code and failed_code in batch:
                             logger.warning('Removing unsupported code from batch and retrying: %s', failed_code)
                             batch.remove(failed_code)
                             retry_count += 1
                             if batch and retry_count < max_retries:
-                                continue # 剔除后重试当前批量请求
-                        
-                        # 如果无法提取具体代码或重试过多，则进入精细化退避逻辑
+                                continue
                         if len(batch) > 1:
                             frames.extend(self._get_market_snapshot_resilient(quote_ctx, ret_ok, batch, batch_error=error_message))
                         break
-                    else:
-                        raise RuntimeError(error_message)
-        finally:
-            quote_ctx.close()
+                    raise RuntimeError(error_message)
+            return frames
+
+        frames = self._execute_with_quote_context(_run)
         if not frames:
             return pd.DataFrame()
         return pd.concat(frames, ignore_index=True)
@@ -157,10 +155,9 @@ class FutuQuoteClient:
         return '获取市场快照频率太高' in message or '每30秒最多60次' in message or 'rate limit' in message.lower()
 
     def request_history_kline(self, **kwargs: Any) -> pd.DataFrame:
-        quote_ctx, ret_ok = self._open_quote_context()
-        frames: list[pd.DataFrame] = []
-        page_req_key = None
-        try:
+        def _run(quote_ctx, ret_ok):
+            frames: list[pd.DataFrame] = []
+            page_req_key = None
             while True:
                 ret, data, page_req_key = quote_ctx.request_history_kline(page_req_key=page_req_key, **kwargs)
                 if ret != ret_ok:
@@ -169,8 +166,9 @@ class FutuQuoteClient:
                     frames.append(data.copy())
                 if page_req_key is None:
                     break
-        finally:
-            quote_ctx.close()
+            return frames
+
+        frames = self._execute_with_quote_context(_run)
         if not frames:
             return pd.DataFrame()
         return pd.concat(frames, ignore_index=True)
@@ -183,48 +181,41 @@ class FutuQuoteClient:
         start: str | None = None,
         end: str | None = None,
     ) -> pd.DataFrame:
-        quote_ctx, ret_ok = self._open_quote_context()
-        try:
+        def _run(quote_ctx, ret_ok):
             ret, data = quote_ctx.get_capital_flow(stock_code, period_type=period_type, start=start, end=end)
             if ret != ret_ok:
                 raise RuntimeError(str(data))
             if data is None or data.empty:
                 return pd.DataFrame()
             return data.copy()
-        finally:
-            quote_ctx.close()
+        return self._execute_with_quote_context(_run)
 
     def get_owner_plate(self, codes: str | Sequence[str]) -> pd.DataFrame:
-        quote_ctx, ret_ok = self._open_quote_context()
         code_list = self._normalize_codes_input(codes)
-        try:
+        def _run(quote_ctx, ret_ok):
             ret, data = quote_ctx.get_owner_plate(code_list)
             if ret != ret_ok:
                 raise RuntimeError(str(data))
             if data is None or data.empty:
                 return pd.DataFrame()
             return data.copy()
-        finally:
-            quote_ctx.close()
+        return self._execute_with_quote_context(_run)
 
     def get_plate_list(self, market, plate_class) -> pd.DataFrame:
-        quote_ctx, ret_ok = self._open_quote_context()
-        try:
+        def _run(quote_ctx, ret_ok):
             ret, data = quote_ctx.get_plate_list(market, plate_class)
             if ret != ret_ok:
                 raise RuntimeError(str(data))
             if data is None or data.empty:
                 return pd.DataFrame()
             return data.copy()
-        finally:
-            quote_ctx.close()
+        return self._execute_with_quote_context(_run)
 
     def get_stock_filter(self, market, filter_list=None, plate_code: str | None = None, *, begin: int = 0, num: int | None = None) -> pd.DataFrame:
-        quote_ctx, ret_ok = self._open_quote_context()
         page_size = int(num or self.batch_size or 200)
-        rows: list[dict[str, Any]] = []
-        cursor = int(begin or 0)
-        try:
+        def _run(quote_ctx, ret_ok):
+            rows: list[dict[str, Any]] = []
+            cursor = int(begin or 0)
             while True:
                 self._sleep_for_filter_rate_limit()
                 ret, data = quote_ctx.get_stock_filter(
@@ -247,8 +238,9 @@ class FutuQuoteClient:
                 if last_page:
                     break
                 cursor += page_size
-        finally:
-            quote_ctx.close()
+            return rows
+
+        rows = self._execute_with_quote_context(_run)
         if not rows:
             return pd.DataFrame()
         frame = pd.DataFrame(rows)
@@ -297,3 +289,53 @@ class FutuQuoteClient:
         except ImportError as exc:
             raise RuntimeError('futu-api is not installed') from exc
         return OpenQuoteContext(host=self.host, port=self.port), RET_OK
+
+    @classmethod
+    def _close_shared_quote_context(cls) -> None:
+        quote_ctx = cls._shared_quote_ctx
+        cls._shared_quote_ctx = None
+        cls._shared_ret_ok = None
+        if quote_ctx is None:
+            return
+        try:
+            quote_ctx.close()
+        except Exception as exc:
+            logger.warning('Failed to close shared Futu quote context: %s', exc)
+
+    @classmethod
+    def close_shared_quote_context(cls) -> None:
+        with cls._quote_ctx_lock:
+            cls._close_shared_quote_context()
+
+    def _get_or_create_shared_quote_context(self):
+        if self.__class__._shared_quote_ctx is None:
+            quote_ctx, ret_ok = self._open_quote_context()
+            self.__class__._shared_quote_ctx = quote_ctx
+            self.__class__._shared_ret_ok = ret_ok
+        return self.__class__._shared_quote_ctx, self.__class__._shared_ret_ok
+
+    def _execute_with_quote_context(self, operation, *, retry_once: bool = True):
+        with self.__class__._quote_ctx_lock:
+            try:
+                quote_ctx, ret_ok = self._get_or_create_shared_quote_context()
+                return operation(quote_ctx, ret_ok)
+            except Exception as exc:
+                message = str(exc)
+                if retry_once and self._should_rebuild_quote_context(message):
+                    logger.warning('Rebuilding shared Futu quote context after error: %s', message)
+                    self.__class__._close_shared_quote_context()
+                    quote_ctx, ret_ok = self._get_or_create_shared_quote_context()
+                    return operation(quote_ctx, ret_ok)
+                raise
+
+    @staticmethod
+    def _should_rebuild_quote_context(error_message: str) -> bool:
+        message = str(error_message or '').lower()
+        return (
+            'timeout' in message
+            or 'disconnected' in message
+            or 'connection aborted' in message
+            or 'network' in message
+            or 'opend unavailable' in message
+            or 'connect fail' in message
+        )

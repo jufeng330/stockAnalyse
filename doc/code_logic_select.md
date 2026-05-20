@@ -1,0 +1,519 @@
+# 深度价值成长策略_7 三市场代码逻辑梳理
+
+本文梳理 `http://192.168.1.12:38080/stock-screener` 页面执行 `深度价值成长策略_7` 时，在 A股、H股、USA 三个市场下的：
+
+- 页面/API入口
+- 核心业务代码链路
+- 市场差异点
+- 核心函数入口
+
+---
+
+## 公共入口
+
+### 页面入口
+文件：`src/stock_analyse/interfaces/web/routes/misc.py`
+
+```python
+@app.route('/stock-screener', methods=['GET'])
+def stock_screener():
+    return render_template(
+        'stock_screener.html',
+        strategies=_get_stock_selection_strategies(),
+        default_market='SH',
+        default_strategy='1',
+    )
+```
+
+这个页面本身只负责渲染 UI，不直接执行选股。
+
+### 前端调用的核心 API
+文件：`src/stock_analyse/interfaces/web/routes/analysis.py`
+
+```python
+@app.route('/api/select_stock', methods=['GET', 'POST'])
+def select_stock():
+```
+
+前端提交 `market` 和 `strategy=7` 后，真正执行：
+
+```python
+context.analyzer.stock_select_process(strategy_code, market)
+```
+
+### 选股业务总入口
+文件：`src/stock_analyse/interfaces/web/services/stock_analyzer_service.py`
+
+```python
+def stock_select_process(self, strategy_code, market):
+    json_result = run_stock_selection_use_case.execute(market=market, strategy_code=strategy_code)
+```
+
+### UseCase 入口
+文件：`src/stock_analyse/application/use_cases/run_stock_selection.py`
+
+```python
+def execute(market: str, strategy_code: str, orchestrator: StockSelectionOrchestrator | None = None) -> dict:
+```
+
+内部执行：
+
+```python
+file_utils, high_score_stocks = orchestrator.run_web_selection(market=market, strategy_type=strategy_type)
+```
+
+### 编排器入口
+文件：`src/stock_analyse/application/orchestrators/stock_selection_orchestrator.py`
+
+```python
+def run_web_selection(self, market: str, strategy_type: int = 1):
+    file_utils, high_score_stocks = self._get_full_market_scan_workflow().run(
+        market=market,
+        strategy_type=strategy_type,
+        batch_size=20,
+        strategy_filter='avg',
+    )
+```
+
+### 全市场扫描主入口
+文件：`src/stock_analyse/application/workflows/full_market_scan_workflow.py`
+
+```python
+def run(self, *, market: str, strategy_type: int = 1, batch_size: int = 20, strategy_filter: str = 'avg', ...):
+```
+
+核心两步：
+
+```python
+df_stocks_data = self._get_scan_candidates(runtime=runtime, strategy_filter=strategy_filter)
+results = self.scan_stock(runtime, batch_size=batch_size, df_stocks_data=df_stocks_data)
+```
+
+---
+
+## 一、A股 `SH / SZ`
+
+### 1. A股候选股票入口
+文件：`src/stock_analyse/application/workflows/full_market_scan_workflow.py`
+
+```python
+df_stocks_data = self.get_all_stocks(market=runtime.market)
+df_selected = runtime.selector.select_stock(df_stocks_data, strategy_type=runtime.strategy_type, strategy_filter=strategy_filter)
+```
+
+#### A股股票池获取
+文件：`src/stock_analyse/application/workflows/full_market_scan_workflow.py`
+
+```python
+def get_all_stocks(self, *, market: str) -> pd.DataFrame:
+```
+
+A股分支：
+
+```python
+if normalized_market in {'SH', 'SZ'}:
+    df_stock = stock.get_stock_spot()
+```
+
+#### A股实时行情接口
+文件：`src/stock_analyse/infrastructure/services/market_data_service.py`
+
+```python
+def get_stock_spot(self):
+```
+
+A股优先：
+
+- `ak.stock_zh_a_spot_em()`
+- 失败回退 `ak.stock_zh_a_spot()`
+
+### 2. 策略 7 的业务入口
+文件：`src/stock_analyse/domain/strategies/stock_select_strategy.py`
+
+```python
+elif strategy_type == 7:
+    return self.deep_value_growth_strategy(df_stock)
+```
+
+继续进入：
+
+文件：`src/stock_analyse/domain/strategies/selection_strategy_service.py`
+
+```python
+def deep_value_growth_strategy(...)
+```
+
+这是 `深度价值成长策略_7` 的核心实现。
+
+### 3. A股策略 7 的核心逻辑
+
+#### 第一步：逐只股票进入 `_worker`
+文件：`selection_strategy_service.py`
+
+```python
+def _worker(row_tuple):
+```
+
+#### 第二步：初筛
+提取：
+
+- `PE_TTM / PE / 市盈率-动态`
+- `总市值`
+
+```python
+pe_val = _get_frame_val(row, ['PE_TTM', 'PE_静态', '市盈率-动态', '市盈率', 'PE', 'pe_ttm'], -1)
+mkt_cap = _get_frame_val(row, ['总市值', '市值', 'market_val'], 0)
+```
+
+A股市值门槛：
+
+```python
+is_valid_cap = mkt_cap >= 5e8 or mkt_cap <= 0
+```
+
+#### 第三步：获取财务快照
+文件：`selection_strategy_service.py`
+
+```python
+df_financial = selector.stock.get_stock_border_financial_indicator(
+    market=market, df_stock_spot=pd.DataFrame([row])
+)
+```
+
+#### A股财务主入口
+文件：`src/stock_analyse/infrastructure/services/market_data_service.py`
+
+```python
+def get_stock_border_financial_indicator(self, market="H", date='20240331', indicator='年报', df_stock_spot=None):
+```
+
+这里会做：
+
+- 拉取 5 年财务指标
+- 计算 `净利润_TTM`
+- 计算 `每股收益_TTM`
+- 计算 `PE_TTM`
+- 统一 `ROE`
+- 映射 `总市值 / 最新价`
+
+#### 第四步：回填标准字段
+文件：`selection_strategy_service.py`
+
+回填到 `s_data`：
+
+- `ROE`
+- `净利润同比增长率`
+- `营业总收入同比增长率`
+- `资产负债率`
+- `PE_TTM`
+
+#### 第五步：计算四个核心业务字段
+文件：`src/stock_analyse/domain/services/stock_strategy_service.py`
+
+```python
+def calculate_stock_data(self, df_history_data, df_stock_data, stock_code, df_financial=None):
+```
+
+内部生成：
+
+- `行业`
+- `股票类型分类`
+- `五阶段判断模型`
+- `四区价格分区`
+
+#### 第六步：评分
+文件：`stock_strategy_service.py`
+
+```python
+def calculate_score(self, df_history_data, df_stock, df_summary_data):
+```
+
+分数由以下组成：
+
+- 阶段 x 分区矩阵
+- 类型溢价
+- 技术面分数
+
+### 4. A股核心 API / 函数入口总结
+
+#### API
+- `/stock-screener`
+- `/api/select_stock`
+
+#### 主要函数入口
+- `StockAnalyzerService.stock_select_process`
+- `run_stock_selection.execute`
+- `StockSelectionOrchestrator.run_web_selection`
+- `FullMarketScanWorkflow.run`
+- `StockSelectStrategy.select_stock`
+- `SelectionStrategyService.deep_value_growth_strategy`
+- `stockBorderInfo.get_stock_border_financial_indicator`
+- `StockStrategy.calculate_stock_data`
+- `StockStrategy.calculate_score`
+
+---
+
+## 二、H股 `H / HK`
+
+H股整体链路与 A股一致，但股票池来源、财务来源、行业来源不同。
+
+### 1. H股候选股票入口
+文件：`src/stock_analyse/application/workflows/full_market_scan_workflow.py`
+
+```python
+else:
+    df_stock = stock.get_stock_border_info()
+```
+
+H股不是只拿 spot，而是拿增强后的聚合股票信息。
+
+### 2. H股行情来源
+文件：`market_data_service.py`
+
+```python
+elif self.market == 'H' or self.market == 'HK':
+    stock_df = ak.stock_hk_main_board_spot_em()
+```
+
+如果配置了 Futu，也可能优先走：
+
+```python
+stock_df = FutuMarketDataProvider(normalized_market).get_stock_spot(normalized_market)
+```
+
+### 3. H股策略 7 入口
+与 A股完全一致：
+
+- `StockSelectStrategy.select_stock`
+- `SelectionStrategyService.deep_value_growth_strategy`
+- `_worker`
+
+### 4. H股财务主入口
+仍然是：
+
+```python
+stockBorderInfo.get_stock_border_financial_indicator(...)
+```
+
+但 H股会走港股字段映射：
+
+- `营业收入 -> 营业总收入`
+- `营业收入同比增长率 -> 营业总收入同比增长率`
+- `归属于母公司股东的净利润同比增长率_hk -> 净利润同比增长率`
+- `平均净资产收益率 -> 净资产收益率`
+
+另外如果财务为空，还会在策略层 fallback：
+
+文件：`selection_strategy_service.py`
+
+```python
+if (df_financial is None or df_financial.empty) and market in ('usa', 'H', 'HK'):
+    detail_df = futu_provider.get_stock_snapshot_detail(stock_code, market)
+```
+
+### 5. H股与 A股的关键区别
+
+#### 区别 1：ROE 目前不稳定
+H股没有像 usa 一样强制通过 `净利润 / 净资产 * 100` 兜底计算 `ROE`。
+
+#### 区别 2：PE 来源更依赖：
+- `市盈率`
+- `市盈率-TTM`
+- `滚动市盈率每股收益_hk`
+
+#### 区别 3：行业字段
+H股最终也是通过：
+
+- `行业板块`
+- `行业`
+
+来消费，但上游更依赖缓存/DB/Futu owner plate 补充，不像 A股那么稳定。
+
+### 6. H股核心 API / 函数入口总结
+
+#### API
+- `/stock-screener`
+- `/api/select_stock`
+
+#### 核心函数
+与 A股相同，区别主要在数据提供函数：
+
+- `stockBorderInfo.get_stock_border_info`
+- `stockBorderInfo.get_stock_border_financial_indicator`
+- `FutuMarketDataProvider.get_stock_spot`
+- `FutuMarketDataProvider.get_stock_snapshot_detail`
+
+---
+
+## 三、USA 美股
+
+美股链路与 H股更像，也更依赖 Futu。
+
+### 1. usa 候选股票入口
+
+在配置了 Futu 且市场为 usa 时：
+
+文件：`full_market_scan_workflow.py`
+
+```python
+if self._should_source_candidates_from_strategy(market=runtime.market):
+    df_selected = SelectionStrategyService().get_prefilter_candidates_or_raise(...)
+```
+
+也就是说，美股可能先走策略预筛候选，而不是全量行情池。
+
+否则也可能走：
+
+```python
+stock.get_stock_border_info()
+```
+
+### 2. usa 行情来源
+文件：`market_data_service.py`
+
+```python
+elif self.market == 'usa':
+    stock_df = ak.stock_us_spot_em()
+```
+
+如果配置了 Futu，则可能优先走：
+
+```python
+FutuMarketDataProvider(normalized_market).get_stock_spot(normalized_market)
+```
+
+### 3. usa 策略 7 入口
+仍然一致：
+
+- `StockSelectStrategy.select_stock`
+- `SelectionStrategyService.deep_value_growth_strategy`
+- `_worker`
+
+### 4. usa 财务入口
+仍然是：
+
+```python
+stockBorderInfo.get_stock_border_financial_indicator(...)
+```
+
+美股内部增加了专门处理：
+
+文件：`market_data_service.py`
+
+#### 美股专门补齐
+```python
+if '市盈率-TTM' in df_stock_financial_all.columns and 'PE_TTM' not in df_stock_financial_all.columns:
+    df_stock_financial_all['PE_TTM'] = df_stock_financial_all['市盈率-TTM']
+
+if '市盈率' in df_stock_financial_all.columns and 'PE' not in df_stock_financial_all.columns:
+    df_stock_financial_all['PE'] = df_stock_financial_all['市盈率']
+
+if '净利润' in df_stock_financial_all.columns and '净资产' in df_stock_financial_all.columns:
+    df_stock_financial_all.loc[mask, 'ROE'] = (净利润 / 净资产) * 100
+```
+
+### 5. usa 的关键业务差异
+
+#### 差异 1：代码规范化
+美股经常有：
+
+- `AAPL`
+- `AAPL.US`
+
+所以在 `market_data_service.py` 和 `selection_strategy_service.py` 都做了标准化匹配。
+
+#### 差异 2：财务 fallback 高度依赖 Futu
+当标准财务数据不完整时，常走：
+
+- `FutuMarketDataProvider.get_stock_snapshot_detail`
+
+#### 差异 3：增长率字段通常缺失
+即使 `PE_TTM`、`ROE`、`市值` 有了，
+`净利润同比增长率`、`营业总收入同比增长率` 仍可能缺失，
+这会直接影响：
+
+- `股票类型分类`
+- `五阶段判断模型`
+
+### 6. usa 核心 API / 函数入口总结
+
+#### API
+- `/stock-screener`
+- `/api/select_stock`
+
+#### 核心函数
+- `SelectionStrategyService.get_prefilter_candidates_or_raise`（可能先走）
+- `SelectionStrategyService.deep_value_growth_strategy`
+- `stockBorderInfo.get_stock_border_financial_indicator`
+- `FutuMarketDataProvider.get_stock_spot`
+- `FutuMarketDataProvider.get_stock_snapshot_detail`
+- `StockStrategy.calculate_stock_data`
+- `StockStrategy.calculate_score`
+
+---
+
+## 四、行业字段的真实来源
+
+最终在 `calculate_stock_data()` 里使用的是：
+
+文件：`src/stock_analyse/domain/services/stock_strategy_service.py`
+
+```python
+border_name = _get_val(['行业板块', '行业'], '')
+```
+
+也就是说，最终消费的是：
+
+- `行业板块`
+- 或 `行业`
+
+### 上游来源
+
+#### 路径 1：技术分析流程中，从 `stock_industry_{market}` 相关表查出
+文件：`src/stock_analyse/application/workflows/technical_analysis_workflow.py`
+
+```python
+if ('行业板块' not in row.index or not str(row.get('行业板块', '')).strip()) and not should_reuse_scan_row:
+    row['行业板块'] = stock_service.get_stock_industry_by_code(stock_code)
+```
+
+这里的 `get_stock_industry_by_code(stock_code)` 是上游入口。
+
+#### 路径 2：底层依赖 MySQL / 缓存表
+它本质上依赖已经缓存的行业数据表，核心表名通常是：
+
+- `stock_industry_data_{market}`
+- `stock_industry_{market}`
+
+所以更准确地说：
+
+**行业字段最终来源于 `stock_service.get_stock_industry_by_code(stock_code)`，其底层主要依赖 MySQL 缓存表 `stock_industry_data_{market}` / `stock_industry_{market}` 查询结果，并回填到 `行业板块` 字段，后续再由 `calculate_stock_data()` 消费。**
+
+---
+
+## 五、三个市场的差异总结
+
+| 市场 | 股票池入口 | 行情来源 | 财务来源 | 主要风险 |
+|---|---|---|---|---|
+| A股 SH/SZ | `get_stock_spot()` | AkShare A股实时行情 | A股财报 + TTM计算 | 财务 enrich 失败、AkShare 超时 |
+| H股 H/HK | `get_stock_border_info()` | AkShare HK / Futu | 港股财务映射 + Futu fallback | `ROE` 常缺、行业不稳定 |
+| 美股 usa | 可能先走策略预筛 | AkShare US / Futu | 美股 snapshot detail + 映射计算 | 增长率缺失、Futu连接稳定性 |
+
+---
+
+## 六、最核心的函数入口顺序
+
+如果后续需要自己追代码，最核心的入口顺序就是：
+
+1. `/stock-screener`
+2. `/api/select_stock`
+3. `StockAnalyzerService.stock_select_process()`
+4. `run_stock_selection.execute()`
+5. `StockSelectionOrchestrator.run_web_selection()`
+6. `FullMarketScanWorkflow.run()`
+7. `StockSelectStrategy.select_stock(..., strategy_type=7)`
+8. `SelectionStrategyService.deep_value_growth_strategy()`
+9. `_worker()`
+10. `stockBorderInfo.get_stock_border_financial_indicator()`
+11. `StockStrategy.calculate_stock_data()`
+12. `StockStrategy.calculate_score()`

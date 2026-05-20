@@ -257,49 +257,68 @@ class StockStrategy:
             pe = float(pe)
             change_60d = float(change_60d)
             profit_growth = float(profit_growth)
-            
-            # A 困境期: 便宜但还在跌 (百分位 < 30% 或 PE < 15)
-            is_low_val = pe_percentile < 30 if pe_percentile is not None and pe_percentile >= 0 else (0 < pe < 15)
-            if is_low_val and change_60d < -5:
+
+            valid_percentile = pe_percentile is not None and pe_percentile >= 0
+
+            # 严格优先使用历史百分位；只有百分位不可用时，才使用 PE 绝对值兜底。
+            if valid_percentile:
+                if pe_percentile < 30 and change_60d < -5 and profit_growth < 0:
+                    return "A 困境期"
+                if profit_growth > 5 and pe_percentile < 50 and -10 <= change_60d < 15:
+                    return "B 修复初期"
+                if profit_growth > 15 and 30 <= pe_percentile < 70 and 5 <= change_60d < 30:
+                    return "C 修复确认期"
+                if pe_percentile >= 60 and change_60d >= 10:
+                    return "D 乐观定价期"
+                if pe_percentile > 80 and change_60d >= 30:
+                    return "E 透支期"
+                return "未知"
+
+            # 百分位不可用时，使用 PE 绝对值进行兜底
+            if 0 < pe < 15 and change_60d < -5 and profit_growth < 0:
                 return "A 困境期"
-                
-            # E 透支期: 价格远超基本面 (百分位 > 80% 或 PE > 80)
-            is_extreme_high = pe_percentile > 80 if pe_percentile is not None and pe_percentile >= 0 else pe > 80
-            # 若处于历史极端高位且涨幅已放缓或滞涨
-            if is_extreme_high and change_60d < 10:
-                return "E 透支期"
-
-            # D 乐观定价期: 加速上涨 (涨幅大)
-            if change_60d >= 30:
-                return "D 乐观定价期"
-
-            # C 修复确认期: 趋势形成 (增速好 + 中位估值 + 稳步上涨)
-            is_mid_val = 30 <= pe_percentile <= 75 if pe_percentile is not None and pe_percentile >= 0 else 15 <= pe <= 40
-            if profit_growth > 15 and change_60d >= 10 and is_mid_val:
+            if 0 < pe < 25 and profit_growth > 5 and -10 <= change_60d < 15:
+                return "B 修复初期"
+            if 15 <= pe < 40 and profit_growth > 15 and 5 <= change_60d < 30:
                 return "C 修复确认期"
-
-            # B 修复初期: 拐点出现 (增速转正 + 价格企稳)
-            return "B 修复初期" 
+            if 25 <= pe < 80 and change_60d >= 10:
+                return "D 乐观定价期"
+            if pe >= 80 and change_60d >= 30:
+                return "E 透支期"
+            return "未知"
         except:
             return "未知"
 
     def _classify_price_zone(self, pe, pe_dynamic, pe_percentile=None):
         """四区价格分区 - 严格对齐方案文档阈值"""
         try:
-            # 1. 优先使用百分位 (25/40/75 分界)
+            # 1. 优先使用历史百分位，使用连续区间
+            # <25 便宜区；25-40 合理偏低区；40-75 合理区；>=75 高估区
             if pe_percentile is not None and pe_percentile >= 0:
-                if pe_percentile < 25: return "便宜区"
-                if 25 <= pe_percentile < 40: return "合理偏低区"
-                if 40 <= pe_percentile < 75: return "合理区"
-                return "高估区"
+                if pe_percentile < 25:
+                    return "便宜区"
+                if 25 <= pe_percentile < 40:
+                    return "合理偏低区"
+                if 40 <= pe_percentile < 75:
+                    return "合理区"
+                if pe_percentile >= 75:
+                    return "高估区"
+                return "未知"
             
-            # 2. 兜底逻辑 (使用绝对 PE 阈值 15/25/45)
+            # 2. 百分位不存在或不合法时，才使用 PE 绝对值兜底
+            # <15 便宜区；15-25 合理偏低区；25-40 合理区；>=40 高估区
             pe_val = float(pe) if float(pe) > 0 else float(pe_dynamic)
-            if pe_val <= 0: return "未知"
-            if pe_val < 15: return "便宜区"
-            if 15 <= pe_val < 25: return "合理偏低区"
-            if 25 <= pe_val < 45: return "合理区"
-            return "高估区"
+            if pe_val <= 0:
+                return "未知"
+            if pe_val < 15:
+                return "便宜区"
+            if 15 <= pe_val < 25:
+                return "合理偏低区"
+            if 25 <= pe_val < 40:
+                return "合理区"
+            if pe_val >= 40:
+                return "高估区"
+            return "未知"
         except:
             return "未知"
 
