@@ -100,6 +100,7 @@ class MarketDataSettings:
     default_provider: str
     providers_by_market: dict[str, str]
     provider_options: dict[str, dict[str, Any]]
+    mysql: dict[str, Any] = None  # 新增 mysql 字段
 
     @staticmethod
     def normalize_market(market: str) -> str:
@@ -214,6 +215,7 @@ class Settings:
                 for key, value in market_data_config.get("providers", {}).items()
                 if str(key).strip() and isinstance(value, dict)
             },
+            mysql=market_data_config.get("mysql", {"pool_size": 5, "max_overflow": 0})
         )
 
         return cls(path=settings_path, data=data, ai=ai, web=web, market_data=market_data)

@@ -34,6 +34,10 @@
     },
     "market_data": {
         "default_provider": "akshare",
+        "mysql": {
+            "pool_size": 5,
+            "max_overflow": 0
+        },
         "providers_by_market": {
             "SH": "akshare",
             "SZ": "akshare",
