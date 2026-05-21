@@ -322,13 +322,38 @@ class stockBorderInfo:
             #
                 :return:
         """
-        cache_key = f"financial_indicator_5y_window_{market}"
-        df_stock_financial = self.cache_service.read_from_serialized(date, cache_key)
         if df_stock_spot is None:
             df_stock_spot = self.get_stock_spot()
         df_stock_all = df_stock_spot
         # df_stock_all = df_stock_all.head(15)
         df_stock = df_stock_all
+
+        request_codes: list[str] = []
+        if df_stock_spot is not None and not df_stock_spot.empty:
+            if '股票代码' in df_stock_spot.columns:
+                request_codes = df_stock_spot['股票代码'].astype(str).tolist()
+            elif '代码' in df_stock_spot.columns:
+                request_codes = df_stock_spot['代码'].astype(str).tolist()
+
+        def _normalize_code_for_cache(value):
+            text = str(value).strip().upper()
+            for suffix in ['.US', '.HK', '.SH', '.SZ']:
+                if text.endswith(suffix):
+                    text = text[:text.rfind(suffix)]
+                    break
+            if text.endswith('.0'):
+                text = text[:-2]
+            if market in ('H', 'HK') and text.isdigit():
+                text = text.zfill(5)
+            return text
+
+        normalized_codes = [_normalize_code_for_cache(code) for code in request_codes if str(code).strip()]
+        if len(normalized_codes) == 1:
+            cache_key = f"financial_indicator_5y_window_{market}_{normalized_codes[0]}"
+        else:
+            cache_key = f"financial_indicator_5y_window_{market}"
+
+        df_stock_financial = self.cache_service.read_from_serialized(date, cache_key)
 
         if df_stock_financial is None or df_stock_financial.empty:
                 # ['序号', '代码', '名称', '最新价', '涨跌额', '涨跌幅', '今开', '最高', '最低', '昨收', '成交量', '成交额']
