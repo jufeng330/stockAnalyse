@@ -115,8 +115,8 @@ class FileCacheUtils:
                 with open(filepath, 'rb') as f:
                     df = pickle.load(f)
                     return df
-            df_mysql =  self.mysql.read_from_cache(date, report_type,market=self.market,file_type='pkl')
-            return df_mysql  # 文件不存在返回 None
+            # df_mysql =  self.mysql.read_from_cache(date, report_type,market=self.market,file_type='pkl')
+            return None  # 文件不存在返回 None
         except Exception as e:
             print(f"[CACHE] 读取缓存失败: {filepath}, 错误: {e}")
             return None

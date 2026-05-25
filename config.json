@@ -48,7 +48,7 @@
         "providers": {
             "futu": {
                 "enabled": true,
-                "opend_host": "127.0.0.1",
+                "opend_host": "192.168.1.12",
                 "opend_port": 11111
             }
         }

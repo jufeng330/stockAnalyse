@@ -8,7 +8,7 @@
     },
     "model_plat": "qwen",
     "model_name": "qwen-plus-2025-04-28",
-    "api_key": ""
+    "api_key": "sk-123456"
   },
   "analysis_weights": {
     "technical": 0.4,
@@ -36,5 +36,14 @@
     "password": "",
     "session_timeout": 7200,
     "notes": "Web界面密码鉴权配置"
+  },
+  "market_data": {
+      "providers": {
+        "futu": {
+          "enabled": true,
+          "opend_host": "192.168.1.12",
+          "opend_port": 11111
+        }
+      }
   }
 }

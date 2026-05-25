@@ -207,7 +207,7 @@ class StockStrategy:
                 if any(c in str(industry) for c in concept_industries):
                     return "概念期 (Concept)"
                 
-            return "防守型 (Defensive)"
+            return "未知"
         except:
             return "未知"
 
@@ -272,7 +272,6 @@ class StockStrategy:
                     return "D 乐观定价期"
                 if pe_percentile > 80 and change_60d >= 30:
                     return "E 透支期"
-                return "未知"
 
             # 百分位不可用时，使用 PE 绝对值进行兜底
             if 0 < pe < 15 and change_60d < -5 and profit_growth < 0:

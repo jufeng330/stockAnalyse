@@ -584,9 +584,15 @@ class stockCompanyInfo:
         stock_financial_analysis_indicator_df = self.cache_service.read_from_serialized(current_date, report_type)
         if cache and stock_financial_analysis_indicator_df is not None:
             return stock_financial_analysis_indicator_df
+
         if self._should_use_futu_provider():
-            detail_df = self._get_futu_provider().get_stock_snapshot_detail(self._normalize_symbol_for_provider(), self._normalized_market())
-            stock_financial_analysis_indicator_df = self._build_futu_financial_snapshot(detail_df)
+            stock_financial_analysis_indicator_df = self._get_futu_provider().get_stock_financials_statements(
+                self._normalize_symbol_for_provider(), self._normalized_market()
+            )
+            stock_financial_analysis_indicator_df = self._filter_financial_indicator_window(
+                df=stock_financial_analysis_indicator_df,
+                start_year=start_year,
+            )
         elif self.market  == self.HongKong:
             #SECUCODE, SECURITY_CODE, SECURITY_NAME_ABBR, ORG_CODE, REPORT_DATE, DATE_TYPE_CODE, PER_NETCASH_OPERATE, PER_OI, BPS, BASIC_EPS, DILUTED_EPS, OPERATE_INCOME, OPERATE_INCOME_YOY, GROSS_PROFIT, GROSS_PROFIT_YOY, HOLDER_PROFIT, HOLDER_PROFIT_YOY, GROSS_PROFIT_RATIO, EPS_TTM, OPERATE_INCOME_QOQ, NET_PROFIT_RATIO, ROE_AVG, GROSS_PROFIT_QOQ, ROA, HOLDER_PROFIT_QOQ, ROE_YEARLY, ROIC_YEARLY, TAX_EBT, OCF_SALES, DEBT_ASSET_RATIO, CURRENT_RATIO, CURRENTDEBT_DEBT, START_DATE, FISCAL_YEAR, CURRENCY, IS_CNY_CODE
             # 证券代码, 股票代码, 股票简称, 机构代码, 报告日期, 数据类型代码, 经营活动每股净现金流量, 每股经营活动现金流量, 每股净资产, 基本每股收益, 稀释每股收益, 营业收入, 营业收入同比增长率, 毛利润, 毛利润同比增长率, 归属于母公司股东的净利润, 归属于母公司股东的净利润同比增长率, 毛利率, 滚动市盈率每股收益, 营业收入环比增长率, 净利率, 平均净资产收益率, 毛利润环比增长率, 总资产收益率, 归属于母公司股东的净利润环比增长率, 年度净资产收益率, 年度投入资本回报率, 息税前利润税负, 销售商品、提供劳务收到的现金占营业收入比重, 资产负债率, 流动比率, 流动负债占总负债比重, 起始日期, 会计年度, 货币类型, 是否人民币代码
@@ -674,7 +680,16 @@ class stockCompanyInfo:
 
     # 分红配送详情
     def get_stock_fhps_detail_ths(self):
-        if self.market  == self.HongKong:
+        if self._should_use_futu_provider():
+            stock_financial_analysis_indicator_df = self._get_futu_provider().get_stock_financials_statements(
+                self._normalize_symbol_for_provider(), self._normalized_market()
+            )
+            # Map standard columns to match downstream expectations if needed
+            stock_financial_analysis_indicator_df = self._filter_financial_indicator_window(
+                df=stock_financial_analysis_indicator_df,
+                start_year=start_year,
+            )
+        elif self.market  == self.HongKong:
             symbol = self.symbol[1:]
             stock_fhps_detail_ths_df = ak.stock_hk_fhpx_detail_ths(symbol=symbol).to_markdown(index=False)
         elif self.market == self.usa:
