@@ -157,6 +157,13 @@ class FutuMarketDataProvider(MarketSpotProvider):
         normalized_market = self._normalize_market(market)
         if not self.supports_market(normalized_market):
             raise ValueError(f'Unsupported market for Futu provider: {market}')
+
+        current_date = self.report_utils.get_current__history_date_str()
+        report_type = f'futu_{normalized_market}_filtered_spot_strategy_{strategy_type}'
+        cached_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_df is not None and not getattr(cached_df, 'empty', True):
+            return cached_df
+
         futu_market = FutuStockFilterMapper.to_futu_market(normalized_market)
         filter_list = FutuStockFilterMapper.build_filters(strategy_type=strategy_type, market=normalized_market, config=strategy_config)
         if not filter_list:
@@ -205,7 +212,10 @@ class FutuMarketDataProvider(MarketSpotProvider):
             len(candidate_codes),
             len(result_df),
         )
-        return result_df.reset_index(drop=True)
+        final_df = result_df.reset_index(drop=True)
+        if not final_df.empty:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, final_df)
+        return final_df
 
     def should_use_as_prefilter(self, market: str) -> bool:
         normalized_market = self._normalize_market(market)
@@ -214,33 +224,93 @@ class FutuMarketDataProvider(MarketSpotProvider):
 
     def get_stock_snapshot_detail(self, stock_code: str, market: str) -> pd.DataFrame:
         normalized_market = self._normalize_market(market)
+        current_date = self.report_utils.get_current__history_date_str()
+        report_type = f'futu_{normalized_market}_{stock_code}_snapshot_detail'
+        cached_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_df is not None and not getattr(cached_df, 'empty', True):
+            return cached_df
+
         snapshot_df = self.client.get_market_snapshot([self.to_futu_code(stock_code, normalized_market)])
         if snapshot_df.empty:
             return pd.DataFrame()
-        return self._map_snapshot_detail_frame(snapshot_df, normalized_market, stock_code)
+        mapped_df = self._map_snapshot_detail_frame(snapshot_df, normalized_market, stock_code)
+
+        if not mapped_df.empty:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, mapped_df)
+        return mapped_df
 
     def get_stock_capital_flow(self, stock_code: str, market: str) -> pd.DataFrame:
         normalized_market = self._normalize_market(market)
+        current_date = self.report_utils.get_current__history_date_str()
+        report_type = f'futu_{normalized_market}_{stock_code}_capital_flow'
+        cached_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_df is not None and not getattr(cached_df, 'empty', True):
+            return cached_df
+
         flow_df = self.client.get_capital_flow(self.to_futu_code(stock_code, normalized_market))
         if flow_df.empty:
             return pd.DataFrame()
-        return self._map_capital_flow_frame(flow_df, normalized_market, stock_code)
+        mapped_df = self._map_capital_flow_frame(flow_df, normalized_market, stock_code)
+
+        if not mapped_df.empty:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, mapped_df)
+        return mapped_df
 
     def get_stock_owner_plate(self, stock_code: str, market: str) -> pd.DataFrame:
         normalized_market = self._normalize_market(market)
+        # 板块信息通常较稳定，可以使用固定日期 'total' 或当期日期
+        current_date = 'total'
+        report_type = f'futu_{normalized_market}_{stock_code}_owner_plate'
+        cached_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_df is not None and not getattr(cached_df, 'empty', True):
+            return cached_df
+
         plate_df = self.client.get_owner_plate([self.to_futu_code(stock_code, normalized_market)])
         if plate_df.empty:
             return pd.DataFrame()
-        return self._map_owner_plate_frame(plate_df, normalized_market, stock_code)
+        mapped_df = self._map_owner_plate_frame(plate_df, normalized_market, stock_code)
+
+        if not mapped_df.empty:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, mapped_df)
+        return mapped_df
+
+    def get_stock_financials_statements(self, stock_code: str, market: str) -> pd.DataFrame:
+        normalized_market = self._normalize_market(market)
+        current_date = self.report_utils.get_current__history_date_str()
+        report_type = f'futu_{normalized_market}_{stock_code}_financials_statements'
+        cached_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_df is not None and not getattr(cached_df, 'empty', True):
+            return cached_df
+
+        futu_code = self.to_futu_code(stock_code, normalized_market)
+        # 默认拉取最近的数据（如有需要可补充更多kwargs，比如statement_type等）
+        statements_df = self.client.get_financials_statements(futu_code)
+        if statements_df.empty:
+            return pd.DataFrame()
+
+        mapped_df = self._map_financials_statements_frame(statements_df, normalized_market, stock_code)
+        if not mapped_df.empty:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, mapped_df)
+        return mapped_df
 
     def get_plate_list(self, market: str, plate_type: str) -> pd.DataFrame:
         normalized_market = self._normalize_market(market)
+        current_date = 'total'
+        report_type = f'futu_{normalized_market}_{plate_type}_plate_list'
+        cached_df = self.cache_service.read_from_serialized(current_date, report_type)
+        if cached_df is not None and not getattr(cached_df, 'empty', True):
+            return cached_df
+
         futu_market = self._to_futu_market_enum(normalized_market)
         futu_plate_class = self._to_futu_plate_enum(plate_type)
         plate_df = self.client.get_plate_list(futu_market, futu_plate_class)
         if plate_df.empty:
             return pd.DataFrame()
-        return self._map_plate_list_frame(plate_df, normalized_market, plate_type)
+        mapped_df = self._map_plate_list_frame(plate_df, normalized_market, plate_type)
+
+        if not mapped_df.empty:
+            self.cache_service.write_to_cache_serialized(current_date, report_type, mapped_df)
+        return mapped_df
 
     def _map_snapshot_frame(self, df: pd.DataFrame, market: str) -> pd.DataFrame:
         frame = df.copy()
@@ -395,6 +465,70 @@ class FutuMarketDataProvider(MarketSpotProvider):
         if '板块类型' in mapped.columns:
             mapped['板块类型'] = mapped['板块类型'].astype(str).map(lambda value: self.OWNER_PLATE_TYPE_MAP.get(value, value))
         return mapped.drop_duplicates().reset_index(drop=True)
+
+    def _map_financials_statements_frame(self, df: pd.DataFrame, market: str, stock_code: str) -> pd.DataFrame:
+        frame = df.copy()
+        normalized_code = str(stock_code).strip().upper() if market == 'usa' else str(stock_code).strip().zfill(5)
+
+        # Dynamic mapping: ensure all unique columns from the input dataframe are included
+        # and standard columns are mapped to our schema.
+        all_columns = set(frame.columns)
+
+        # Base mapping
+        mapped_data = {
+            '代码': normalized_code,
+            '股票代码': normalized_code,
+            '报告期': self._first_series(frame, ['period_date', 'period_end_date', 'date_time_str', '报告期']),
+            '财务类型': self._first_series(frame, ['financial_type', '财务类型']),
+            '报表类型': self._first_series(frame, ['statement_type', '报表类型']),
+            '营业总收入': self._first_series(frame, ['total_revenue', 'total_revenues', 'operating_revenue', 'operating_income', '营业收入', '营业总收入']),
+            '净利润': self._first_series(frame, ['net_income', 'net_profit', '归属于母公司股东净利润', '归属于普通股股东净利润', '净利润']),
+            '净资产': self._first_series(frame, ['total_equity', 'net_asset', 'total_stockholders_equity', '股东权益', '净资产']),
+            '总资产': self._first_series(frame, ['total_assets', '资产总计', '总资产']),
+            '毛利润': self._first_series(frame, ['gross_profit', '毛利', '毛利润']),
+            '经营活动产生的现金流量净额': self._first_series(frame, ['net_cash_from_operating_activities', 'operating_cash_flow', '经营活动现金流', '经营活动产生的现金流量净额']),
+            '每股收益': self._first_series(frame, ['eps', 'diluted_eps', 'basic_eps', '每股稀释收益', '每股基本收益', '每股收益']),
+            '营业收入同比增长率': self._first_series(frame, ['total_revenue_yoy', 'revenue_yoy', '营业收入同比增长率', '营业收入(同比增长率)']),
+            '净利润同比增长率': self._first_series(frame, ['net_income_yoy', 'net_profit_yoy', '归属于母公司股东净利润同比增长率', '净利润同比增长率', '净利润(同比增长率)']),
+            '净资产收益率': self._first_series(frame, ['roe', 'return_on_equity', '平均净资产收益率', '净资产收益率']),
+        }
+
+        mapped = pd.DataFrame(mapped_data)
+
+        # Add all other columns from the original frame that aren't already in mapped
+        for col in all_columns:
+            if col not in mapped.columns:
+                mapped[col] = frame[col]
+
+        # Ensure numeric values
+        numeric_columns = [
+            '营业总收入', '净利润', '净资产', '总资产', '毛利润', '经营活动产生的现金流量净额',
+            '每股收益', '营业收入同比增长率', '净利润同比增长率', '净资产收益率'
+        ]
+        for column in numeric_columns:
+            if column in mapped.columns:
+                mapped[column] = pd.to_numeric(mapped[column], errors='coerce')
+
+        # Clean report period string if present
+        if '报告期' in mapped.columns:
+            mapped['报告期'] = mapped['报告期'].astype(str).str.slice(0, 10)
+
+        return mapped.sort_values(by='报告期', ascending=False, na_position='last').reset_index(drop=True)
+
+        # Ensure numeric values
+        numeric_columns = [
+            '营业总收入', '净利润', '净资产', '总资产', '毛利润', '经营活动产生的现金流量净额',
+            '每股收益', '营业收入同比增长率', '净利润同比增长率', '净资产收益率'
+        ]
+        for column in numeric_columns:
+            if column in mapped.columns:
+                mapped[column] = pd.to_numeric(mapped[column], errors='coerce')
+
+        # Clean report period string if present
+        if '报告期' in mapped.columns:
+            mapped['报告期'] = mapped['报告期'].astype(str).str.slice(0, 10)
+
+        return mapped.sort_values(by='报告期', ascending=False, na_position='last').reset_index(drop=True)
 
     def _map_plate_list_frame(self, df: pd.DataFrame, market: str, plate_type: str) -> pd.DataFrame:
         frame = df.copy()

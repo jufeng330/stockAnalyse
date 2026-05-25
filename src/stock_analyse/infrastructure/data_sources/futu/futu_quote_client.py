@@ -23,6 +23,10 @@ class FutuQuoteClient:
     FILTER_RATE_LIMIT_MAX_CALLS = 10
     FILTER_SAFE_CALLS_PER_WINDOW = 8
 
+    FINANCIAL_RATE_LIMIT_WINDOW_SECONDS = 30.0
+    FINANCIAL_RATE_LIMIT_MAX_CALLS = 30
+    FINANCIAL_SAFE_CALLS_PER_WINDOW = 25
+
     _shared_quote_ctx = None
     _shared_ret_ok = None
     _quote_ctx_lock = threading.RLock()
@@ -36,6 +40,8 @@ class FutuQuoteClient:
         self._last_snapshot_call_at = 0.0
         self.filter_min_interval_seconds = self.FILTER_RATE_LIMIT_WINDOW_SECONDS / self.FILTER_SAFE_CALLS_PER_WINDOW
         self._last_filter_call_at = 0.0
+        self.financial_min_interval_seconds = self.FINANCIAL_RATE_LIMIT_WINDOW_SECONDS / self.FINANCIAL_SAFE_CALLS_PER_WINDOW
+        self._last_financial_call_at = 0.0
 
     def get_market_snapshot(self, codes: list[str], *, skip_unsupported: bool = False) -> pd.DataFrame:
         def _run(quote_ctx, ret_ok):
@@ -189,6 +195,71 @@ class FutuQuoteClient:
                 return pd.DataFrame()
             return data.copy()
         return self._execute_with_quote_context(_run)
+
+    def get_financials_statements(self, stock_code: str, **kwargs: Any) -> pd.DataFrame:
+        # 定义 field_id 到名称的映射，基于 Futu API 文档
+        FIELD_ID_MAP = {
+            8001: '营业收入',
+            8002: '营业总收入',
+            8003: '营业成本',
+            8004: '毛利润',
+            8005: '净利润',
+            8007: '经营活动现金流',
+            8010: '销售及管理费用',
+            8017: '营业利润',
+            8018: '所得税',
+            8019: '利息费用',
+            8020: '利息收入',
+            8022: '净收益',
+            8033: '持续经营净收益',
+            8034: 'EBITDA',
+            8035: '折旧与摊销',
+            8037: 'EBIT',
+            8038: '息税前利润',
+            8042: '少数股东损益',
+            8043: '归属于母公司股东净利润',
+            8046: '归属于普通股股东净利润',
+            8047: '每股基本收益',
+            8048: '每股稀释收益'
+        }
+
+        def _run(quote_ctx, ret_ok):
+            frames: list[pd.DataFrame] = []
+            next_key = None
+            while True:
+                self._sleep_for_financial_rate_limit()
+                ret, data = quote_ctx.get_financials_statements(
+                    code=stock_code, next_key=next_key, **kwargs
+                )
+                if ret != ret_ok:
+                    if self._is_rate_limit_financial_error(str(data)):
+                        time.sleep(5)
+                        continue
+                    raise RuntimeError(str(data))
+                if data and 'report_list' in data:
+                    report_list = data.get("report_list", [])
+                    if report_list:
+                        for report in report_list:
+                            item_dict = {
+                                item.get("display_name"): item.get("data")
+                                for item in report.get("item_list", [])
+                            }
+                            # Add top-level report info
+                            item_dict["date_time_str"] = report.get("date_time_str")
+                            item_dict["fiscal_year"] = report.get("fiscal_year")
+                            item_dict["period_text"] = report.get("period_text")
+                            frames.append(pd.DataFrame([item_dict]))
+
+                    next_key = data.get("next_key")
+
+                if not next_key or next_key == "-1":
+                    break
+            return frames
+
+        frames = self._execute_with_quote_context(_run)
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
 
     def get_owner_plate(self, codes: str | Sequence[str]) -> pd.DataFrame:
         code_list = self._normalize_codes_input(codes)
