@@ -120,7 +120,7 @@
 
         .layout {
             display: grid;
-            grid-template-columns: 360px 1fr;
+            grid-template-columns: 1fr;
             gap: 20px;
         }
 
@@ -442,7 +442,17 @@
             </div>
 
             <div class="layout">
-                <div>
+                <div class="panel" style="grid-column: 1 / -1;">
+                    <h2>分析结果</h2>
+                    <div id="resultsContent">
+                        <div class="empty-state">
+                            <div style="font-size: 48px;">📈</div>
+                            <div>请输入股票参数后发起 AI 个股分析。</div>
+                            <div style="font-size: 13px; color: #9ca3af;">该兼容页直接复用 /api/analyze_stock_ai 与 /api/sse。</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                     <div class="panel">
                         <h2>分析参数</h2>
 
@@ -510,17 +520,6 @@
                         <h2>分析日志</h2>
                         <div id="logBox" class="log-box">
                             <div class="log-entry log-info">[系统] 等待发起 AI 个股分析任务...</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <h2>分析结果</h2>
-                    <div id="resultsContent">
-                        <div class="empty-state">
-                            <div style="font-size: 48px;">📈</div>
-                            <div>请输入股票参数后发起 AI 个股分析。</div>
-                            <div style="font-size: 13px; color: #9ca3af;">该兼容页直接复用 /api/analyze_stock_ai 与 /api/sse。</div>
                         </div>
                     </div>
                 </div>

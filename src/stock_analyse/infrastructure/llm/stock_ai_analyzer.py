@@ -171,10 +171,61 @@ class StockAiAnalyzer:
         fallback_kwargs = dict(request_kwargs)
         fallback_kwargs.pop('tools', None)
         fallback_kwargs.pop('tool_choice', None)
-        fallback_kwargs.pop('response_format', None)
+        # 确保重整模式下启用 JSON 模式
+        fallback_kwargs['response_format'] = {"type": "json_object"}
+        
+        # 检查 raw_text 是否已经是上次解析失败留下的 JSON 碎片
+        if isinstance(raw_text, dict) and "_failed_json_" in raw_text:
+            error_reason = raw_text["_error_"]
+            failed_candidate = raw_text["_failed_json_"]
+            reformat_message = (
+                f"你之前生成的 JSON 存在语法错误: {error_reason}。\n"
+                f"错误的部分片段如下: {failed_candidate}\n"
+                "请务必针对上述错误进行修正，返回一个完美的、符合标准 JSON 语法的对象。"
+            )
+        else:
+            reformat_message = self._build_json_reformat_message(raw_text)
+
         fallback_kwargs['messages'] = (
             {'role': 'system', 'content': self._build_json_reformat_instruction(instruction)},
-            {'role': 'user', 'content': self._build_json_reformat_message(raw_text)},
+            {'role': 'user', 'content': reformat_message},
+        )
+        content = self._stream_chat_completion_text(
+            client,
+            fallback_kwargs,
+            f"{stock_name or 'unknown'}_json_reformat",
+            current_date,
+        )
+        parsed = self._parse_json_content(content)
+        if parsed is not None and not isinstance(parsed, dict) or "_error_" not in parsed:
+            return parsed
+        
+        # 增加二次深度修复逻辑：如果依然解析失败，把上一次的原始内容再丢进去让它提取 JSON
+        self._log_progress(None, 5, 6, "5-2: JSON 解析失败，正在进行第二轮深度格式化修复...")
+        
+        debug_log("重整后依然解析失败，尝试最后一次深度格式化...")
+        deep_repair_message = (
+            "你之前的输出格式有误，导致无法解析。请从以下文本中仅提取出 JSON 对象，"
+            "并确保它是合法的 JSON 格式。如果文本中包含 markdown 代码块标记，请务必去掉：\n" + content
+        )
+        fallback_kwargs['messages'] = (
+            {'role': 'system', 'content': "你是一个 JSON 修复专家。请仅返回合法的 JSON，不要包含任何思考过程、Markdown 标记或解释。"},
+            {'role': 'user', 'content': deep_repair_message},
+        )
+        content = self._stream_chat_completion_text(
+            client,
+            fallback_kwargs,
+            f"{stock_name or 'unknown'}_deep_repair",
+            current_date,
+        )
+        
+        parsed = self._parse_json_content(content)
+        if parsed is not None and (not isinstance(parsed, dict) or "_error_" not in parsed):
+            return parsed
+
+        raise ValueError(
+            '当前 AI 服务经过多轮重整后仍未返回可解析内容。'
+            f' 原始响应摘要: {self._summarize_stream_text(content)}'
         )
         content = self._stream_chat_completion_text(
             client,
@@ -185,8 +236,33 @@ class StockAiAnalyzer:
         parsed = self._parse_json_content(content)
         if parsed is not None:
             return parsed
+        
+        # 增加二次深度修复逻辑：如果依然解析失败，把上一次的原始内容再丢进去让它提取 JSON
+        self._log_progress(client_id, 5, 6, "5-2: JSON 解析失败，正在进行第二轮深度格式化修复...")
+        debug_log("重整后依然解析失败，尝试最后一次深度格式化...")
+        deep_repair_message = (
+            "你之前的输出格式有误，导致无法解析。请从以下文本中仅提取出 JSON 对象，"
+            "并确保它是合法的 JSON 格式。如果文本中包含 markdown 代码块标记，请务必去掉：\n" + content
+        )
+        fallback_kwargs['messages'] = (
+            {'role': 'system', 'content': "你是一个 JSON 修复专家。请仅返回合法的 JSON，不要包含任何思考过程、Markdown 标记或解释。"},
+            {'role': 'user', 'content': deep_repair_message},
+        )
+        content = self._stream_chat_completion_text(
+            client,
+            fallback_kwargs,
+            f"{stock_name or 'unknown'}_deep_repair",
+            current_date,
+        )
+        self._log_progress(client_id, 5, 6, "5-2: 深度修复请求已发出，正在获取修复后的 JSON...")
+        
+        parsed = self._parse_json_content(content)
+        if parsed is not None:
+            self._log_progress(client_id, 5, 6, "5-2: JSON 格式已成功修复!")
+            return parsed
+
         raise ValueError(
-            '当前 AI 服务在首轮生成和 JSON 重整模式下都未返回可解析内容。'
+            '当前 AI 服务经过多轮重整后仍未返回可解析内容。'
             f' 原始响应摘要: {self._summarize_stream_text(content)}'
         )
 
@@ -227,8 +303,10 @@ class StockAiAnalyzer:
     def _build_json_reformat_instruction(self, instruction: str) -> str:
         return (
             f"{instruction}\n"
-            '你的唯一任务是把输入内容整理成一个合法 JSON 对象字符串。'
-            '不要输出 markdown，不要输出解释，不要补充任何说明文字。'
+            "【极其重要】你必须严格遵守 JSON 格式规范：\n"
+            "1. 所有的 key 和 string value 必须使用双引号括起来。\n"
+            "2. 禁止在 JSON 输出中添加任何 Markdown 格式或解释性文字。\n"
+            "3. 输出结果必须可以直接通过 JSON 解析器解析。"
         )
 
     def _build_json_reformat_message(self, raw_text: str) -> str:
@@ -250,11 +328,40 @@ class StockAiAnalyzer:
             stripped = stripped.strip('`').strip()
             if stripped.startswith('json'):
                 stripped = stripped[4:].strip()
+        
+        # 尝试寻找 JSON 数组或对象
         start = stripped.find('{')
         end = stripped.rfind('}')
+        list_start = stripped.find('[')
+        list_end = stripped.rfind(']')
+        
+        final_start = -1
+        final_end = -1
+        
         if start != -1 and end != -1 and end > start:
-            candidate = stripped[start:end + 1]
-            return json.loads(candidate)
+            final_start = start
+            final_end = end
+        elif list_start != -1 and list_end != -1 and list_end > list_start:
+            final_start = list_start
+            final_end = list_end
+        else:
+            upper_stripped = stripped.upper()
+            if upper_stripped.startswith("JSON"):
+                 stripped = stripped[4:].strip().lstrip(':').strip()
+                 start = stripped.find('{')
+                 end = stripped.rfind('}')
+                 if start != -1 and end != -1 and end > start:
+                     final_start = start
+                     final_end = end
+            
+        if final_start != -1 and final_end != -1:
+            candidate = stripped[final_start:final_end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError as e:
+                debug_log(f"JSON 解析失败: {e}")
+                # 返回一个特殊结构通知上层进行修复
+                return {"_error_": str(e), "_failed_json_": candidate}
         return None
 
     def _retry_json_reformat(self, client, request_kwargs: dict, instruction: str, raw_text: str, stock_name: str, current_date: datetime.datetime):
@@ -298,6 +405,7 @@ class StockAiAnalyzer:
         symbol='',
         message='你好',
         instruction='请模拟中国A股的分析大师',
+        client_id=None,
         *,
         tools=None,
         tool_choice=None,
@@ -308,11 +416,14 @@ class StockAiAnalyzer:
         current_date = datetime.datetime.now()
         stock_name = symbol
         raw_response = ''
+        
+        # 定义 AI 请求内部的步骤
+        ai_steps = 2
+        
         try:
             debug_log("openai_api_call............................")
-            if len(message) > 109024:
-                debug_log(f'消息太长，长度:{len(message)} 截断消息... ')
-
+            self._log_progress(client_id, 5, 6, "5-1: 正在初始化 OpenAI 客户端与请求参数...")
+            
             client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_http_api_url,
@@ -325,19 +436,21 @@ class StockAiAnalyzer:
                     {'role': 'user', 'content': message},
                 ),
                 'max_tokens': self.max_tokens,
-                'temperature': self.temperature,
+                'temperature': 0.1,
+                'response_format': {"type": "json_object"},
             }
             if tools:
                 request_kwargs['tools'] = tools
             if tool_choice:
                 request_kwargs['tool_choice'] = tool_choice
-            if response_format:
-                request_kwargs['response_format'] = response_format
-
+            
+            # 移除对 response_format 的强制 pop
             request_kwargs.pop('tools', None)
             request_kwargs.pop('tool_choice', None)
-            request_kwargs.pop('response_format', None)
+
+            self._log_progress(client_id, 5, 6, "5-2: 正在向模型发起流式请求 (模型思考与生成中)...")
             raw_response = self._stream_chat_completion_text(client, request_kwargs, stock_name, current_date)
+            
             if raw_response:
                 debug_log(
                     f"OpenAI 兼容响应摘要: symbol={stock_name}, model={self.model}, preview={raw_response[:500]!r}"
@@ -345,6 +458,8 @@ class StockAiAnalyzer:
                 parsed = self._parse_json_content(raw_response)
                 if parsed is not None:
                     return parsed
+                
+                self._log_progress(client_id, 5, 6, "5-2: JSON 解析失败，正在触发自动重整逻辑...")
                 return self._retry_json_reformat(
                     client,
                     request_kwargs,
@@ -353,6 +468,28 @@ class StockAiAnalyzer:
                     stock_name,
                     current_date,
                 )
+
+            # ... (request_kwargs 构建保持不变)
+
+            self._log_progress(client_id, 5, 6, "5-2: 正在向模型发起流式请求 (模型思考与生成中)...")
+            raw_response = self._stream_chat_completion_text(client, request_kwargs, stock_name, current_date)
+            
+            if raw_response:
+                # ... (解析逻辑保持不变)
+                parsed = self._parse_json_content(raw_response)
+                if parsed is not None:
+                    return parsed
+                
+                self._log_progress(client_id, 5, 6, "5-2: JSON 解析失败，尝试触发重整逻辑...")
+                return self._retry_json_reformat(
+                    client,
+                    request_kwargs,
+                    instruction,
+                    raw_response,
+                    stock_name,
+                    current_date,
+                )
+            # ... (后续保持不变)
 
             raise ValueError(
                 '当前 AI 服务未返回文本内容，无法进入 JSON 解析。'
@@ -385,52 +522,56 @@ class StockAiAnalyzer:
         debug_log(f"个股信息查询: {stock_zyjs_ths_df}")
         return stock_zyjs_ths_df.to_string(index=False)
 
-    def stock_indicator_analyse(self, market, symbol, start_date, end_date):
+    def _log_progress(self, client_id, step, total, message):
+        """发送进度日志到 SSE 管理器"""
+        if hasattr(self, 'sse_manager') and client_id:
+            progress = int((step / total) * 100)
+            self.sse_manager.push_message(client_id, {
+                'event': 'progress',
+                'data': {'percent': progress, 'message': f"[{step}/{total}] {message}"}
+            })
+            # 同时发送一条 log 类型的消息，以便在日志框中显示
+            self.sse_manager.push_message(client_id, {
+                'event': 'log',
+                'data': {'message': f"[{step}/{total}] {message}", 'type': 'info'}
+            })
+        debug_log(f"进度: [{step}/{total}] {message}")
+
+    def stock_indicator_analyse(self, market, symbol, start_date, end_date, client_id=None):
         stock_service = stockCompanyInfo(market, symbol)
         stock_name = stock_service.get_stock_name()
-        debug_log(f"创建 stockCompanyInfo 实例: {market}, {symbol}, {stock_name}")
-
+        
+        steps = 6
+        self._log_progress(client_id, 1, steps, f"正在初始化 {stock_name} 数据服务...")
+        
         stock_zyjs_ths_df = stock_service.get_stock_zyjs()
-        debug_log(f"获取主营业务介绍: {stock_zyjs_ths_df}")
-
         stock_individual_info_em_df, list_date, industry = stock_service.get_stock_individual_info_em()
-        debug_log(f"获取个股信息: {stock_individual_info_em_df}")
-
+        
+        self._log_progress(client_id, 2, steps, "正在获取资金流与板块信息...")
         stock_sector_fund_flow_rank_df = stock_service.get_stock_fund_flow()
-        if '名称' in stock_sector_fund_flow_rank_df.columns:
-            single_industry_df = stock_sector_fund_flow_rank_df[stock_sector_fund_flow_rank_df['名称'] == industry]
-        else:
-            single_industry_df = pd.DataFrame()
-
+        single_industry_df = stock_sector_fund_flow_rank_df[stock_sector_fund_flow_rank_df['名称'] == industry] if '名称' in stock_sector_fund_flow_rank_df.columns else pd.DataFrame()
         concept_info_df = stock_service.get_stock_industry_by_code(code=symbol)
+        
+        self._log_progress(client_id, 3, steps, "正在获取历史数据与财务指标...")
         stock_zh_a_hist_df = stock_service.get_stock_history_data(start_date_str=start_date, end_date_str=end_date)
         technical_indicators_df = stock_zh_a_hist_df
         stock_news_em_df = stock_service.get_stock_news()
         stock_individual_fund_flow_df = stock_service.get_stock_individual_fund_flow()
         stock_financial_analysis_indicator_df = stock_service.get_stock_financial_analysis_indicator()
 
+        self._log_progress(client_id, 4, steps, "正在构建分析模型 Prompt...")
         user_message = self.generate_stock_indicate_message(concept_info_df, single_industry_df,
                                                             stock_financial_analysis_indicator_df,
                                                             stock_individual_fund_flow_df, stock_individual_info_em_df,
                                                             stock_news_em_df, stock_zh_a_hist_df, stock_zyjs_ths_df,
                                                             technical_indicators_df)
-
+        
+        self._log_progress(client_id, 5, steps, "正在向 AI 发起请求 (模型分析中)...")
+        result_qwen = self.openai_api_call(symbol=symbol, message=user_message, instruction=self.instruction, client_id=client_id)
+        
+        self._log_progress(client_id, 6, steps, "分析完成，正在整理报告...")
+        
         timestamp_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        file_name = self.data_dir / f"{stock_name}_indicator_{market}_{self.model}_request_{timestamp_str}.txt"
-        with open(file_name, 'w', encoding='utf-8') as file:
-            is_mark_down = True
-            user_message_view = self.generate_stock_indicate_message(concept_info_df, single_industry_df,
-                                                                     stock_financial_analysis_indicator_df,
-                                                                     stock_individual_fund_flow_df,
-                                                                     stock_individual_info_em_df,
-                                                                     stock_news_em_df, stock_zh_a_hist_df, stock_zyjs_ths_df,
-                                                                     technical_indicators_df, is_mark_down)
-            file.write(user_message_view)
-        debug_log(f"{stock_name}_已保存到文件: {file_name}")
-
-        result_qwen = self.openai_api_call(symbol=symbol, message=user_message, instruction=self.instruction)
-        debug_log(f"Qwen API 响应 {len(result_qwen)}: {result_qwen}")
-
         file_name = self.data_dir / f"{stock_name}_indicator_{market}_{self.model}_{timestamp_str}.txt"
         with open(file_name, 'w', encoding='utf-8') as file:
             file.write(result_qwen)

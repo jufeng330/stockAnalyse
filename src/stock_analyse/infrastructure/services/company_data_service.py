@@ -462,43 +462,54 @@ class stockCompanyInfo:
             return self.get_default_df()
 
 
-    # 个股信息查询
     def get_stock_individual_info_em(self):
-
-        # 个股信息查询,功能同上
+        """
+        个股信息查询 (增强了网络重试与兜底逻辑)
+        """
         default_df = self.get_default_df()
         default_list_date = "2000-01-01"
         default_industry = "None"
-        try:
-            if self.market == self.ETF:
-                default_industry = "EFT"
-                return default_df, default_list_date, default_industry
-            elif self._should_use_futu_provider():
-                stock_individual_info_em_df = self._get_futu_provider().get_stock_snapshot_detail(self._normalize_symbol_for_provider(), self._normalized_market())
-                list_date = str(self._get_first_non_empty(stock_individual_info_em_df, ['上市日期']) or default_list_date)
-                industry = self.get_stock_industry_by_code(self._normalize_symbol_for_provider()) or default_industry
-                return stock_individual_info_em_df, list_date, industry
-            elif self.market == self.HongKong:
-                stock_individual_info_em_df = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol,
-                                                                                   token=self.xq_a_token)
-                list_date = '2010-01-01'
-                industry = self.get_stock_industry_by_code(self.symbol) or ''
-                return stock_individual_info_em_df, list_date, industry
-            elif self.market == self.usa:
-                symbol = self.get_usa_code()
-                stock_individual_info_em_df = ak.stock_individual_basic_info_us_xq(symbol=symbol, token=self.xq_a_token)
-                list_date = '2010-01-01'
-                industry = self.get_stock_industry_by_code(symbol) or ''
-                return stock_individual_info_em_df, list_date, industry
-            else:
-                stock_individual_info_em_df = ak.stock_individual_info_em(symbol=self.symbol)
-                list_date = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '上市时间']['value'].values[0]
-                industry = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '行业']['value'].values[0]
-                return stock_individual_info_em_df, list_date, industry
-        except Exception as e:
-            self.logger.error(f"get_stock_individual_info_em stock:{self.symbol} Error occurred: {e}")
-            traceback.print_exc()
-            return  default_df, default_list_date, default_industry
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if self.market == self.ETF:
+                    default_industry = "EFT"
+                    return default_df, default_list_date, default_industry
+                elif self._should_use_futu_provider():
+                    stock_individual_info_em_df = self._get_futu_provider().get_stock_snapshot_detail(self._normalize_symbol_for_provider(), self._normalized_market())
+                    list_date = str(self._get_first_non_empty(stock_individual_info_em_df, ['上市日期']) or default_list_date)
+                    industry = self.get_stock_industry_by_code(self._normalize_symbol_for_provider()) or default_industry
+                    return stock_individual_info_em_df, list_date, industry
+                elif self.market == self.HongKong:
+                    stock_individual_info_em_df = ak.stock_individual_basic_info_hk_xq(symbol=self.symbol, token=self.xq_a_token)
+                    list_date = '2010-01-01'
+                    industry = self.get_stock_industry_by_code(self.symbol) or ''
+                    return stock_individual_info_em_df, list_date, industry
+                elif self.market == self.usa:
+                    symbol = self.get_usa_code()
+                    stock_individual_info_em_df = ak.stock_individual_basic_info_us_xq(symbol=symbol, token=self.xq_a_token)
+                    list_date = '2010-01-01'
+                    industry = self.get_stock_industry_by_code(symbol) or ''
+                    return stock_individual_info_em_df, list_date, industry
+                else:
+                    stock_individual_info_em_df = ak.stock_individual_info_em(symbol=self.symbol)
+                    if 'item' in stock_individual_info_em_df.columns:
+                        list_date_series = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '上市时间']['value']
+                        list_date = list_date_series.values[0] if not list_date_series.empty else default_list_date
+                        
+                        industry_series = stock_individual_info_em_df[stock_individual_info_em_df['item'] == '行业']['value']
+                        industry = industry_series.values[0] if not industry_series.empty else default_industry
+                        return stock_individual_info_em_df, list_date, industry
+                    return default_df, default_list_date, default_industry
+
+            except Exception as e:
+                self.logger.warning(f"get_stock_individual_info_em attempt {attempt+1} failed for {self.symbol}: {e}")
+                time.sleep(2 * (attempt + 1)) # 指数退避
+                if attempt == max_retries - 1:
+                    self.logger.error(f"get_stock_individual_info_em 最终失败 stock:{self.symbol}")
+                    return default_df, default_list_date, default_industry
+
 
 
 

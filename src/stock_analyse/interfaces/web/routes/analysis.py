@@ -513,11 +513,13 @@ def register_analysis_routes(app):
         def event_stream():
             client_queue = Queue()
             context.sse_manager.add_client(client_id, client_queue)
+            logger.info(f"SSE客户端已连接: {client_id}") # 新增日志
             try:
                 yield f"data: {json.dumps({'event': 'connected', 'data': {'client_id': client_id}})}\n\n"
                 while True:
                     try:
                         message = client_queue.get(timeout=30)
+                        logger.info(f"SSE向客户端 {client_id} 推送消息: {message}") # 新增日志
                         try:
                             json_data = json.dumps(message, ensure_ascii=False)
                             event_name = str(message.get('event') or 'message').strip() or 'message'

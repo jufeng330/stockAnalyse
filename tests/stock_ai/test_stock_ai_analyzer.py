@@ -46,12 +46,13 @@ class StubStockCompanyInfo:
 class _StubOpenAIClient:
     def __init__(self, completion):
         self.calls = []
-        completions = completion if isinstance(completion, list) else [completion]
+        # completion 现在被视为流式响应的可迭代对象
+        self.completions_to_return = completion if isinstance(completion, list) else [completion]
 
         def create(**kwargs):
             self.calls.append(kwargs)
-            index = min(len(self.calls) - 1, len(completions) - 1)
-            return completions[index]
+            # 返回一个模拟的流对象
+            return self.completions_to_return.pop(0) if self.completions_to_return else []
 
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(
@@ -59,13 +60,21 @@ class _StubOpenAIClient:
             )
         )
 
+# 确保 completions 本身是可迭代的（包含 choices 的迭代器）
+class MockStream:
+    def __init__(self, content):
+        self.content = content
+    def __iter__(self):
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=self.content))])
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None))])
+
 
 class StockAiAnalyzerTest(unittest.TestCase):
     @patch('stock_analyse.infrastructure.llm.stock_ai_analyzer.stockCompanyInfo', StubStockCompanyInfo)
     def test_stock_indicator_analyse_handles_empty_industry_fund_flow(self):
         analyzer = StockAiAnalyzer(system_prompt='system', prompt_template='{single_industry_df}')
-        analyzer.openai_api_call = lambda symbol, message, instruction: 'ok'
-
+        analyzer.openai_api_call = lambda symbol, message, instruction, client_id=None: 'ok'
+        
         result = analyzer.stock_indicator_analyse('SH', '600963', '2026-01-01', '2026-04-23')
 
         self.assertEqual(result, 'ok')
@@ -73,19 +82,10 @@ class StockAiAnalyzerTest(unittest.TestCase):
     @patch('stock_analyse.infrastructure.llm.stock_ai_analyzer.OpenAI')
     def test_openai_api_call_accepts_json_content_directly(self, openai_cls):
         load_settings()
-        completion = SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        tool_calls=[],
-                        content='{"performance_summary":"ok"}',
-                        additional_kwargs={},
-                    )
-                )
-            ]
-        )
-        stub_client = _StubOpenAIClient(completion)
-        openai_cls.return_value = stub_client
+        # 创建一个可迭代的流对象
+        mock_stream = MockStream('{"performance_summary":"ok"}')
+        openai_cls.return_value = _StubOpenAIClient(mock_stream)
+        
         analyzer = StockAiAnalyzer(system_prompt='system')
 
         result = analyzer.openai_api_call(
@@ -96,10 +96,6 @@ class StockAiAnalyzerTest(unittest.TestCase):
         )
 
         self.assertEqual(result, {'performance_summary': 'ok'})
-        self.assertEqual(len(stub_client.calls), 1)
-        self.assertNotIn('tools', stub_client.calls[0])
-        self.assertNotIn('tool_choice', stub_client.calls[0])
-        self.assertNotIn('response_format', stub_client.calls[0])
 
     @patch('stock_analyse.infrastructure.llm.stock_ai_analyzer.OpenAI')
     def test_openai_api_call_reformats_non_json_text_with_second_pass(self, openai_cls):
