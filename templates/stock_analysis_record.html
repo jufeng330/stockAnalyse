@@ -703,7 +703,13 @@
         function unpackSsePayload(event) {
             try {
                 const payload = JSON.parse(event.data || '{}');
-                return payload && typeof payload === 'object' ? payload : {};
+                if (payload && typeof payload === 'object') {
+                    if (payload.event && payload.data !== undefined) {
+                        return payload.data;
+                    }
+                    return payload;
+                }
+                return {};
             } catch (error) {
                 return {};
             }
@@ -1586,7 +1592,7 @@
             const holdingStockId = (params.get('holding_stock_id') || '').trim() || ((HOLDING_STOCK || {}).id || '');
             const stockCode = (params.get('stock_code') || params.get('code') || '').trim() || ((HOLDING_STOCK || {}).stock_code || (WATCH_STOCK || {}).stock_code || '');
             const market = (params.get('market') || '').trim() || ((HOLDING_STOCK || {}).market || (WATCH_STOCK || {}).market || '');
-            const tradeDate = ((SELECTED_RECORD || {}).trade_date || '').trim();
+            
             if (watchStockId) {
                 document.getElementById('watchStockContext').style.display = 'inline-flex';
                 document.getElementById('watchStockIdText').textContent = watchStockId;
@@ -1598,9 +1604,8 @@
             if (stockCode) {
                 document.getElementById('stockCode').value = stockCode;
             }
-            if (tradeDate) {
-                document.getElementById('tradeDate').value = tradeDate;
-            }
+            // Do not override tradeDate with history record to ensure new analysis defaults to today
+            
             applyMarketValue(market);
             if (watchStockId && !stockCode) {
                 hydrateWatchStockContext(watchStockId);

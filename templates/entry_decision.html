@@ -703,7 +703,13 @@
         function unpackSsePayload(event) {
             try {
                 const payload = JSON.parse(event.data || '{}');
-                return payload && typeof payload === 'object' ? payload : {};
+                if (payload && typeof payload === 'object') {
+                    if (payload.event && payload.data !== undefined) {
+                        return payload.data;
+                    }
+                    return payload;
+                }
+                return {};
             } catch (error) {
                 return {};
             }

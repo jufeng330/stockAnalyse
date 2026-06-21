@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>量化交易策略查询</title>
-    <link rel="stylesheet" href="/static/ui/nav.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -84,13 +83,15 @@
     }
 
     select {
-    width: 200px;          /* 设置宽度 */
-    padding: 10px;         /* 增加内边距，让下拉框更高 */
-    font-size: 14px;       /* 可选：增大字体，提升可读性 */
-    height: 40px;          /* 可选：强制设定高度 */
-    border-radius: 4px;    /* 和 input 保持一致风格 */
-    border: 1px solid #ccc;
-}
+        width: 200px;          /* 设置宽度 */
+        padding: 10px;         /* 增加内边距，让下拉框更高 */
+        font-size: 14px;       /* 可选：增大字体，提升可读性 */
+        height: 40px;          /* 可选：强制设定高度 */
+        border-radius: 4px;    /* 和 input 保持一致风格 */
+        border: 1px solid #ccc;
+        position: relative;
+        z-index: 10;
+    }
 
     .checkbox-group {
         display: flex;
@@ -167,35 +168,33 @@
     </style>
 </head>
 <body>
-    <div class="main-layout">
-        <!-- 侧边栏菜单 -->
-        <aside class="sidebar">
-            <div class="brand">
-                <h1>🚀 股票分析系统</h1>
-                <p>Web V1.0 | WebStockAnalyzer</p>
-            </div>
-            <div class="tree-title">导航菜单</div>
-            <ul class="tree">
-                <li><a href="/" class="active">🏠 选股</a></li>
-                <li><a href="/history">📚 历史记录</a></li>
-                <li><a href="/stock">📈 股票分析</a></li>
-                {% if auth_enabled %}
-                <li><a href="{{ url_for('logout') }}">🚪 退出登录</a></li>
-                {% endif %}
-            </ul>
-        </aside>
-        
-        <!-- 主内容区 -->
-        <main class="content-area">
-            <!-- 页面头部 -->
-            <div class="page-header">
-                <h1>量化交易策略查询</h1>
-                <div class="header-right">
-                    {% if auth_enabled %}<span>🔐 已认证</span>{% endif %}
+ <!-- Header -->
+        <div class="header">
+            <h1>🚀 股票分析系统 - Web V1.0</h1>
+            <div class="header-info">
+                <div class="version-info">
+                    Web V1.0 | WebStockAnalyzer |  {% if auth_enabled %}| 🔐 已认证{% endif %}
                     <span id="systemStatus" class="status-indicator status-ready">系统就绪</span>
+                </div>
+                <div class="header-buttons">
                     <button class="config-btn" onclick="showConfig()">⚙️ AI配置</button>
+                    {% if auth_enabled %}
+                    <a href="{{ url_for('logout') }}" class="logout-btn">🚪 退出登录</a>
+                    {% endif %}
+                </div>
+
+                <div class="header-buttons">
+                    <a href="/" class="config-btn">🏠 选股</a>
+                    <a href="/history" class="config-btn">📚 历史记录</a>
+                    <a href="/stock" class="config-btn">📈 股票分析</a>
+                    {% if auth_enabled %}
+                    <a href="{{ url_for('logout') }}" class="logout-btn">🚪 退出登录</a>
+                    {% endif %}
                 </div>
             </div>
+        </div>
+
+    <h1>量化交易策略查询</h1>
     <form method="post">
           <!-- AI 配置容器 -->
         <div id= "ai-config" class="container">
@@ -313,7 +312,8 @@
 
         <button type="submit">查询</button>
     </form>
-        </main>
-    </div>
+
+
+
 </body>
 </html>

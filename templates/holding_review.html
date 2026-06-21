@@ -441,11 +441,18 @@
         }
 
         function unpackSsePayload(event) {
-            const payload = JSON.parse(event.data || '{}');
-            if (payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object') {
-                return payload.data;
+            try {
+                const payload = JSON.parse(event.data || '{}');
+                if (payload && typeof payload === 'object') {
+                    if (payload.event && payload.data !== undefined) {
+                        return payload.data;
+                    }
+                    return payload;
+                }
+                return {};
+            } catch (error) {
+                return {};
             }
-            return payload && typeof payload === 'object' ? payload : {};
         }
 
         function handleProgressEvent(event) {
